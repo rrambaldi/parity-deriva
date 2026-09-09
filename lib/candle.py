@@ -5,7 +5,7 @@ class Candle(object):
 	l = 0
 	c = 0
 
-	def __init(self, o=0, h=0, l=0, c=0):
+	def __init__(self, o=0, h=0, l=0, c=0):
 		if  isinstance(o, dict):
 			self.set( o)
 			return

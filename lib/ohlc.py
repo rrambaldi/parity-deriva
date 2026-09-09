@@ -35,10 +35,10 @@ class ohlc(object):
 		return abs((self.o-self.c)/(self.h - self.l))
 
 	def from_oanda(self, dct, typ):
-		self.o=float(dct['type']['o'])
-		self.h=float(dct['type']['h'])
-		self.l=float(dct['type']['l'])
-		self.c=float(dct['type']['c'])
+		self.o=float(dct[typ]['o'])
+		self.h=float(dct[typ]['h'])
+		self.l=float(dct[typ]['l'])
+		self.c=float(dct[typ]['c'])
 		self.v=int(dct['volume'])
 		self.t = datetime.datetime.strptime(dct['time'], "%Y-%m-%dT%H:%M:%S.%f000Z")
 

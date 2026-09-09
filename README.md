@@ -43,7 +43,7 @@ candles and the OANDA v3 API, then migrated from Python 2 to Python 3.
 * **Performance** - `performance/analyze.py` reports win/loss statistics,
   consecutive runs and three flavours of optimal *f* over the closed trades
   pulled from the account.
-* **Tests** - 462 characterisation tests, no network access required.
+* **Tests** - 483 tests, no network access required.
 
 # Installation and Usage
 

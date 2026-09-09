@@ -194,16 +194,17 @@ class TestOhlc(unittest.TestCase):
         self.assertEqual(str(ohlc(T0, 1, 3, 0.5, 2, 9)),
                          "2017-02-01 10:00:00 O:1.0 H:3.0 L:0.5 C:2.0 V:9")
 
-    def test_from_oanda_is_broken_by_a_literal_key(self):
-        """
-        from_oanda(dct, typ) indexes dct['type'] instead of dct[typ], so it can
-        never read the price triplet it was passed. Nothing in the codebase
-        calls it - this test exists so a future fix is noticed.
-        """
+    def test_from_oanda_reads_the_requested_price_type(self):
+        """It used to index the literal key 'type' instead of the argument."""
+        raw = {"time": oanda_time(T0), "volume": 3,
+               "mid": {"o": 1, "h": 2, "l": 0, "c": 1.5},
+               "ask": {"o": 1.2, "h": 2.2, "l": 0.2, "c": 1.7}}
         bar = ohlc()
-        with self.assertRaises(KeyError):
-            bar.from_oanda({"time": oanda_time(T0), "volume": 1,
-                            "mid": {"o": 1, "h": 2, "l": 0, "c": 1}}, 'mid')
+        bar.from_oanda(raw, 'mid')
+        self.assertEqual((bar.o, bar.c, bar.v), (1.0, 1.5, 3))
+        self.assertEqual(bar.t, T0)
+        bar.from_oanda(raw, 'ask')
+        self.assertEqual(bar.c, 1.7)
 
 
 class TestCandle(unittest.TestCase):
@@ -229,14 +230,19 @@ class TestCandle(unittest.TestCase):
         c.set({"o": 1, "h": 2, "l": 0, "c": 1.5})
         self.assertEqual(str(c), "O: 1.000000 H: 2.000000 L: 0.000000 C: 1.500000")
 
-    def test_constructor_takes_no_arguments(self):
-        """
-        The initialiser is misspelled `__init` (name-mangled to _Candle__init),
-        so Candle never gets a real __init__ and only the no-arg form works.
-        """
-        with self.assertRaises(TypeError):
-            Candle(1, 2, 3, 4)
-        self.assertTrue(hasattr(Candle, '_Candle__init'))
+    def test_the_constructor_accepts_ohlc(self):
+        """The initialiser used to be misspelled `__init`, so the class had
+        no __init__ at all and only the no-arg form worked."""
+        c = Candle(1, 2, 0, 1.5)
+        self.assertEqual((c.o, c.h, c.l, c.c), (1.0, 2.0, 0, 1.5))
+
+    def test_the_constructor_accepts_a_dict(self):
+        c = Candle({"o": 1, "h": 2, "l": 0, "c": 1.5})
+        self.assertEqual((c.o, c.h, c.l, c.c), (1.0, 2.0, 0.0, 1.5))
+
+    def test_the_no_argument_form_still_works(self):
+        c = Candle()
+        self.assertEqual((c.o, c.h, c.l, c.c), (0, 0, 0, 0))
 
 
 class TestOANDAObjects(unittest.TestCase):

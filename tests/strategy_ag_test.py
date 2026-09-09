@@ -152,22 +152,18 @@ class TestAG01Breakout(AGCase):
         self.assertEqual(buy.time, second.time)
         self.assertEqual(sell.time, second.time)
 
-    def test_gtd_time_uses_the_hour_where_the_seconds_belong(self):
-        """
-        gtdTime is split into [hh, mm, ss] but the replace() call passes
-        second=int(self.gtdTime[0]) - the hour - instead of [2]. With the
-        default "23:59:59" the expiry lands at 23:59:23.
-        """
+    def test_the_expiry_matches_the_configured_time(self):
+        """replace() used to be handed the hour where the seconds belong."""
         s = self.make()
         self.reversal(s)
         gtd = self.sink.events[0].gtdTime
-        self.assertEqual((gtd.hour, gtd.minute, gtd.second), (23, 59, 23))
+        self.assertEqual((gtd.hour, gtd.minute, gtd.second), (23, 59, 59))
 
-    def test_a_custom_gtd_time_shows_the_same_substitution(self):
+    def test_a_custom_expiry_is_honoured_to_the_second(self):
         s = self.make(gtdTime="18:30:45")
         self.reversal(s)
         gtd = self.sink.events[0].gtdTime
-        self.assertEqual((gtd.hour, gtd.minute, gtd.second), (18, 30, 18))
+        self.assertEqual((gtd.hour, gtd.minute, gtd.second), (18, 30, 45))
 
     def test_candles_for_other_instruments_are_ignored(self):
         s = self.make()

@@ -1,14 +1,15 @@
-# parity_deriva characterisation suite
+# parity_deriva test suite
 
-Plain `unittest`, no plugins required. The suite is a *characterisation*
-suite: it describes what the code does today, quirks and all, so that the
-simulated side can be trusted as a reference against live execution and so
-that a later refactor shows up as a failing test rather than as a silent
-change in behaviour.
+Plain `unittest`, no plugins required.
 
-Where a test documents something that looks wrong, the docstring says so and
-the assertion still pins current behaviour. Fixing such a bug is *meant* to
-break its test - that is the signal.
+It began as a characterisation suite: it described what the code did, quirks
+included, so that the defects could be found and then fixed without guessing
+at the original intent. Those defects have since been fixed and the tests now
+describe the intended behaviour. Many docstrings still say what the behaviour
+used to be, because that history explains why some assertions look oddly
+specific.
+
+A failing test is therefore a real regression, not a deliberate pin.
 
 ## Running it
 
@@ -49,9 +50,10 @@ writes gets its own temporary directory.
 
 ## Class-level mutable state
 
-Several components declare their dictionaries and lists in the class body
-(`Engine.handlers`, `OANDABacktester.orders`, `MoneyManager.signals`,
-`ForexCandles.last`, `CandleSaver.store`, ...), so instances share them within
-a process. The relevant `setUp` methods reset those attributes, and a test in
-each module pins the sharing itself. Anything that builds more than one of
-these objects - one simulator per instrument, say - has to do the same.
+Several components still declare their dictionaries and lists in the class
+body (`Engine.handlers`, `MoneyManager.signals`, `ForexCandles.last`,
+`CandleSaver.store`, ...), so instances share them within a process, and the
+relevant `setUp` methods reset those attributes. `OANDABacktester` was moved
+to per-instance state, because one simulator per instrument is the intended
+deployment; the others have not been, and a test in each module pins the
+sharing so the constraint stays visible.

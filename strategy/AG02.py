@@ -59,7 +59,7 @@ class AG02(ExecutionHandler):
 		sb.orderType = "LIMIT"
 		sb.instrument = i
 		sb.gtdTime = datetime.datetime.today().replace(hour=int(self.gtdTime[0])
-				, minute=int(self.gtdTime[1]), second=int(self.gtdTime[0]), microsecond=0)
+				, minute=int(self.gtdTime[1]), second=int(self.gtdTime[2]), microsecond=0)
 		sb.time = event.time
 		sb.takeProfit = min(p.bid['l'], event.bid['l'])
 		sb.price = max(p.ask['h'], event.ask['h'])
