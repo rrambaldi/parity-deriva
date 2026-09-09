@@ -28,6 +28,8 @@ class BO05(BO):
 				out += 1
 				if p[j].direction()<0:
 					break
+			else:
+				out = 0	# never resolved inside the window
 			if out==0:
 				self.logger.debug("==== DEAD %s" % ( self.__class__.__name__))
 			self.logger.debug("%s %s EVENT P1 %s : IN %d" % (self.__class__.__name__, self.pair, p[1].time, out))
@@ -66,6 +68,8 @@ class BO06(BO):
 				out += 1
 				if p[j].direction()<0:
 					break
+			else:
+				out = 0	# never resolved inside the window
 			if out==0:
 				self.logger.debug("==== DEAD %s" % ( self.__class__.__name__))
 			self.logger.debug("%s %s EVENT P1 %s : IN %d" % (self.__class__.__name__, self.pair, p[1].time, out))

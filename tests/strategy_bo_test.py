@@ -101,17 +101,29 @@ class TestCommonSetUp(unittest.TestCase):
         feed(s, [True, False, False, True], instrument="EUR_USD")
         self.assertIsNone(s.prev[1])
 
-    def test_the_done_status_never_triggers_the_final_report(self):
+    def test_the_done_status_triggers_the_final_report(self):
         """
-        Both the base class and BO01/BO03 gate their report on
-        `str(event) == 'DONE'` / `'QUI'`, but a StatusEvent stringifies to
-        'STATUS'. The end-of-run tables are therefore never printed - the only
-        output comes from the periodic stats_after dump.
+        The gate reads the StatusEvent payload rather than str(event), which
+        is 'STATUS' for every status. Before that fix the end-of-run tables
+        were never printed at all.
         """
+        s = make(BO)
+        with self.assertLogs('parity_deriva.trading.trading', level='INFO') as log:
+            s.execute_event(StatusEvent('DONE'))
+        self.assertTrue(any("ALL TOT" in line for line in log.output))
+
+    def test_another_status_does_not_trigger_the_report(self):
         s = make(BO)
         with self.assertRaises(AssertionError):
             with self.assertLogs('parity_deriva.trading.trading', level='INFO'):
+                s.execute_event(StatusEvent('STARTED'))
+
+    def test_bo01_and_bo03_report_on_done_as_well(self):
+        for cls in (BO01, BO03):
+            s = make(cls)
+            with self.assertLogs('parity_deriva.trading.trading', level='DEBUG') as log:
                 s.execute_event(StatusEvent('DONE'))
+            self.assertTrue(any("ALL TOT" in l for l in log.output), cls.__name__)
 
 
 class TestBO01Pattern(unittest.TestCase):
@@ -143,15 +155,22 @@ class TestBO01Pattern(unittest.TestCase):
         feed(s, [True, False, False, True, False, True])
         self.assertEqual(s.num[2], 1)
 
-    def test_a_window_that_never_flips_saturates_at_the_last_bucket(self):
+    def test_a_window_that_never_flips_lands_in_bucket_zero(self):
         """
-        With no bearish bar in positions 4..depth the loop runs to the end, so
-        `out` saturates at depth-3 instead of signalling "did not resolve".
-        A saturated bucket and a genuine depth-3 resolution are indistinguishable.
+        Bucket 0 means "the run did not resolve inside the window". It is
+        distinct from a genuine resolution on the last bar, which the
+        saturating counter used to conflate with it.
         """
         s = make(BO01, depth=5)
         feed(s, [True, False, False, True, True, True])
-        self.assertEqual(s.num[2], 1)      # depth-3 == 2
+        self.assertEqual(s.num[0], 1)
+        self.assertEqual(s.num[2], 0)
+
+    def test_a_resolution_on_the_last_bar_is_not_bucket_zero(self):
+        s = make(BO01, depth=5)
+        feed(s, [True, False, False, True, False, True])
+        self.assertEqual(s.num[2], 1)
+        self.assertEqual(s.num[0], 0)
 
     def test_per_hour_and_per_weekday_accumulate_together(self):
         s = make(BO01, depth=5)
@@ -183,18 +202,18 @@ class TestBO01Pattern(unittest.TestCase):
              start=T0.replace(hour=10, minute=58))
         self.assertEqual(sum(s.num.values()), 1)
 
-    def test_a_sunday_candle_crashes_the_weekday_accumulator(self):
+    def test_a_sunday_candle_is_counted(self):
         """
-        week is initialised for range(0, 6) - Monday to Saturday. OANDA does
-        publish Sunday-evening bars, and weekday() == 6 has no bucket, so a
-        research run over raw history dies with KeyError. Under the Engine
-        that becomes os._exit(1), losing the run.
+        OANDA publishes Sunday-evening bars, so the weekday buckets run
+        Monday..Sunday. This used to raise KeyError, which under the Engine
+        became os._exit(1) and lost the whole research run.
         """
         sunday = datetime.datetime(2017, 2, 5, 22, 0, 0)
         self.assertEqual(sunday.weekday(), 6)
         s = make(BO01, depth=5)
-        with self.assertRaises(KeyError):
-            feed(s, [True, False, False, False, True, True], start=sunday)
+        feed(s, [True, False, False, False, True, True], start=sunday)
+        self.assertEqual(s.week[6][1], 1)
+        self.assertEqual(sum(s.num.values()), 1)
 
 
 class TestMirrorPatterns(unittest.TestCase):
@@ -303,24 +322,39 @@ class TestPrintStats(unittest.TestCase):
         self.assertIn("NUM: 1", line)
         self.assertIn("PERC:   0.00", line)
 
-    def test_the_weekday_section_repeats_every_day_once_per_day(self):
+    def test_the_weekday_section_is_printed_once_per_day_with_data(self):
         """
-        The reporting loop reuses `w` for both the outer accumulation and the
-        inner print, so once any weekday has data the full table is printed
-        again for each such day, and every percentage is divided by the last
-        totw computed rather than that day's own total. The DAY block of the
-        research output is duplicated and mis-normalised.
+        One table per weekday that has data, each bucket normalised by that
+        day's own total. The report used to reuse the loop variable, printing
+        the whole table once per populated day and dividing every percentage
+        by the last total computed.
         """
         s = make(BO01, depth=5)
         feed(s, [True, False, False, False, True, True])
         with self.assertLogs('parity_deriva.trading.trading', level='DEBUG') as log:
             s.printStats()
         day_lines = [l for l in log.output if " DAY " in l]
-        # 6 weekdays x depth buckets, emitted once for each day that has data
-        self.assertEqual(len(day_lines), 6 * s.depth)
         wednesday = T0.weekday()
+        # exactly one day has data, reported over buckets 0..depth
+        self.assertEqual(len(day_lines), s.depth + 1)
+        self.assertTrue(all("DAY %d-" % wednesday in l for l in day_lines))
         hits = [l for l in day_lines if "DAY %d-1 NUM: 1" % wednesday in l]
         self.assertEqual(len(hits), 1)
+        self.assertIn("PERC: 100.00", hits[0])
+
+    def test_two_populated_days_are_normalised_independently(self):
+        s = make(BO01, depth=5)
+        feed(s, [True, False, False, False, True, True], start=T0)
+        thursday = T0 + datetime.timedelta(days=1)
+        feed(s, [True, False, False, False, True, True], start=thursday)
+        with self.assertLogs('parity_deriva.trading.trading', level='DEBUG') as log:
+            s.printStats()
+        day_lines = [l for l in log.output if " DAY " in l]
+        self.assertEqual(len(day_lines), 2 * (s.depth + 1))
+        for weekday in (T0.weekday(), thursday.weekday()):
+            hit = [l for l in day_lines if "DAY %d-1 NUM: 1" % weekday in l]
+            self.assertEqual(len(hit), 1)
+            self.assertIn("PERC: 100.00", hit[0])
 
     def test_the_periodic_report_fires_every_stats_after_matches(self):
         s = make(BO01, depth=5)

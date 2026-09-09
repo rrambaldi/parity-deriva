@@ -34,9 +34,9 @@ class BO(ExecutionHandler):
 		self.invested = False
 		self.num[0] = 0
 		self.numh = {}
-		for w in range(0,6):
+		for w in range(0,7):
 			self.week[w] = {}
-			for j in range(1,self.depth+1):
+			for j in range(0,self.depth+1):
 				self.week[w][j] = 0
 
 		for h in range(0,24):
@@ -52,7 +52,7 @@ class BO(ExecutionHandler):
 
 
 	def execute_event(self, event):
-		if str(event) == 'DONE':
+		if str(event) == 'STATUS' and getattr(event, 'status', None) == 'DONE':
 			self.printStats(logging.INFO)
 			return 
 
@@ -112,15 +112,14 @@ class BO(ExecutionHandler):
 					self.logger.log(lvl,"%s %s HOUR %02d-%d NUM: %d PERC: %6.2f" \
 						% ( self.__class__.__name__, self.pair, h, j, self.numh[h][j], x))
 
-		for w in range(0,6):
+		for w in range(0,7):
 			totw = 0
-			for j in range(1,self.depth+1):
+			for j in range(0,self.depth+1):
 				totw += self.week[w][j]
 
 			if totw>0:
-				for w in range(0,6):
-					for j in range(1,self.depth+1):
-						self.logger.log(lvl,"%s %s DAY %d-%d NUM: %d PERC: %6.2f" \
-							% ( self.__class__.__name__, self.pair, w, j, self.week[w][j] \
-								, self.week[w][j] / (totw*1.0) * 100.0 ))
+				for j in range(0,self.depth+1):
+					self.logger.log(lvl,"%s %s DAY %d-%d NUM: %d PERC: %6.2f" \
+						% ( self.__class__.__name__, self.pair, w, j, self.week[w][j] \
+							, self.week[w][j] / (totw*1.0) * 100.0 ))
 
