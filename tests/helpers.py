@@ -1,0 +1,231 @@
+"""
+Shared fixtures for the qsforex characterisation suite.
+
+The suite is deliberately a *characterisation* suite: it pins down what the
+code does today, quirks included, so the behaviour of the simulated side can
+be trusted as a reference when it runs in parallel with live execution.
+Where a test documents something that looks wrong, the docstring says so
+explicitly and the assertion still describes current behaviour - changing the
+code should make that test fail on purpose.
+"""
+
+import datetime
+import json
+import logging
+import os
+import shutil
+import tempfile
+import unittest
+from unittest import mock
+
+
+# Most components fetch 'qsforex.trading.trading' by name; a few use
+# __name__. Silence the whole tree so the suite output stays readable.
+# assertLogs() raises the level on the specific logger it watches, so the
+# tests that assert on log output still work.
+for _name in ('qsforex', 'qsforex.trading.trading'):
+    _log = logging.getLogger(_name)
+    _log.addHandler(logging.NullHandler())
+    _log.setLevel(logging.CRITICAL)
+    _log.propagate = False
+
+
+OANDA_TIME = "%Y-%m-%dT%H:%M:%S.%f000Z"
+T0 = datetime.datetime(2017, 2, 1, 10, 0, 0)
+
+
+def oanda_time(dt):
+    """Render a datetime the way the OANDA v3 API does."""
+    return dt.strftime(OANDA_TIME)
+
+
+def candle_dict(dt=T0, o=11700.0, h=11706.0, l=11694.0, c=11703.0,
+                volume=10, complete=True, spread=0.2):
+    """
+    One OANDA v3 candle with the ABM price triplet. ask is mid + spread/2*2
+    and bid is mid - the same, so ask/bid/mid stay distinguishable in asserts.
+    """
+    def px(delta):
+        return {"o": "%.1f" % (o + delta), "h": "%.1f" % (h + delta),
+                "l": "%.1f" % (l + delta), "c": "%.1f" % (c + delta)}
+    return {"time": oanda_time(dt), "volume": volume, "complete": complete,
+            "ask": px(spread), "bid": px(-spread), "mid": px(0.0)}
+
+
+def bull_candle(dt=T0, base=11700.0, **kw):
+    """Close above open."""
+    return candle_dict(dt, o=base, h=base + 6, l=base - 6, c=base + 3, **kw)
+
+
+def bear_candle(dt=T0, base=11700.0, **kw):
+    """Close below open."""
+    return candle_dict(dt, o=base + 3, h=base + 6, l=base - 6, c=base, **kw)
+
+
+def candle_series(directions, start=T0, step=datetime.timedelta(minutes=1),
+                  instrument="DE30_EUR", granularity="M1"):
+    """
+    Build a list of CandleEvent from a sequence of booleans (True = bullish),
+    already tagged with instrument/granularity the way a data source does.
+    """
+    from qsforex.event.event import CandleEvent
+    out = []
+    for i, up in enumerate(directions):
+        maker = bull_candle if up else bear_candle
+        ev = CandleEvent(maker(start + i * step, base=11700.0 + i))
+        ev.instrument = instrument
+        ev.granularity = granularity
+        out.append(ev)
+    return out
+
+
+def candles_response(n, start=T0, step=datetime.timedelta(minutes=1),
+                     instrument="DE30_EUR", granularity="M1", complete=True):
+    """The JSON body of GET /v3/instruments/{pair}/candles."""
+    return {"instrument": instrument, "granularity": granularity,
+            "candles": [candle_dict(start + i * step, o=11700.0 + i,
+                                    h=11706.0 + i, l=11694.0 + i,
+                                    c=11703.0 + i, volume=10 + i,
+                                    complete=complete)
+                        for i in range(n)]}
+
+
+class Recorder(object):
+    """Stands in for the Engine as an event sink."""
+
+    def __init__(self):
+        self.events = []
+
+    def put(self, event):
+        self.events.append(event)
+
+    # convenience accessors used all over the suite
+    def kinds(self):
+        return [str(e) for e in self.events]
+
+    def of(self, kind):
+        return [e for e in self.events if str(e) == kind]
+
+    def statuses(self):
+        return [e.status for e in self.of('STATUS')]
+
+
+class FakeResponse(object):
+    """Minimal requests.Response stand-in."""
+
+    def __init__(self, payload=None, status=200, lines=None, text=None):
+        self.status_code = status
+        self.headers = {}
+        if text is not None:
+            self.text = text
+        else:
+            self.text = json.dumps(payload) if payload is not None else ""
+        self._lines = lines or []
+
+    def iter_lines(self, *args, **kwargs):
+        for line in self._lines:
+            yield line.encode("utf-8") if isinstance(line, str) else line
+
+
+class FakeRequests(object):
+    """
+    Replacement for the `requests` module as the data handlers use it:
+    requests.packages.urllib3.disable_warnings(), requests.Request(...),
+    requests.Session().send(...). Records every prepared request so tests can
+    assert on URL, headers and query parameters.
+    """
+
+    def __init__(self, *responses, **kwargs):
+        self.responses = list(responses)
+        self.raise_on_send = kwargs.get('raise_on_send', False)
+        self.sent = []
+        self.packages = mock.MagicMock()
+        self.packages.urllib3.disable_warnings = lambda: None
+        self.exceptions = mock.MagicMock()
+
+    # -- requests.Request ------------------------------------------------
+    def Request(self, method, url, headers=None, params=None, **kwargs):
+        self.sent.append({"method": method, "url": url,
+                          "headers": dict(headers or {}),
+                          "params": dict(params or {})})
+        req = mock.MagicMock()
+        req.prepare.return_value = "PREPARED"
+        return req
+
+    # -- requests.Session ------------------------------------------------
+    def Session(self):
+        outer = self
+
+        class _Session(object):
+            closed = False
+
+            def send(self, prepared, **kwargs):
+                if outer.raise_on_send:
+                    raise IOError("network disabled in tests")
+                if not outer.responses:
+                    raise AssertionError("more requests than canned responses")
+                if len(outer.responses) == 1:
+                    return outer.responses[0]
+                return outer.responses.pop(0)
+
+            def close(self):
+                self.closed = True
+
+        return _Session()
+
+    @property
+    def last(self):
+        return self.sent[-1]
+
+
+class FakeHTTPSConnection(object):
+    """
+    Replacement for http.client.HTTPSConnection, used by the OANDA execution
+    handler. `calls` is class level so a test can read what was sent without
+    holding a reference to the instance the handler created.
+    """
+
+    calls = []
+    response_body = b"{}"
+
+    def __init__(self, host, *args, **kwargs):
+        FakeHTTPSConnection.calls.append({"host": host})
+
+    def request(self, method, url, body=None, headers=None):
+        FakeHTTPSConnection.calls[-1].update(
+            method=method, url=url, body=body, headers=dict(headers or {}))
+
+    def getresponse(self):
+        resp = mock.MagicMock()
+        resp.read.return_value = FakeHTTPSConnection.response_body
+        return resp
+
+    @classmethod
+    def reset(cls, body=b"{}"):
+        cls.calls = []
+        cls.response_body = body
+
+    @classmethod
+    def last(cls):
+        return cls.calls[-1]
+
+
+class TempDirCase(unittest.TestCase):
+    """Base case giving each test its own DATA_DIR / LOG_DIR."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="qsforex-test-")
+        self.addCleanup(shutil.rmtree, self.tmpdir, True)
+        from qsforex.etc import settings
+        self.settings = mock.MagicMock()
+        self.settings.DATA_DIR = self.tmpdir
+        self.settings.LOG_DIR = self.tmpdir
+        self.settings.API_DOMAIN = settings.API_DOMAIN
+        self.settings.STREAM_DOMAIN = settings.STREAM_DOMAIN
+        self.settings.ACCESS_TOKEN = "TESTTOKEN"
+        self.settings.ACCOUNT_ID = "001-TEST-000"
+        self.settings.API_VERSION = '3'
+        self.settings.EQUITY = settings.EQUITY
+
+    def path(self, *parts):
+        return os.path.join(self.tmpdir, *parts)
