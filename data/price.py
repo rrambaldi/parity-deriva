@@ -63,10 +63,13 @@ class PriceHandler(object):
 		"""
 		getcontext().rounding = ROUND_HALF_DOWN
 		inv_pair = "%s%s" % (pair[3:], pair[:3])
-		inv_bid = (Decimal("1.0")/bid).quantize(
+		# Reciprocating swaps the two sides: 1/ask is the lower of the pair and
+		# is therefore the inverted bid. Returning them unswapped left the
+		# inverted quote with its spread inside out.
+		inv_bid = (Decimal("1.0")/ask).quantize(
 			Decimal("0.00001")
 		)
-		inv_ask = (Decimal("1.0")/ask).quantize(
+		inv_ask = (Decimal("1.0")/bid).quantize(
 			Decimal("0.00001")
 		)
 		return inv_pair, inv_bid, inv_ask

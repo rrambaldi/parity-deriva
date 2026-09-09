@@ -17,12 +17,20 @@ def create_drawdowns(pnl):
 
     # Calculate the cumulative returns curve 
     # and set up the High Water Mark
-    hwm = [0]
+    # Seed with the first observation, not with 0: seeding with 0 made hwm[1]
+    # equal pnl[1] whatever happened, so drawdown[1] was always exactly 0 and
+    # an opening fall was invisible.
+    idx = pnl.index
+    if len(idx) == 0:
+        empty = pd.Series(index=idx, dtype=float)
+        return empty, float('nan'), float('nan')
+    hwm = [pnl.iloc[0]]
 
     # Create the drawdown and duration series
-    idx = pnl.index
     drawdown = pd.Series(index=idx, dtype=float)
     duration = pd.Series(index=idx, dtype=float)
+    drawdown.iloc[0] = 0.0
+    duration.iloc[0] = 0.0
 
     # Loop over the index range
     for t in range(1, len(idx)):

@@ -78,8 +78,9 @@ class Portfolio(object):
             header += ",%s" % pair
         header += "\n"
         out_file.write(header)
+        out_file.flush()
         if self.backtest:
-            print(header[:-2])
+            print(header.rstrip("\n"))
         return out_file
 
     def output_results(self):
@@ -123,7 +124,7 @@ class Portfolio(object):
                 else:
                     out_line += ",0.00"
             out_line += "\n"
-            print(out_line[:-2])
+            print(out_line.rstrip("\n"))
             self.backtest_file.write(out_line)
 
     def execute_event(self, signal_event):

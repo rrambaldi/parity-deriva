@@ -75,13 +75,13 @@ class TestPriceHandlerHelpers(unittest.TestCase):
         pair, bid, ask = handler.invert_prices("GBPUSD", Decimal("1.50328"),
                                                Decimal("1.50349"))
         self.assertEqual(pair, "USDGBP")
-        self.assertEqual(bid, Decimal("0.66521"))
-        self.assertEqual(ask, Decimal("0.66512"))
+        # 1/ask is the lower of the two and becomes the inverted bid
+        self.assertEqual(bid, Decimal("0.66512"))
+        self.assertEqual(ask, Decimal("0.66521"))
 
-    def test_the_inverted_bid_ends_up_above_the_inverted_ask(self):
-        """Reciprocating without re-ordering leaves the spread inside out."""
+    def test_the_inverted_quote_keeps_the_spread_the_right_way_round(self):
         _, bid, ask = handler_invert()
-        self.assertGreater(bid, ask)
+        self.assertLess(bid, ask)
 
 
 def handler_invert():
@@ -333,14 +333,14 @@ class TestPortfolioBookkeeping(PortfolioCase):
         with open(self.path("backtest.csv")) as fh:
             self.assertEqual(fh.readline().strip(), "Timestamp,Balance,GBPUSD,EURUSD")
 
-    def test_the_header_is_not_flushed_until_the_first_tick(self):
+    def test_the_header_is_on_disk_straight_away(self):
         """
-        create_equity_file() writes and returns without flushing, so a crash
-        before the first tick leaves an empty backtest.csv behind.
+        create_equity_file() flushes, so a crash before the first tick still
+        leaves a readable file rather than an empty one.
         """
         self.portfolio()
         with open(self.path("backtest.csv")) as fh:
-            self.assertEqual(fh.read(), "")
+            self.assertEqual(fh.read().strip(), "Timestamp,Balance,GBPUSD,EURUSD")
 
     def test_no_equity_file_outside_a_backtest(self):
         port = self.portfolio(backtest=False)
@@ -481,23 +481,28 @@ class TestCreateDrawdowns(unittest.TestCase):
         drawdown, _, _ = create_drawdowns(curve)
         self.assertTrue(drawdown.index.equals(curve.index))
 
-    def test_the_first_point_is_never_filled_in(self):
-        """The loop starts at index 1, so position 0 of both series stays NaN."""
+    def test_the_first_point_is_a_zero_drawdown(self):
+        """Position 0 is filled in rather than left NaN."""
         drawdown, max_dd, duration = create_drawdowns(self.curve([1.0, 1.2, 1.1]))
-        self.assertTrue(np.isnan(drawdown.iloc[0]))
+        self.assertEqual(drawdown.iloc[0], 0.0)
         self.assertFalse(np.isnan(max_dd))
         self.assertFalse(np.isnan(duration))
 
-    def test_the_second_point_always_reports_a_zero_drawdown(self):
+    def test_an_opening_fall_is_measured(self):
         """
-        The high water mark is seeded with 0 rather than with the first value,
-        so hwm[1] is always pnl[1] and drawdown[1] is always exactly 0 - a
-        first bar that drops is invisible to the drawdown series, and the
-        duration counter is reset by it.
+        The high water mark is seeded with the first observation, so a curve
+        that drops from the very first bar shows the fall. Seeding with 0 used
+        to make drawdown[1] exactly 0 whatever happened.
         """
-        drawdown, _, duration = create_drawdowns(self.curve([1.0, 0.5, 0.4]))
-        self.assertEqual(drawdown.iloc[1], 0.0)
-        self.assertEqual(duration, 1.0)
+        drawdown, max_dd, duration = create_drawdowns(self.curve([1.0, 0.5, 0.4]))
+        self.assertAlmostEqual(drawdown.iloc[1], 0.5)
+        self.assertAlmostEqual(max_dd, 0.6)
+        self.assertEqual(duration, 2.0)
+
+    def test_an_empty_curve_is_handled(self):
+        drawdown, max_dd, duration = create_drawdowns(self.curve([]))
+        self.assertEqual(len(drawdown), 0)
+        self.assertTrue(np.isnan(max_dd))
 
     def test_the_duration_counts_consecutive_bars_below_the_peak(self):
         _, _, duration = create_drawdowns(self.curve([1.0, 1.5, 1.4, 1.3, 1.2]))

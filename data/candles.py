@@ -207,7 +207,7 @@ class ForexCandles(StreamHandler):
 					maxtime_reached = True
 					for pair in self.pairs:
 						self.logger.debug("last pair was: %s" % ( self.last[pair].strftime('%Y-%m-%d %H:%M:%S') ))
-						maxtime_reached = maxtime_reached and self.last[pair]>self.dtto
+						maxtime_reached = maxtime_reached and self.last[pair]>=self.dtto
 					
 					if maxtime_reached:
 						self.logger.info("Max time reached on all pairs. Streamer stopped")

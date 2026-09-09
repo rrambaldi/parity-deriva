@@ -108,6 +108,7 @@ class StreamingForexPrices(StreamHandler, PriceHandler):
 				if valid_data:
 					self.prices[instrument]["bid"] = bid
 					self.prices[instrument]["ask"] = ask
+					self.prices[instrument]["time"] = time
 					# Invert the prices (GBP_USD -> USD_GBP)
 					inv_pair, inv_bid, inv_ask = self.invert_prices(instrument, bid, ask)
 					self.prices[inv_pair]["bid"] = inv_bid

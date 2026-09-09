@@ -139,31 +139,19 @@ class TestForexCandlesStreaming(CandlesCase):
         src.stream_to_queue()
         self.assertEqual(len(self.sink.of('CANDLE')), 3)
 
-    def test_the_last_candle_landing_exactly_on_dtto_never_terminates(self):
+    def test_a_block_ending_exactly_on_dtto_terminates(self):
         """
-        The stop condition is `last[pair] > dtto`, so a block whose final
-        complete candle sits exactly on the requested end date leaves the
-        historic loop spinning - with sleep == 0 it busy-loops, re-requesting
-        the same block and re-publishing the same candles forever. The sink
-        below aborts the run once the same block has been seen twice, which is
-        enough to show the loop did not stop by itself.
+        The stop condition is `last[pair] >= dtto`. With a strict > a block
+        whose final complete candle sat exactly on the requested end date left
+        the historic loop spinning, re-requesting and re-publishing the same
+        block forever with sleep == 0.
         """
-        class Tripwire(Recorder):
-            armed = True
-
-            def put(self, event):
-                Recorder.put(self, event)
-                if self.armed and len(self.of('CANDLE')) > 4:
-                    self.armed = False          # let the ERROR status through
-                    raise RuntimeError("historic loop did not terminate")
-
         src = self.build(FakeResponse(candles_response(4)), dtfrom=T0,
                          dtto=T0 + datetime.timedelta(minutes=3))
-        trip = Tripwire()
-        src.set_queue(trip)
-        src.stream_to_queue()          # the RuntimeError is caught internally
-        self.assertGreater(src.num_blocks["DE30_EUR"], 1)
-        self.assertEqual(trip.statuses()[-1], 'ERROR')
+        src.stream_to_queue()
+        self.assertEqual(len(self.sink.of('CANDLE')), 4)
+        self.assertEqual(self.sink.statuses(), ['STARTED', 'DONE'])
+        self.assertEqual(src.num_blocks["DE30_EUR"], 1)
 
     def test_historic_mode_sends_a_from_parameter(self):
         src = self.build(FakeResponse(candles_response(3)), dtfrom=T0,
@@ -264,6 +252,18 @@ class TestResampler(CandlesCase):
         self.assertLess(bar.mid['l'], bar.mid['h'])
         self.assertEqual(bar.mid['h'], max(bar.mid.values()))
         self.assertEqual(bar.mid['l'], min(bar.mid.values()))
+
+    def test_historic_mode_terminates_on_its_own(self):
+        """
+        stream_to_queue now advances self.last, so the historic stop condition
+        can actually fire. The line doing so used to sit inside a commented-out
+        block, which left the loop spinning forever.
+        """
+        src = self.build(self.canned(25), granularity="M1", dtfrom=T0,
+                         dtto=T0 + datetime.timedelta(minutes=1))
+        src.stream_to_queue()
+        self.assertEqual(self.sink.statuses()[-1], 'DONE')
+        self.assertEqual(len(self.sink.of('CANDLE')), 1)
 
     def test_nothing_is_published_when_the_block_does_not_end_on_a_boundary(self):
         src = self.build(self.canned(24), granularity="M1", dtfrom=T0,
@@ -391,18 +391,18 @@ class TestPriceStream(TempDirCase):
     def test_the_inverse_pair_is_filled_in(self):
         src = self.build(self.price())
         src.stream_to_queue()
+        # the inverted bid is the reciprocal of the ask
         self.assertEqual(src.prices["USDEUR"]["bid"],
-                         (Decimal("1.0") / Decimal("1.07832")).quantize(Decimal("0.00001")))
+                         (Decimal("1.0") / Decimal("1.07847")).quantize(Decimal("0.00001")))
+        self.assertLess(src.prices["USDEUR"]["bid"], src.prices["USDEUR"]["ask"])
 
-    def test_only_the_inverse_pair_gets_a_timestamp(self):
-        """
-        The direct pair's "time" slot is never written - only the inverted one
-        is. Anything reading prices[pair]["time"] sees None forever.
-        """
+    def test_both_the_pair_and_its_inverse_are_timestamped(self):
+        """The direct pair's "time" slot used to be left at None forever."""
         src = self.build(self.price())
         src.stream_to_queue()
-        self.assertIsNone(src.prices["EURUSD"]["time"])
-        self.assertIsNotNone(src.prices["USDEUR"]["time"])
+        self.assertIsNotNone(src.prices["EURUSD"]["time"])
+        self.assertEqual(src.prices["EURUSD"]["time"],
+                         src.prices["USDEUR"]["time"])
 
     def test_an_untradeable_quote_is_still_recorded(self):
         """

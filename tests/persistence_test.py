@@ -241,13 +241,12 @@ class TestCandleSaver(TempDirCase):
         self.assertIsNone(saver.pairs)
         self.assertEqual(saver.store, {})
 
-    def test_re_saving_an_existing_bar_is_silently_dropped(self):
+    def test_re_saving_an_existing_bar_does_not_duplicate_it(self):
         """
-        The intended update path is `if t in store[i][g].index: ... .loc[t] =`,
-        but HDFStore.__getitem__ hands back a fresh DataFrame, so the write
-        lands on a throwaway copy and the method returns as if it had saved.
-        The bar is neither updated nor appended: a re-delivered candle - which
-        is exactly what a reconnecting live feed produces - vanishes.
+        A re-delivered candle - what a reconnecting live feed produces - has
+        to land on the row already stored. The old update path assigned into
+        the DataFrame that HDFStore hands back, which is a copy, so the write
+        was lost; the row is now removed and re-appended.
         """
         saver = self.build()
         saver.execute_event(self.candle())
@@ -255,7 +254,7 @@ class TestCandleSaver(TempDirCase):
         saver.store["DE30_EUR"].flush()
         self.assertEqual(len(saver.store["DE30_EUR"]['/M1']), 1)
 
-    def test_a_corrected_bar_does_not_overwrite_the_stored_one(self):
+    def test_a_corrected_bar_overwrites_the_stored_one(self):
         saver = self.build()
         saver.execute_event(self.candle())
         revised = self.candle()
@@ -264,7 +263,15 @@ class TestCandleSaver(TempDirCase):
         saver.store["DE30_EUR"].flush()
         table = saver.store["DE30_EUR"]['/M1']
         self.assertEqual(len(table), 1)
-        self.assertNotEqual(table['mid_c'].iloc[0], 99999.0)
+        self.assertEqual(table['mid_c'].iloc[0], 99999.0)
+
+    def test_distinct_bars_still_accumulate(self):
+        saver = self.build()
+        for i in range(3):
+            saver.execute_event(self.candle(T0 + datetime.timedelta(minutes=i)))
+        saver.execute_event(self.candle(T0))          # a repeat of the first
+        saver.store["DE30_EUR"].flush()
+        self.assertEqual(len(saver.store["DE30_EUR"]['/M1']), 3)
 
 
 class TestOfflineReplay(TempDirCase):

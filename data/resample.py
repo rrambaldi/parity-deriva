@@ -209,13 +209,10 @@ class ForexCandles(StreamHandler):
 						if (cev.time-self.last[pair])>self.minsec:
 							self.logger.warning("MISSING CANDLES %s - %s" % ( cev.time, self.last[pair]))
 							ret = self.price_request(pair, self.last[pair])
-						'''
-						cev.granularity = msg['granularity']
-						cev.instrument  = msg['instrument']
+						# The aggregated candle is published further down, once
+						# a full bar has been assembled; only the clock has to
+						# advance here, or the historic loop never terminates.
 						self.last[pair] = cev.time
-						self.queue_event(cev)
-						block += 1
-						'''
 
 					beg = ctime.replace(hour=0, minute=0, second=0)
 					delta = ctime - beg
@@ -257,7 +254,7 @@ class ForexCandles(StreamHandler):
 				if not self.live:
 					maxtime_reached = True
 					for pair in self.pairs:
-						maxtime_reached = maxtime_reached and self.last[pair]>self.dtto
+						maxtime_reached = maxtime_reached and self.last[pair]>=self.dtto
 					
 					if maxtime_reached:
 						self.logger.info("Max time reached on all pairs. Streamer stopped")

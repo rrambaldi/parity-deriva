@@ -42,10 +42,13 @@ class CandleSaver(ExecutionHandler):
 			g = event.granularity
 			try:
 				if t in self.store[i][g].index:
-					self.store[i][g].loc[t] = event.to_dict()
-					return 
-			except Exception as e:
-				pass
+					# HDFStore.__getitem__ returns a fresh DataFrame, so
+					# assigning into it would only touch a copy. Drop the row
+					# from the table, then fall through to the append below.
+					self.store[i].remove(g, where='index == "%s"' % t)
+					self.logger.debug("%s %s replacing bar at %s" % (i, g, t))
+			except KeyError:
+				pass                    # the table does not exist yet
 
 			self.store[i].append( g, event.dataframe())
 
