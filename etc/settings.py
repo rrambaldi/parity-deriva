@@ -24,6 +24,8 @@ API_DOMAIN = ENVIRONMENTS["api"][DOMAIN]
 # Credentials come from the environment only - never commit them. Set:
 #   export OANDA_API_ACCESS_TOKEN=...
 #   export OANDA_API_ACCOUNT_ID=...
+# An empty token makes OANDA answer 401, which the data handlers report as a
+# StatusEvent('ERROR') rather than crashing.
 ACCESS_TOKEN = os.environ.get('OANDA_API_ACCESS_TOKEN', '')
 ACCOUNT_ID = os.environ.get('OANDA_API_ACCOUNT_ID', '')
 API_VERSION = '3'

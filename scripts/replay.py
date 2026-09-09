@@ -2,15 +2,12 @@ import copy
 from decimal import Decimal, getcontext
 import logging
 import logging.config
-try:
-	import Queue as queue
-except ImportError:
-	import queue
+import queue
 import threading
 import time
 
 from qsforex.etc import settings
-from qsforex.strategy.AG import AGStrategy
+from qsforex.lib.utils import getLogger
 from qsforex.data.candles import ForexCandles
 from qsforex.data.transaction import StreamingForexTransactions
 from qsforex.execution.execution import OANDAExecutionHandler
@@ -19,8 +16,7 @@ from qsforex.trading.engine import Engine
 from qsforex.event.replay import EventReplay
 
 # Set up logging
-logging.config.fileConfig('./logging.conf')
-logger = logging.getLogger('qsforex.trading.trading')
+logger = getLogger()
 
 # Set the number of decimal places to 2
 getcontext().prec = 2

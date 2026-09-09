@@ -1,21 +1,18 @@
-from __future__ import print_function
-
 from decimal import Decimal, getcontext, ROUND_HALF_DOWN
 import logging
 import json
 
 import requests
 
-from qsforex import settings
+from qsforex.etc import settings
 from qsforex.event.event import TickEvent
 from qsforex.data.price import PriceHandler
 from qsforex.lib.candle import Candle
 from qsforex.event.event import TransactionEvent
-from qsforex.data.transaction import TransactionHandler
 from qsforex.trading.handler import StreamHandler
 
 
-class StreamingForexPrices(StreamHandler):
+class StreamingForexPrices(StreamHandler, PriceHandler):
 	events_queue = None
 
 	def __init__(
@@ -26,7 +23,7 @@ class StreamingForexPrices(StreamHandler):
 		self.domain = setup.STREAM_DOMAIN
 		self.access_token = setup.ACCESS_TOKEN
 		self.account_id = setup.ACCOUNT_ID
-		self.events_queue = setup.events_queue
+		self.events_queue = getattr(setup, 'events_queue', None)
 		self.api_version = setup.API_VERSION
 
 		self.pairs = pairs
@@ -57,6 +54,9 @@ class StreamingForexPrices(StreamHandler):
 
 	def stream_to_queue(self):
 		response = self.connect_to_stream()
+		if response is None:
+			self.logger.error("no response from price stream")
+			return
 		if response.status_code != 200:
 			return
 		for line in response.iter_lines(1):
@@ -113,6 +113,9 @@ class StreamingForexPrices(StreamHandler):
 					self.prices[inv_pair]["bid"] = inv_bid
 					self.prices[inv_pair]["ask"] = inv_ask
 					self.prices[inv_pair]["time"] = time
-					tev = TickEvent(instrument, time, bid, ask)
-					self.queue_events(tev)
+					tev = TickEvent({
+						"type": "TICK", "instrument": instrument,
+						"time": time, "bid": bid, "ask": ask
+					})
+					self.queue_event(tev)
 

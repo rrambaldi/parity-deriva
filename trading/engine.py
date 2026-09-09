@@ -3,10 +3,7 @@ import copy
 from decimal import Decimal, getcontext
 import logging
 import logging.config
-try:
-	import Queue as queue
-except ImportError:
-	import queue
+import queue
 import time
 import threading
 import traceback
@@ -64,7 +61,7 @@ class Engine(object):
 							os._exit(1)
 
 				for t in self.threads:
-					if not t.isAlive():
+					if not t.is_alive():
 						os._exit(1)
 
 		except KeyboardInterrupt:

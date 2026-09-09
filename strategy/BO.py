@@ -53,7 +53,7 @@ class BO(ExecutionHandler):
 
 	def execute_event(self, event):
 		if str(event) == 'DONE':
-			printStats(logging.INFO)
+			self.printStats(logging.INFO)
 			return 
 
 		if str(event) != 'CANDLE':

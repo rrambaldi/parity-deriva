@@ -1,10 +1,7 @@
 
-from __future__ import print_function
-
 from abc import ABCMeta, abstractmethod
 
-class MetaHandler(object):
-	__metaclass__ = ABCMeta
+class MetaHandler(metaclass=ABCMeta):
 
 	@abstractmethod
 	def set_queue(self, event_queue):
@@ -29,7 +26,7 @@ class ExecutionHandler(MetaHandler):
 	"""
 
 	def _set(self, args, key, default=None):
-		if args.has_key(key):
+		if key in args:
 			self.logger.debug("Setting %s: %s" % (key, args[key]))
 			setattr(self, key, args[key])
 			return True

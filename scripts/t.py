@@ -5,7 +5,7 @@ NUM_PROCESSES = 7
 
 def timeConsumingFunction(ret):
 	x = 1
-	for n in xrange(1000000):
+	for n in range(1000000):
 		x *= 1
 
 def run(id):
@@ -15,7 +15,7 @@ def run(id):
 	else:
 		timeConsumingFunction(id)
 		ret = random.choice([0,1])
-		print "%d done : %d" % (id,ret)
+		print("%d done : %d" % (id,ret))
 		os._exit(ret)
 
 children = {}
@@ -26,23 +26,23 @@ for process in range(NUM_PROCESSES):
 	children[pid] = process
 	retok[process] = False
 
-print "WAIT...."
+print("WAIT....")
 alldone=False
 while not alldone:
 	ret=os.waitpid(0, 0)
 	proc = children[ret[0]]
-	print "RET: %d -> %d" % (proc, ret[1])
+	print("RET: %d -> %d" % (proc, ret[1]))
 	if ret[1]!=0:
 		pid = run( proc )
 		children[pid] = proc
 		retok[proc] = False
-		print "%d respawn" % proc
+		print("%d respawn" % proc)
 		continue
 
 	retok[proc] = True
 	alldone = True
 	for p in range(NUM_PROCESSES):
-		print "STATS: %d %d " % (p, retok[p])
+		print("STATS: %d %d " % (p, retok[p]))
 		alldone = alldone and retok[p]
 
 		

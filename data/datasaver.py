@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 from decimal import Decimal, getcontext, ROUND_HALF_DOWN
 import datetime
 import logging
@@ -7,7 +5,7 @@ import json
 import time
 import os
 import sys
-from qsforex import settings
+from qsforex.etc import settings
 
 import requests
 import pandas as pd
@@ -43,7 +41,7 @@ class CandleSaver(ExecutionHandler):
 			t = event.time.strftime('%Y-%m-%d %H:%M:%S')
 			g = event.granularity
 			try:
-				if tm in self.store[i][g].index:
+				if t in self.store[i][g].index:
 					self.store[i][g].loc[t] = event.to_dict()
 					return 
 			except Exception as e:

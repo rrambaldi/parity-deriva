@@ -3,14 +3,14 @@ import pandas as pd
 import datetime
 import time
 
-a=ohlc.ohlc(1,2,3,4,datetime.datetime.now())
+a=ohlc.ohlc(t=datetime.datetime.now(), o=1, h=2, l=3, c=4)
 time.sleep(1)
-b=ohlc.ohlc(1.1,2,3,4,datetime.datetime.now())
-v=pd.DataFrame().from_dict(a.to_dict(),orient='index')
+b=ohlc.ohlc(t=datetime.datetime.now(), o=1.1, h=2, l=3, c=4)
+v=pd.DataFrame.from_dict(a.to_dict(),orient='index')
 v.loc[b.t]={ 'o': b.o
                 , 'h': b.h
                 , 'l': b.l
                 , 'c': b.c
 }
 
-v.head()
+print(v.head())

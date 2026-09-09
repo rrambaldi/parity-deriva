@@ -4,6 +4,25 @@ import json
 import pandas as pd
 from qsforex.lib.candle import Candle
 
+
+def parse_time(v):
+	"""
+	Parse an event timestamp. OANDA sends "%Y-%m-%dT%H:%M:%S.%f000Z"; the
+	event log written by EventSaver stores datetime.isoformat(). Accept both
+	(and datetime objects unchanged) so a saved log replays with its real
+	timestamps instead of the 1970-01-01 fallback.
+	"""
+	if isinstance(v, datetime.datetime):
+		return v
+	try:
+		return datetime.datetime.strptime(v, "%Y-%m-%dT%H:%M:%S.%f000Z")
+	except (TypeError, ValueError):
+		pass
+	try:
+		return datetime.datetime.fromisoformat(str(v).replace('Z', '+00:00'))
+	except (TypeError, ValueError):
+		return datetime.datetime(1970,1,1,0,0,0)
+
 class Event(object):
 
 	def __init__(self, data=None):
@@ -28,15 +47,12 @@ class Event(object):
 				v = "0.0"
 
 		if k=='time':
-			try:
-				v = datetime.datetime.strptime(v, "%Y-%m-%dT%H:%M:%S.%f000Z")
-			except:
-				v = datetime.datetime(1970,1,1,0,0,0)
+			v = parse_time(v)
 
 		setattr(self,k,v)
 
 	def __get__(self,k):
-		if self.__dict__.has_key(k):
+		if k in self.__dict__:
 			return self.__dict__[k]
 		return None
 
@@ -47,7 +63,7 @@ class Event(object):
 		return str(self)
 
 	def has_attr(self, k):
-		return self.__dict__.has_key(k)
+		return k in self.__dict__
 
 	def to_dict(self):
 		d = {}
@@ -96,10 +112,7 @@ class CandleEvent(Event):
 			v = new
 
 		if k=='time':
-			try:
-				v = datetime.datetime.strptime(v, "%Y-%m-%dT%H:%M:%S.%f000Z")
-			except:
-				v = datetime.datetime(1970,1,1,0,0,0)
+			v = parse_time(v)
 
 		setattr(self,k,v)
 

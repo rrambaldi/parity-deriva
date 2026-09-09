@@ -6,7 +6,7 @@ class Candle(object):
 	c = 0
 
 	def __init(self, o=0, h=0, l=0, c=0):
-		if  isinstance(x, dict):
+		if  isinstance(o, dict):
 			self.set( o)
 			return
 
@@ -21,7 +21,7 @@ class Candle(object):
 
 	def set(self, candle):
 		for k in [ 'o', 'h', 'l', 'c' ]:
-			if candle.has_key(k):
+			if k in candle:
 				setattr(self, k, float(candle[k]))
 
 	def __str__(self):

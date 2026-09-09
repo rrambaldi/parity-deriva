@@ -3,6 +3,18 @@ import copy
 from qsforex.event.event import SignalEvent
 
 
+def _signal(instrument, order_type, side, time):
+    """
+    Build a SignalEvent from the (instrument, order_type, side, time)
+    tuple these example strategies work with. The Event hierarchy is
+    dictionary-driven, so the fields are passed by name.
+    """
+    return SignalEvent({
+        "type": "SIGNAL", "instrument": instrument,
+        "orderType": order_type, "side": side, "time": time
+    })
+
+
 class TestStrategy(object):
     """
     A testing strategy that alternates between buying and selling
@@ -23,11 +35,11 @@ class TestStrategy(object):
         if event.type == 'TICK' and event.instrument == self.pairs[0]:
             if self.ticks % 5 == 0:
                 if self.invested == False:
-                    signal = SignalEvent(self.pairs[0], "market", "buy", event.time)
+                    signal = _signal(self.pairs[0], "market", "buy", event.time)
                     self.events.put(signal)
                     self.invested = True
                 else:
-                    signal = SignalEvent(self.pairs[0], "market", "sell", event.time)
+                    signal = _signal(self.pairs[0], "market", "sell", event.time)
                     self.events.put(signal)
                     self.invested = False
             self.ticks += 1
@@ -92,11 +104,11 @@ class MovingAverageCrossStrategy(object):
             # Only start the strategy when we have created an accurate short window
             if pd["ticks"] > self.short_window:
                 if pd["short_sma"] > pd["long_sma"] and not pd["invested"]:
-                    signal = SignalEvent(pair, "market", "buy", event.time)
+                    signal = _signal(pair, "market", "buy", event.time)
                     self.events.put(signal)
                     pd["invested"] = True
                 if pd["short_sma"] < pd["long_sma"] and pd["invested"]:
-                    signal = SignalEvent(pair, "market", "sell", event.time)
+                    signal = _signal(pair, "market", "sell", event.time)
                     self.events.put(signal)
                     pd["invested"] = False
             pd["ticks"] += 1

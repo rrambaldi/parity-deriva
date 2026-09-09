@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import json
 import datetime
 import logging
@@ -87,8 +85,8 @@ class OANDABacktester(ExecutionHandler):
 		o.SLOrder = None
 		o.TPOrder = None
 		o.type = None
-		if o.stopLoss is not None or o.stopLoss>0:
-			new = Event(o.to_dict)
+		if o.stopLoss is not None:
+			new = Event(o.to_dict())
 			if o.units > 0:
 				new.units = - o.units
 			new.price = o.stopLoss
@@ -99,8 +97,8 @@ class OANDABacktester(ExecutionHandler):
 			self.createOrder(new)
 			self.logger.debug("== ADDED STOP LOSS @%f" % new.price)
 
-		if o.takeProfit is not None or o.takeProfit>0:
-			new = Event(o.to_dict)
+		if o.takeProfit is not None:
+			new = Event(o.to_dict())
 			new.units = - o.units
 			new.price = o.takeProfit
 			new.type = 'TAKE_PROFIT_ORDER'

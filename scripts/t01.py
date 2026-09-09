@@ -2,16 +2,13 @@ import copy
 from decimal import Decimal, getcontext
 import logging
 import logging.config
-try:
-	import Queue as queue
-except ImportError:
-	import queue
+import queue
 import threading
 import time
 
 from qsforex.etc import settings
 from qsforex.lib.utils import getLogger
-from qsforex.strategy.AG import AGStrategy
+from qsforex.strategy.AG01 import AG01
 from qsforex.data.candles import ForexCandles
 from qsforex.data.transaction import StreamingForexTransactions
 from qsforex.execution.execution import OANDAExecutionHandler
@@ -38,7 +35,7 @@ pairs = ["DE30_EUR"]
 
 # Create the strategy/signal generator, passing the 
 # instrument and the events queue
-e.add_handler( AGStrategy( pairs=pairs) )
+e.add_handler( AG01( pairs=pairs) )
 e.add_handler( MoneyManager( pairs=pairs, units=100) )
 e.add_handler( OANDAExecutionHandler() )
 

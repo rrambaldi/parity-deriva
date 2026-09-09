@@ -52,7 +52,7 @@ class BO01(ExecutionHandler):
 
 	def execute_event(self, event):
 		if str(event) == 'QUI':
-			printStats()
+			self.printStats()
 			return 
 
 		if str(event) != 'CANDLE':

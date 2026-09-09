@@ -1,6 +1,4 @@
 
-from __future__ import print_function
-
 import datetime
 from qsforex.etc import settings
 from qsforex.event.event import OrderEvent
@@ -23,14 +21,14 @@ class MoneyManager(ExecutionHandler):
 
 	def addOrder(self, oe):
 		oe.batchID = 0
-		if self.signals.has_key(oe.signalNumber):
+		if oe.signalNumber in self.signals:
 			self.signals[oe.signalNumber].append(oe)
 			return
 		self.signals[oe.signalNumber] = [ oe ]
 
 
 	def handleSignal(self, se):
-		if self.onTrade or (self.orderIssued and not self.signals.has_key(se.signalNumber)):
+		if self.onTrade or (self.orderIssued and se.signalNumber not in self.signals):
 			self.logger.info("SIGNAL IGNORED: onTrade")
 			return
  
@@ -52,7 +50,7 @@ class MoneyManager(ExecutionHandler):
 			% ( orderID, event.price, event.pl, event.financing, event.accountBalance))
 #		self.logger.debug(event.dump())
 		found = False
-		for s in self.signals.keys():
+		for s in list(self.signals.keys()):
 			for o in self.signals[s]:
 #				self.logger.debug("%s %s" % (s, o.dump()))
 				if o.has_attr('orderID') and o.orderID==orderID:
@@ -106,7 +104,7 @@ class MoneyManager(ExecutionHandler):
 		#
 
 	def handleClientOrder(self,event):
-		if not self.signals.has_key(event.signalNumber):
+		if event.signalNumber not in self.signals:
 			self.logger.error("Missing %s" % event.signalNumber)
 			return
 		for o in self.signals[event.signalNumber]:

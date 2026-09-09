@@ -2,14 +2,18 @@ import os, os.path
 
 import pandas as pd
 import matplotlib
-try:
-    matplotlib.use('TkAgg')
-except:
-    pass
 import matplotlib.pyplot as plt
+
+# Prefer the interactive Tk backend, but fall back to a headless one when
+# tkinter is not installed. Backends are resolved lazily, so neither use()
+# nor the pyplot import raises on their own - switch_backend() does.
+try:
+    plt.switch_backend('TkAgg')
+except ImportError:
+    plt.switch_backend('Agg')
 import seaborn as sns
 
-from qsforex.settings import OUTPUT_RESULTS_DIR
+from qsforex.etc.settings import OUTPUT_RESULTS_DIR
 
 
 if __name__ == "__main__":
@@ -24,7 +28,7 @@ if __name__ == "__main__":
     sns.set_context(rc={"figure.figsize": (8, 4)})
 
     equity_file = os.path.join(OUTPUT_RESULTS_DIR, "equity.csv")
-    equity = pd.io.parsers.read_csv(
+    equity = pd.read_csv(
         equity_file, parse_dates=True, header=0, index_col=0
     )
 

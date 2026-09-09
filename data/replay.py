@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 from decimal import Decimal, getcontext, ROUND_HALF_DOWN
 import pandas as pd
 import datetime
@@ -7,7 +5,7 @@ import logging
 import json
 import time
 import os
-from qsforex import settings
+from qsforex.etc import settings
 
 import requests
 
@@ -35,7 +33,7 @@ class ForexCandles(StreamHandler):
 		delta_h = 0
 		delta_s = 0
 		if self.granularity[:1] == 'S':
-			delta_s = secs
+			delta_s = int(self.granularity[1:])
 		if self.granularity[:1] == 'M':
 			delta_m = int(self.granularity[1:])
 		if self.granularity[:1] == 'H':
@@ -69,18 +67,25 @@ class ForexCandles(StreamHandler):
 			self.last[p] = min(s.index.max(), self.dtto)
 			self.samples[p] = len(s.loc[self.curr[p]:self.last[p]])
 			self.logger.debug("%s %d samples to go" % ( p, self.samples[p]))
-			self.cent[p] = self.samples[p] / 100
-			i=0
+			self.cent[p] = max(1, self.samples[p] // 100)
 			x={}
-			for t in a['index']:
-				j=0
-				z={}
-				for c in a['columns']:
-					z[c] = a['data'][j][i]
-				x[t]=z
+			for i, t in enumerate(a['index']):
+				x[t] = dict(zip(a['columns'], a['data'][i]))
 			self.logger.debug("%s %d loaded" % ( p, len(x)))
 			self.store[p] = x
 
+
+	def to_candle(self, tm, row):
+		"""
+		Turn one flat store row ({ask,bid,mid}_{o,h,l,c} + volume) back into
+		the nested OANDA candle layout that CandleEvent expects.
+		"""
+		out = { 'time': tm.to_pydatetime() if hasattr(tm,'to_pydatetime') else tm
+			, 'volume': int(row['volume'])
+			, 'complete': True }
+		for x in ['ask','bid','mid']:
+			out[x] = dict((p, row["%s_%s" % (x,p)]) for p in ['o','h','l','c'])
+		return out
 
 	def stream_to_queue(self):
 		try:
@@ -90,12 +95,12 @@ class ForexCandles(StreamHandler):
 				for pair in self.pairs:
 					try:
 						c = self.store[pair][self.curr[pair]]
-						cev = CandleEvent(c)
+						cev = CandleEvent(self.to_candle(self.curr[pair], c))
 						cev.granularity = self.granularity
 						cev.instrument  = pair
 						self.candles[pair] += 1
 						self.queue_event(cev)
-					except Exception as e:
+					except KeyError:
 						pass
 
 					self.curr[pair] = self.curr[pair] + self.interval
@@ -106,7 +111,7 @@ class ForexCandles(StreamHandler):
 				for pair in self.pairs:
 					maxtime_reached = maxtime_reached and self.curr[pair]>self.last[pair]
 					if self.cent[pair]<=self.candles[pair] and self.candles[pair] % self.cent[pair] == 0:
-						self.logger.debug("%s %d%%" % ( pair, (self.candles[pair]/self.cent[pair])))
+						self.logger.debug("%s %d%%" % ( pair, (self.candles[pair]//self.cent[pair])))
 				
 				if maxtime_reached:
 					self.logger.info("Max time reached on all pairs. Streamer stopped")

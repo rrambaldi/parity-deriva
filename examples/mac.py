@@ -1,9 +1,7 @@
-from __future__ import print_function
-
 from qsforex.backtest.backtest import Backtest
 from qsforex.execution.execution import SimulatedExecution
 from qsforex.portfolio.portfolio import Portfolio
-from qsforex import settings
+from qsforex.etc import settings
 from qsforex.strategy.strategy import MovingAverageCrossStrategy
 from qsforex.data.price import HistoricCSVPriceHandler
 

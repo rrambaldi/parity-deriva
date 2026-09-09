@@ -59,9 +59,9 @@ def getLogger(config=None,confstr='qsforex.trading.trading'):
 	if config is None or not os.path.exists(config):
 		if os.path.exists(DEF_CONFIG):
 			config = DEF_CONFIG
-		elif os.environ.has_key('QSFOREX_HOME'):
+		elif 'QSFOREX_HOME' in os.environ:
 			config = os.path.join(os.environ['QSFOREX_HOME'],'etc',DEF_CONFIG)
-		elif os.environ.has_key('VIRTUAL_ENV'):
+		elif 'VIRTUAL_ENV' in os.environ:
 			config = os.path.join(os.environ['VIRTUAL_ENV'],'qsforex','etc',DEF_CONFIG)
 		else:
 			print("Missing logger config")

@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import calendar
 import copy
 import datetime
@@ -9,7 +7,7 @@ import sys
 import numpy as np
 import pandas as pd
 
-from qsforex import settings
+from qsforex.etc import settings
 
 
 def month_weekdays(year_int, month_int):

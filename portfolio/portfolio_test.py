@@ -1,6 +1,9 @@
 from decimal import Decimal, getcontext, ROUND_HALF_DOWN
+import shutil
+import tempfile
 import unittest
 
+import qsforex.portfolio.portfolio as portfolio_module
 from qsforex.portfolio.portfolio import Portfolio
 from qsforex.portfolio.position_test import TickerMock
 from qsforex.portfolio.position import Position
@@ -8,6 +11,16 @@ from qsforex.portfolio.position import Position
 
 class TestPortfolio(unittest.TestCase):
     def setUp(self):
+        # Portfolio writes backtest.csv into OUTPUT_RESULTS_DIR; point it at a
+        # scratch directory so the tests do not depend on that setting being
+        # configured and writable.
+        tmpdir = tempfile.mkdtemp(prefix="qsforex-portfolio-test-")
+        self.addCleanup(shutil.rmtree, tmpdir, True)
+        original = portfolio_module.OUTPUT_RESULTS_DIR
+        portfolio_module.OUTPUT_RESULTS_DIR = tmpdir
+        self.addCleanup(setattr, portfolio_module,
+                        'OUTPUT_RESULTS_DIR', original)
+
         home_currency = "GBP"
         leverage = 20
         equity = Decimal("100000.00")
@@ -19,6 +32,7 @@ class TestPortfolio(unittest.TestCase):
             leverage=leverage, equity=equity, 
             risk_per_trade=risk_per_trade
         )
+        self.addCleanup(self.port.backtest_file.close)
 
     def test_add_position_long(self):
         position_type = "long"
@@ -32,11 +46,11 @@ class TestPortfolio(unittest.TestCase):
         )
         ps = self.port.positions[currency_pair]
 
-        self.assertEquals(ps.position_type, position_type)
-        self.assertEquals(ps.currency_pair, currency_pair)
-        self.assertEquals(ps.units, units)
-        self.assertEquals(ps.avg_price, ticker.prices[currency_pair]["ask"])
-        self.assertEquals(ps.cur_price, ticker.prices[currency_pair]["bid"])
+        self.assertEqual(ps.position_type, position_type)
+        self.assertEqual(ps.currency_pair, currency_pair)
+        self.assertEqual(ps.units, units)
+        self.assertEqual(ps.avg_price, ticker.prices[currency_pair]["ask"])
+        self.assertEqual(ps.cur_price, ticker.prices[currency_pair]["bid"])
 
     def test_add_position_short(self):
         position_type = "short"
@@ -50,11 +64,11 @@ class TestPortfolio(unittest.TestCase):
         )
         ps = self.port.positions[currency_pair]
 
-        self.assertEquals(ps.position_type, position_type)
-        self.assertEquals(ps.currency_pair, currency_pair)
-        self.assertEquals(ps.units, units)
-        self.assertEquals(ps.avg_price, ticker.prices[currency_pair]["bid"])
-        self.assertEquals(ps.cur_price, ticker.prices[currency_pair]["ask"])
+        self.assertEqual(ps.position_type, position_type)
+        self.assertEqual(ps.currency_pair, currency_pair)
+        self.assertEqual(ps.units, units)
+        self.assertEqual(ps.avg_price, ticker.prices[currency_pair]["bid"])
+        self.assertEqual(ps.cur_price, ticker.prices[currency_pair]["ask"])
 
     def test_add_position_units_long(self):
         position_type = "long"
@@ -264,7 +278,7 @@ class TestPortfolio(unittest.TestCase):
         # Close the position
         cp = self.port.close_position(currency_pair)
         self.assertTrue(cp)
-        self.assertRaises(ps)  # Key doesn't exist
+        self.assertNotIn(currency_pair, self.port.positions)  # Key doesn't exist
         self.assertEqual(self.port.balance, Decimal("100026.63"))
 
     def test_close_position_short(self):
@@ -317,7 +331,7 @@ class TestPortfolio(unittest.TestCase):
         # Close the position
         cp = self.port.close_position(currency_pair)
         self.assertTrue(cp)
-        self.assertRaises(ps)  # Key doesn't exist
+        self.assertNotIn(currency_pair, self.port.positions)  # Key doesn't exist
         self.assertEqual(self.port.balance, Decimal("99962.77"))
 
 

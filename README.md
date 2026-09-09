@@ -24,7 +24,7 @@ The software is provided under a permissive "MIT" license (see below).
 
 2) Clone this git repository into a suitable location on your machine using the following command in your terminal: ```git clone https://github.com/mhallsmoore/qsforex.git```. Alternative you can download the zip file of the current master branch at https://github.com/mhallsmoore/qsforex/archive/master.zip.
 
-3) Create a set of environment variables for all of the settings found in the ```settings.py``` file in the application root directory. Alternatively, you can "hard code" your specific settings by overwriting the ```os.environ.get(...)``` calls for each setting:
+3) Create a set of environment variables for all of the settings found in the ```etc/settings.py``` file. Alternatively, you can "hard code" your specific settings by overwriting the ```os.environ.get(...)``` calls for each setting. The environment variable names are the ones used in that file (```QSFOREX_CSV_DATA_DIR```, ```OUTPUT_RESULTS_DIR```, ```QSFOREX_DATA_DIR```, ```QSFOREX_LOG_DIR```, ```OANDA_API_ACCESS_TOKEN```, ```OANDA_API_ACCOUNT_ID```):
 
 ```
 # The data directory used to store your backtesting CSV files
@@ -50,12 +50,12 @@ BASE_CURRENCY = "GBP"
 EQUITY = Decimal("100000.00")
 ```
 
-4) Create a virtual environment ("virtualenv") for the QSForex code and utilise pip to install the requirements. For instance in a Unix-based system (Mac or Linux) you might create such a directory as follows by entering the following commands in the terminal:
+4) QSForex requires **Python 3.11 or newer** (it was migrated off Python 2.7); the pinned requirements were verified on Python 3.12, and the newest NumPy/SciPy releases need 3.12. The code runs on both pandas 2.x and pandas 3.x. Create a virtual environment for the code and utilise pip to install the requirements. For instance in a Unix-based system (Mac or Linux) you might create such a directory as follows by entering the following commands in the terminal:
 
 ```
 mkdir -p ~/venv/qsforex
 cd ~/venv/qsforex
-virtualenv .
+python3 -m venv .
 ```
 
 This will create a new virtual environment to install the packages into. Assuming you downloaded the QSForex git repository into an example directory such as ```~/projects/qsforex/``` (change this directory below to wherever you installed QSForex), then in order to install the packages you will need to run the following commands:
@@ -65,7 +65,7 @@ source ~/venv/qsforex/bin/activate
 pip install -r ~/projects/qsforex/requirements.txt
 ```
 
-This will take some time as NumPy, SciPy, Pandas, Scikit-Learn and Matplotlib must be compiled. There are many packages required for this to work, so please take a look at these two articles for more information:
+This will normally install pre-built wheels for NumPy, SciPy, Pandas, Scikit-Learn, Matplotlib and PyTables. There are many packages required for this to work, so please take a look at these two articles for more information:
 
 * https://www.quantstart.com/articles/Quick-Start-Python-Quantitative-Research-Environment-on-Ubuntu-14-04
 * https://www.quantstart.com/articles/Easy-Multi-Platform-Installation-of-a-Scientific-Python-Stack-Using-Anaconda
@@ -73,18 +73,18 @@ This will take some time as NumPy, SciPy, Pandas, Scikit-Learn and Matplotlib mu
 You will also need to create a symbolic link from your ```site-packages``` directory to your QSForex installation directory in order to be able to call ```import qsforex``` within the code. To do this you will need a command similar to the following:
 
 ```
-ln -s ~/projects/qsforex/ ~/venv/qsforex/lib/python2.7/site-packages/qsforex
+ln -s ~/projects/qsforex/ ~/venv/qsforex/lib/python3.12/site-packages/qsforex
 ```
 
-Make sure to change ```~/projects/qsforex``` to your installation directory and ```~/venv/qsforex/lib/python2.7/site-packages/``` to your virtualenv site packages directory.
+Make sure to change ```~/projects/qsforex``` to your installation directory and ```~/venv/qsforex/lib/python3.12/site-packages/``` to your virtualenv site packages directory (adjust the version to the Python 3 you created the venv with). Alternatively, put the directory that *contains* ```qsforex``` on ```PYTHONPATH```.
 
 You will now be able to run the subsequent commands correctly.
 
 ## Practice/Live Trading
 
-5) At this stage, if you simply wish to carry out practice or live trading then you can run ```python trading/trading.py```, which will use the default ```TestStrategy``` trading strategy. This simply buys or sells a currency pair every 5th tick. It is purely for testing - do not use it in a live trading environment!
+5) At this stage, if you simply wish to carry out practice or live trading then you can run ```python trading/run.py```, which wires an ```AG01``` strategy, a ```MoneyManager```, the OANDA execution handler and the price/transaction streams into the ```Engine```. The ```scripts/``` directory holds further ready-made wirings (```t01.py``` .. ```t05.py```, ```onlydata.py```). Do not point any of these at a live account until you have read what they do!
 
-If you wish to create a more useful strategy, then simply create a new class with a descriptive name, e.g. ```MeanReversionMultiPairStrategy``` and ensure it has a ```calculate_signals``` method. You will need to pass this class the ```pairs``` list as well as the ```events``` queue, as in ```trading/trading.py```.
+If you wish to create a more useful strategy, then simply create a new class with a descriptive name, e.g. ```MeanReversionMultiPairStrategy```. Strategies driven by the ```Engine``` subclass ```ExecutionHandler``` and implement ```execute_event(event)``` (see ```strategy/AG01.py``` and ```strategy/BO.py```); the backtester's example strategies instead implement ```calculate_signals(event)``` and take the ```pairs``` list plus the ```events``` queue.
 
 Please look at ```strategy/strategy.py``` for details.
 
@@ -124,6 +124,20 @@ And that's it! At this stage you are ready to begin creating your own backtests 
 If you have any questions about the installation then please feel free to email me at mike@quantstart.com.
 
 If you have any bugs or other issues that you think may be due to the codebase specifically, feel free to open a Github issue here: https://github.com/mhallsmoore/qsforex/issues
+
+# Tests
+
+The project ships a characterisation test suite under ```qsforex/tests/```
+(plain ```unittest```, no network access, no OANDA account needed). Run it
+with:
+
+```
+python -m unittest discover -s qsforex -p '*_test.py'
+```
+
+That also picks up the two original ```portfolio/*_test.py``` modules. See
+```qsforex/tests/README.md``` for what each module covers and for the list of
+behaviours that are pinned deliberately because they look wrong.
 
 # License Terms
 

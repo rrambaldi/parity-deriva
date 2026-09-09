@@ -1,12 +1,7 @@
-from __future__ import print_function
-
-try:
-    import Queue as queue
-except ImportError:
-    import queue
+import queue
 import time
 
-from qsforex import settings
+from qsforex.etc import settings
 
 
 class Backtest(object):
@@ -61,7 +56,7 @@ class Backtest(object):
                         self.strategy.calculate_signals(event)
                         self.portfolio.update_portfolio(event)
                     elif event.type == 'SIGNAL':
-                        self.portfolio.execute_signal(event)
+                        self.portfolio.execute_event(event)
                     elif event.type == 'ORDER':
                         self.execution.execute_order(event)
             time.sleep(self.heartbeat)

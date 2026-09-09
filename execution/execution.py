@@ -1,22 +1,25 @@
-from __future__ import print_function
-
 import json
 import datetime
 from qsforex.etc import settings
 from qsforex.trading.handler import ExecutionHandler
 from qsforex.event.event import ClientOrderEvent
-try:
-	import httplib
-except ImportError:
-	import http.client as httplib
+import http.client as httplib
 import logging
-try:
-	from urllib import urlencode
-except ImportError:
-	from urllib.parse import urlencode
+from urllib.parse import urlencode
 import urllib3
 urllib3.disable_warnings()
 
+
+
+class SimulatedExecution(object):
+	"""
+	Provides a simulated execution handling environment. This class
+	actually does nothing - it simply receives an order to execute.
+
+	Instead, the Portfolio object actually provides fill handling.
+	"""
+	def execute_order(self, event):
+		pass
 
 
 class OANDAExecutionHandler(ExecutionHandler):
@@ -123,7 +126,7 @@ ORDER:
 
 		resp = json.loads(response)
 #		self.logger.debug(resp)
-		if resp.has_key("errorCode"):
+		if "errorCode" in resp:
 			self.logger.error("ORDER REJECTED: %s" % resp['errorCode'])
 			return
 

@@ -5,10 +5,7 @@ import logging.config
 import datetime
 import time
 import argparse
-try:
-	import Queue as queue
-except ImportError:
-	import queue
+import queue
 import threading
 import time
 

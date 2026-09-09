@@ -2,10 +2,7 @@ import copy
 from decimal import Decimal, getcontext
 import logging
 import logging.config
-try:
-	import Queue as queue
-except ImportError:
-	import queue
+import queue
 import threading
 import time
 

@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 from decimal import Decimal, getcontext, ROUND_HALF_DOWN
 import pandas as pd
 import datetime
@@ -35,16 +33,16 @@ class ForexCandles(StreamHandler):
 		self._set(args,'granularity','M5')
 
 		self.minsec = granularityToTimedelta(self.granularity)
-		self.resample = '5sec';
+		self.resample = '5s'
 		if self.granularity[:1] == 'S':
 			self.secs = 1 * int(self.granularity[1:])
-			self.resample = str(self.secs) + 'sec';
+			self.resample = str(self.secs) + 's'
 		if self.granularity[:1] == 'M':
 			self.secs = 60 * int(self.granularity[1:])
-			self.resample = self.granularity[1:] + "Min"
+			self.resample = self.granularity[1:] + "min"
 		if self.granularity[:1] == 'H':
 			self.secs = 60*60 * int(self.granularity[1:])
-			self.resample = self.granularity[1:] + "Hour"
+			self.resample = self.granularity[1:] + "h"
 
 		self._set(args,'sampling', 10)
 #		self.sleep = int(secs / self.sampling)
@@ -83,15 +81,23 @@ class ForexCandles(StreamHandler):
 	def init(self,pairs):
 		for p in pairs:
 			d=self.request(p)
+			if d is None:
+				# request() has already logged and queued a StatusEvent('ERROR')
+				self.logger.error("%s no initial candles, skipping seed" % p)
+				continue
 			msg = json.loads(d.text)
+			ask = bid = mid = None
 			for c in msg['candles']:
 				if c['complete']:
 					ask = dctFromOanda(c,'ask')
 					bid = dctFromOanda(c,'bid')
 					mid = dctFromOanda(c,'mid')
-			self.ask[p] = pd.DataFrame().from_dict( ask, orient='index')
-			self.bid[p] = pd.DataFrame().from_dict( bid, orient='index')
-			self.mid[p] = pd.DataFrame().from_dict( mid, orient='index')
+			if ask is None:
+				self.logger.error("%s no complete candle in seed response" % p)
+				continue
+			self.ask[p] = pd.DataFrame.from_dict( ask, orient='index')
+			self.bid[p] = pd.DataFrame.from_dict( bid, orient='index')
+			self.mid[p] = pd.DataFrame.from_dict( mid, orient='index')
 
 	def request(self, instrument):
 		try:
@@ -109,7 +115,7 @@ class ForexCandles(StreamHandler):
 			resp = s.send(pre, stream=False, verify=False)
 			if resp.status_code != 200:
 				s.close()
-				self.logger.error("Response error code %d" % response.status_code)
+				self.logger.error("Response error code %d" % resp.status_code)
 				sev = StatusEvent('ERROR')
 				self.queue_event(sev)
 				return None
@@ -169,7 +175,7 @@ class ForexCandles(StreamHandler):
 						
 					if response is None:
 						self.logger.debug("NADA")
-						pass
+						continue
 
 					try:
 						msg = json.loads(response.text)
@@ -177,7 +183,7 @@ class ForexCandles(StreamHandler):
 						self.logger.error( "Caught exception when converting message into json: %s" % str(e))
 						sev = StatusEvent('ERROR')
 						self.queue_event(sev)
-						pass
+						continue
 
 					block = 0
 					for c in msg['candles']:
@@ -214,9 +220,9 @@ class ForexCandles(StreamHandler):
 					beg = ctime.replace(hour=0, minute=0, second=0)
 					delta = ctime - beg
 					if ((delta.seconds % self.secs)==0):
-						a=self.ask[pair].tail(12).resample('1Min').agg( self.aggregate )
-						b=self.bid[pair].tail(12).resample('1Min').agg( self.aggregate )
-						m=self.mid[pair].tail(12).resample('1Min').agg( self.aggregate )
+						a=self.ask[pair].tail(12).resample('1min').agg( self.aggregate )
+						b=self.bid[pair].tail(12).resample('1min').agg( self.aggregate )
+						m=self.mid[pair].tail(12).resample('1min').agg( self.aggregate )
 						self.logger.debug("ASK:"+str(a))
 						self.logger.debug("BID:"+str(b))
 						self.logger.debug("MID:"+str(m))

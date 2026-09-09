@@ -11,7 +11,7 @@ class ohlc(object):
 
 	def __init__(self, t=None, o=0.0, h=0.0, l=0.0, c=0.0, v=0):
 		if isinstance(t, dict):
-			self.from_dict(self, o)
+			self.from_dict(t)
 			return
 		self.from_vals(t,o,h,l,c,v)
 
@@ -43,10 +43,10 @@ class ohlc(object):
 		self.t = datetime.datetime.strptime(dct['time'], "%Y-%m-%dT%H:%M:%S.%f000Z")
 
 	def from_dict(self,dct,tm=None):
-		if tm is None and dct.has_key('time'):
+		if tm is None and 'time' in dct:
 			tm = dct['time']
 		vol=None
-		if dct.has_key('volume'):
+		if 'volume' in dct:
 			vol=dct['volume']
 		self.from_vals(tm, dct['o'], dct['h'], dct['l'], dct['c'], vol)
 
@@ -55,10 +55,11 @@ class ohlc(object):
 		self.h=float(h)
 		self.l=float(l)
 		self.c=float(c)
-		self.v=int(v)
+		self.v=int(v or 0)
 		if t is not None and not isinstance(t,datetime.datetime):
 			self.t = datetime.datetime.strptime(t, "%Y-%m-%dT%H:%M:%S.%f000Z")
-		self.t = t
+		else:
+			self.t = t
 
 	def __str__(self):
 		return "%s O:%s H:%s L:%s C:%s V:%d" % (self.t, self.o, self.h, self.l, self.c, self.v)

@@ -13,7 +13,7 @@ import os
 import pandas as pd
 
 from qsforex.performance.performance import create_drawdowns
-from qsforex.settings import OUTPUT_RESULTS_DIR
+from qsforex.etc.settings import OUTPUT_RESULTS_DIR
 
 
 if __name__ == "__main__":

@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import argparse
 from dateutil import parser
 from decimal import Decimal, getcontext, ROUND_HALF_DOWN
@@ -42,7 +40,7 @@ class BulkSaver(StreamHandler):
 		self._set(args, 'batch_size', 2000)
 		self._set(args, 'dtto', datetime.datetime.today())
 		if self.dtfrom>self.dtto:
-			os.exit(-1)
+			os._exit(-1)
 
 		self.store_name = {}
 		for p in self.pairs:
@@ -93,9 +91,7 @@ class BulkSaver(StreamHandler):
 				self.logger.error("Response error code %d" % resp.status_code)
 				return None
 
-			line = resp.text
-			dline = line.decode('utf-8')
-			msg = json.loads(dline)
+			msg = json.loads(resp.text)
 
 			return msg
 		except Exception as e:
@@ -120,7 +116,7 @@ class BulkSaver(StreamHandler):
 		return block
 
 	def save_dict(self, pair, block):
-		v=pd.DataFrame().from_dict(block,orient='index')
+		v=pd.DataFrame.from_dict(block,orient='index')
 		self.curr[pair] = v.index.max() + self.timedelta
 		store=pd.HDFStore(os.path.join(self.setup.DATA_DIR,self.store_name[pair]))
 		store.append(self.granularity,v)
@@ -152,7 +148,7 @@ class BulkSaver(StreamHandler):
 					block = self.create_dict(msg)
 					if len(block)==0:
 						self.logger.debug("%s NO DATA RESPONSE WAS: %s" % (pair, msg))
-						self.curr[pair] = self.curr[pair] + self.timedelta * ( self.batch_size / 2 )
+						self.curr[pair] = self.curr[pair] + self.timedelta * ( self.batch_size // 2 )
 						continue
 
 					self.logger.debug("%s saving..." % pair)
@@ -238,8 +234,8 @@ if __name__ == '__main__':
 
 		retok[proc] = True
 		alldone = True
-		for p in children.keys():
-			logger.info( "STATS: %d %d " % (p, retok[p]))
+		for p in retok:
+			logger.info( "STATS: %s %s " % (p, retok[p]))
 			alldone = alldone and retok[p]
 
 			

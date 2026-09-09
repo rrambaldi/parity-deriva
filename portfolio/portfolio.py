@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 from copy import deepcopy
 from decimal import Decimal, getcontext, ROUND_HALF_DOWN
 import logging
@@ -10,7 +8,7 @@ import pandas as pd
 from qsforex.event.event import OrderEvent
 from qsforex.performance.performance import create_drawdowns
 from qsforex.portfolio.position import Position
-from qsforex.settings import OUTPUT_RESULTS_DIR
+from qsforex.etc.settings import OUTPUT_RESULTS_DIR
 
 
 class Portfolio(object):
@@ -69,7 +67,7 @@ class Portfolio(object):
             ps = self.positions[currency_pair]
             pnl = ps.close_position()
             self.balance += pnl
-            del[self.positions[currency_pair]]
+            del self.positions[currency_pair]
             return True
 
     def create_equity_file(self):
@@ -161,7 +159,7 @@ class Portfolio(object):
                 ps = self.positions[currency_pair]
 
                 if side == "buy" and ps.position_type == "long":
-                    add_position_units(currency_pair, units)
+                    self.add_position_units(currency_pair, units)
 
                 elif side == "sell" and ps.position_type == "long":
                     if units == ps.units:
@@ -182,9 +180,12 @@ class Portfolio(object):
                         return
                         
                 elif side == "sell" and ps.position_type == "short":
-                    add_position_units(currency_pair, units)
+                    self.add_position_units(currency_pair, units)
 
-            order = OrderEvent(currency_pair, units, "market", side)
+            order = OrderEvent({
+                "type": "ORDER", "instrument": currency_pair,
+                "units": units, "orderType": "market", "side": side
+            })
             self.events.put(order)
 
             self.logger.info("Portfolio Balance: %s" % self.balance)

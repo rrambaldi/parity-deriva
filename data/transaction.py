@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 from decimal import Decimal, getcontext, ROUND_HALF_DOWN
 import logging
 import json
@@ -51,6 +49,9 @@ class StreamingForexTransactions(StreamHandler):
 	def stream_to_queue(self):
 		response = self.connect_to_stream()
 		self.logger.debug("connected...")
+		if response is None:
+			self.logger.error("no response from transaction stream")
+			return
 		if response.status_code != 200:
 			self.logger.error("response code: %d" % response.status_code)
 			return
@@ -69,8 +70,8 @@ class StreamingForexTransactions(StreamHandler):
 					continue
 
 				self.logger.debug("(trade) TYPE: %s orderID: %s price: %s" % (msg['type']
-							, ( msg['orderID'] if msg.has_key('orderID') else 0 )
-							, ( msg['price'] if msg.has_key('price') else "" )
+							, ( msg['orderID'] if 'orderID' in msg else 0 )
+							, ( msg['price'] if 'price' in msg else "" )
 				))
 #				self.logger.debug(msg)
 #				if not msg['type'] in ['TAKE_PROFIT_ORDER','STOP_LOSS_ORDER','ORDER_CANCEL','STOP_ORDER_REJECT']:

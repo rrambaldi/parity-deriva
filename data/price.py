@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import datetime
 from decimal import Decimal, getcontext, ROUND_HALF_DOWN
 import os
@@ -109,7 +107,7 @@ class HistoricCSVPriceHandler(PriceHandler):
 
 	def _list_all_csv_files(self):
 		files = os.listdir(settings.CSV_DATA_DIR)
-		pattern = re.compile("[A-Z]{6}_\d{8}.csv")
+		pattern = re.compile(r"[A-Z]{6}_\d{8}\.csv")
 		matching_files = [f for f in files if pattern.search(f)]
 		matching_files.sort()
 		return matching_files
@@ -137,13 +135,13 @@ class HistoricCSVPriceHandler(PriceHandler):
 		"""
 		for p in self.pairs:
 			pair_path = os.path.join(self.csv_dir, '%s_%s.csv' % (p, date_str))
-			self.pair_frames[p] = pd.io.parsers.read_csv(
-				pair_path, header=True, index_col=0, 
+			self.pair_frames[p] = pd.read_csv(
+				pair_path, header=0, index_col=0, 
 				parse_dates=True, dayfirst=True,
 				names=("Time", "Ask", "Bid", "AskVolume", "BidVolume")
 			)
 			self.pair_frames[p]["Pair"] = p
-		return pd.concat(self.pair_frames.values()).sort().iterrows()
+		return pd.concat(list(self.pair_frames.values())).sort_index().iterrows()
 
 	def _update_csv_for_day(self):
 		try:
@@ -198,5 +196,8 @@ class HistoricCSVPriceHandler(PriceHandler):
 		self.prices[inv_pair]["time"] = index
 
 		# Create the tick event for the queue
-		tev = TickEvent(pair, index, bid, ask)
+		tev = TickEvent({
+			"type": "TICK", "instrument": pair,
+			"time": index, "bid": bid, "ask": ask
+		})
 		self.events_queue.put(tev)

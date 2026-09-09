@@ -4,30 +4,29 @@ import os
 import glob
 import time
 import datetime
-import qsforex.settings as settings
+import qsforex.etc.settings as settings
 import logging
 import logging.config
 from qsforex.data.bulksaver import BulkSaver
-from qsforex.lib.utils import granularityToTimedelta
-logging.config.fileConfig('./logging.conf')
-logger = logging.getLogger('qsforex.trading.trading')
+from qsforex.lib.utils import granularityToTimedelta, getLogger
+logger = getLogger()
 
 
 for fil in  glob.glob(settings.DATA_DIR + '/DE*.hd5'):
 	h =  os.path.basename(fil)[:-4]
 
-	print " === %s" % fil
+	print(" === %s" % fil)
 	s=pd.HDFStore(fil)
 	kk = s.keys()
 	kk = [ '/M1' ]
 	s.close()
 	for k in kk:
-		print " === %s%s" % (h,k)
-#		print " %s%s %d" % ( h,k, s.get_storer(k).nrows)
-#		print " %s%s MIN: %s" % ( h,k, s.get_storer(k))
+		print(" === %s%s" % (h,k))
+#		print(" %s%s %d" % ( h,k, s.get_storer(k).nrows))
+#		print(" %s%s MIN: %s" % ( h,k, s.get_storer(k)))
 #		x = pd.read_hdf(fil, k, where='index >= 20140714 and index <= 20140715')
-#		print " %s %s MIN: %s" % ( h, k, s[k].index.min())
-#		print " %s $s MAX: %s" % ( h, k, s[k].index.max())
+#		print(" %s %s MIN: %s" % ( h, k, s[k].index.min()))
+#		print(" %s $s MAX: %s" % ( h, k, s[k].index.max()))
 #, len(s[k].index)) 
 		td = granularityToTimedelta(k)
 		for m in pd.date_range(start='20060101', end='20170130', freq='D'):
@@ -42,9 +41,9 @@ for fil in  glob.glob(settings.DATA_DIR + '/DE*.hd5'):
 			groups = [ 0, 0, 0, 0, 0]
 			num = 0
 
-			print dat.index.min()
+			print(dat.index.min())
 			if dat.index.min() + td * len(dat.index) != dat.index.max():
-				print "%s MISSING BARS..." % k
+				print("%s MISSING BARS..." % k)
 
 			for i in dat.index:
 				was = next_bar
@@ -57,7 +56,7 @@ for fil in  glob.glob(settings.DATA_DIR + '/DE*.hd5'):
 					if num>0:
 						dt = pd.read_hdf(fil, k, where='index >= '+(start+td).strftime("%Y%m%d%H%M%S")+' and index < '+i.strftime("%Y%m%d%H%M%S"))
 						if len(dt)>0:
-							print "GOT %d vs %d" % ( len(dt), num)
+							print("GOT %d vs %d" % ( len(dt), num))
 						if num<10:
 							groups[0] += 1
 						elif num<100:
@@ -69,27 +68,27 @@ for fil in  glob.glob(settings.DATA_DIR + '/DE*.hd5'):
 						else:
 							groups[4] += 1
 
-						if not holes.has_key(num):
+						if num not in holes:
 							holes[num] = 0
 						holes[num] += 1
 					num = 0
 					start = i
 					continue
 
-				print "hu..."
-				print next_bar
-				print i
-				os.exit(0)
+				print("hu...")
+				print(next_bar)
+				print(i)
+				os._exit(0)
 
-			print groups
+			print(groups)
 		
 #		for ho in holes.keys():
-#			print "%s.%s HOLE %d QTY: %d" % ( h,k,ho,holes[ho] )
+#			print("%s.%s HOLE %d QTY: %d" % ( h,k,ho,holes[ho] ))
 
-		os.exit(0)
+		os._exit(0)
 
 
-#print s.M5['2010-01-04 07:00:00']
+#print(s.M5['2010-01-04 07:00:00'])
 
 #a=s.M5.loc['2010-01-03 17:53:00':'2010-01-04 08:00:00'].to_dict('spit')
 #i=0
@@ -103,6 +102,6 @@ for fil in  glob.glob(settings.DATA_DIR + '/DE*.hd5'):
 #
 #
 #v=pd.DataFrame().from_dict(x,orient='index')
-#print v.index.max()
+#print(v.index.max())
 
 

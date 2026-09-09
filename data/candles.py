@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 from decimal import Decimal, getcontext, ROUND_HALF_DOWN
 import pandas as pd
 import datetime
@@ -75,15 +73,23 @@ class ForexCandles(StreamHandler):
 	def init(self,pairs):
 		for p in pairs:
 			d=self.request(p)
+			if d is None:
+				# request() has already logged and queued a StatusEvent('ERROR')
+				self.logger.error("%s no initial candles, skipping seed" % p)
+				continue
 			msg = json.loads(d.text)
+			ask = bid = mid = None
 			for c in msg['candles']:
 				if c['complete']:
 					ask = dctFromOanda(c,'ask')
 					bid = dctFromOanda(c,'bid')
 					mid = dctFromOanda(c,'mid')
-			self.ask[p] = pd.DataFrame().from_dict( ask, orient='index')
-			self.bid[p] = pd.DataFrame().from_dict( bid, orient='index')
-			self.mid[p] = pd.DataFrame().from_dict( mid, orient='index')
+			if ask is None:
+				self.logger.error("%s no complete candle in seed response" % p)
+				continue
+			self.ask[p] = pd.DataFrame.from_dict( ask, orient='index')
+			self.bid[p] = pd.DataFrame.from_dict( bid, orient='index')
+			self.mid[p] = pd.DataFrame.from_dict( mid, orient='index')
 
 	def request(self, instrument):
 		try:
@@ -101,7 +107,7 @@ class ForexCandles(StreamHandler):
 			resp = s.send(pre, stream=False, verify=False)
 			if resp.status_code != 200:
 				s.close()
-				self.logger.error("Response error code %d" % response.status_code)
+				self.logger.error("Response error code %d" % resp.status_code)
 				sev = StatusEvent('ERROR')
 				self.queue_event(sev)
 				return None
@@ -161,7 +167,7 @@ class ForexCandles(StreamHandler):
 						
 					if response is None:
 						self.logger.debug("NADA")
-						pass
+						continue
 
 					try:
 						msg = json.loads(response.text)
@@ -169,7 +175,7 @@ class ForexCandles(StreamHandler):
 						self.logger.error( "Caught exception when converting message into json: %s" % str(e))
 						sev = StatusEvent('ERROR')
 						self.queue_event(sev)
-						pass
+						continue
 
 					self.num_blocks[pair]+=1
 					tot = 0

@@ -1,6 +1,4 @@
 
-from __future__ import print_function
-
 from decimal import Decimal, getcontext, ROUND_HALF_DOWN
 import pandas as pd
 import datetime
