@@ -49,8 +49,10 @@ class MoneyManager(ExecutionHandler):
 		self.logger.debug("CLOSED: %s PRICE: %s PL: %s COSTS: %s BALANCE: %s"
 			% ( orderID, event.price, event.pl, event.financing, event.accountBalance))
 #		self.logger.debug(event.dump())
-		found = False
 		for s in list(self.signals.keys()):
+			# reset per group: otherwise the first match closes out every
+			# group visited after it as well
+			found = False
 			for o in self.signals[s]:
 #				self.logger.debug("%s %s" % (s, o.dump()))
 				if o.has_attr('orderID') and o.orderID==orderID:

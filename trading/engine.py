@@ -31,6 +31,24 @@ class Engine(object):
 			if callable(f):
 				h.quit()
 
+	def drain(self):
+		"""
+		Dispatch whatever is still queued. Called when a producer finishes, so
+		that the closing events - a StatusEvent('DONE') in particular - are
+		not lost with the process.
+		"""
+		while True:
+			try:
+				event = self.event_queue.get_nowait()
+			except queue.Empty:
+				return
+			for h in self.handlers:
+				try:
+					h.execute_event(event)
+				except Exception as e:
+					self.logger.critical("ERROR in execute_event while draining: %s" % str(e))
+					self.logger.critical(traceback.format_exc())
+
 	def run(self):
 		try:
 			for h in self.handlers:
@@ -40,7 +58,6 @@ class Engine(object):
 					t = threading.Thread(target=h.stream_to_queue, args=[])
 					self.threads.append(t)
 					t.start()
-					self.threads.append(t)
 
 			self.logger.debug("Running main loop")
 			while True:
@@ -62,7 +79,10 @@ class Engine(object):
 
 				for t in self.threads:
 					if not t.is_alive():
-						os._exit(1)
+						self.logger.info("Stream finished, draining the queue")
+						self.drain()
+						self.quit()
+						os._exit(0)
 
 		except KeyboardInterrupt:
 			self.logger.error("GOT CTRL-C")

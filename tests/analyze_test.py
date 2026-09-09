@@ -144,29 +144,30 @@ class TestAggregation(AnalyzerCase):
 class TestConsecutiveRuns(AnalyzerCase):
 
     def test_consecutive_winners_are_counted_and_summed(self):
+        """The streak length is the number of trades in the run."""
         report = self.report([trade(1, 100.0), trade(2, 100.0),
                               trade(3, 100.0), trade(4, -50.0)])
         line = self.field(report, "WN MAX.CONS")
-        self.assertIn("MAX.CONS: 2", line)
+        self.assertIn("MAX.CONS: 3", line)
+        self.assertIn("MAX.AMOUNT: 300.00", line)
 
-    def test_the_run_counter_ignores_the_first_trade_of_the_run(self):
-        """
-        `prev` starts at 0 and the counter only increments when the previous
-        trade was already a winner, so a run of three winners is reported as
-        2 consecutive - the streak length is one less than the trade count.
-        """
-        report = self.report([trade(1, 10.0), trade(2, 10.0), trade(3, -5.0)])
+    def test_a_single_winner_is_a_run_of_one(self):
+        report = self.report([trade(1, 10.0), trade(2, -5.0)])
         self.assertIn("MAX.CONS: 1", self.field(report, "WN MAX.CONS"))
+
+    def test_two_winners_are_a_run_of_two(self):
+        report = self.report([trade(1, 10.0), trade(2, 10.0), trade(3, -5.0)])
+        self.assertIn("MAX.CONS: 2", self.field(report, "WN MAX.CONS"))
 
     def test_consecutive_losers_are_counted_separately(self):
         report = self.report([trade(1, 10.0), trade(2, -10.0),
                               trade(3, -10.0), trade(4, -10.0)])
-        self.assertIn("MAX.CONS: 2", self.field(report, "LS MAX.CONS"))
+        self.assertIn("MAX.CONS: 3", self.field(report, "LS MAX.CONS"))
 
     def test_a_winner_resets_the_losing_run(self):
         report = self.report([trade(1, -10.0), trade(2, -10.0),
                               trade(3, 10.0), trade(4, -10.0)])
-        self.assertIn("MAX.CONS: 1", self.field(report, "LS MAX.CONS"))
+        self.assertIn("MAX.CONS: 2", self.field(report, "LS MAX.CONS"))
 
 
 class TestDayFilter(AnalyzerCase):
@@ -190,31 +191,36 @@ class TestDayFilter(AnalyzerCase):
 
 class TestDegenerateInputs(AnalyzerCase):
     """
-    The averages divide by the trade counts with no guard, so a perfectly
-    one-sided day - which is exactly what a monitoring job would meet on a
-    quiet session, or on a day the safety net blocked all trading - crashes
-    the report instead of reporting it.
+    A one-sided day - all winners, all losers, or no trades at all - is exactly
+    what a monitoring job meets on a quiet session, or on a day the safety net
+    blocked trading. It has to produce a report, not a ZeroDivisionError.
     """
 
-    def test_a_day_with_no_losers_raises(self):
-        analyzer = self.build([trade(1, 100.0), trade(2, 50.0)])
-        with self.assertRaises(ZeroDivisionError):
-            analyzer.analyze("DE30_EUR")
+    def test_a_day_with_no_losers_reports(self):
+        report = self.report([trade(1, 100.0), trade(2, 50.0)])
+        self.assertIn("RESULT PL: 150.00", self.field(report, "RESULT PL"))
+        self.assertIn("NUM:   0.00", self.field(report, "LS TOT"))
+        self.assertIn("n/a (one-sided day)", self.field(report, "OPTIMAL F-AVG"))
+        self.assertIn("WIN/LOSS RATIO:   1.00", self.field(report, "WIN/LOSS"))
 
-    def test_a_day_with_no_winners_raises(self):
-        analyzer = self.build([trade(1, -100.0), trade(2, -50.0)])
-        with self.assertRaises(ZeroDivisionError):
-            analyzer.analyze("DE30_EUR")
+    def test_a_day_with_no_winners_reports(self):
+        report = self.report([trade(1, -100.0), trade(2, -50.0)])
+        self.assertIn("RESULT PL: -150.00", self.field(report, "RESULT PL"))
+        self.assertIn("WIN/LOSS RATIO:   0.00", self.field(report, "WIN/LOSS"))
+        self.assertIn("n/a (one-sided day)", self.field(report, "OPTIMAL F-MAX"))
 
-    def test_a_day_with_no_matching_trades_raises(self):
-        analyzer = self.build([trade(1, 100.0, day=datetime.date(2017, 2, 7))])
-        with self.assertRaises(ZeroDivisionError):
-            analyzer.analyze("DE30_EUR")
+    def test_a_day_with_no_matching_trades_says_so(self):
+        report = self.report([trade(1, 100.0, day=datetime.date(2017, 2, 7))])
+        self.assertIn("NO CLOSED TRADES", report)
+        self.assertIn("2017-02-06", report)
 
-    def test_an_empty_trade_list_raises(self):
-        analyzer = self.build([])
-        with self.assertRaises(ZeroDivisionError):
-            analyzer.analyze("DE30_EUR")
+    def test_an_empty_trade_list_says_so(self):
+        self.assertIn("NO CLOSED TRADES", self.report([]))
+
+    def test_no_report_lines_are_emitted_for_an_empty_day(self):
+        report = self.report([])
+        self.assertNotIn("OPTIMAL F", report)
+        self.assertNotIn("RESULT PL", report)
 
     def test_a_break_even_trade_is_counted_in_neither_column(self):
         """pl > 0 and pl < 0 both miss zero, so a scratch trade only shows

@@ -234,13 +234,11 @@ class TestTradeClose(MoneyManagerCase):
         self.mm.execute_event(self.signal(number="S2"))
         self.assertEqual(self.sink.kinds(), ['ORDER'])
 
-    def test_a_close_discards_every_other_signal_group_as_well(self):
+    def test_a_close_leaves_other_signal_groups_alone(self):
         """
-        closeTrade initialises `found` outside the loop over signal groups and
-        never resets it, so once one group matches, every group visited after
-        it is also moved to processed and deleted - even though none of their
-        orders were touched. With one trade at a time this rarely bites, but a
-        stale group left over from an earlier signal disappears silently.
+        Only the group holding the closed order is retired. `found` used to be
+        initialised outside the loop and never reset, so every group visited
+        after the match disappeared too.
         """
         self.mm.execute_event(self.signal(units=1, price=11710.0, number="S1"))
         self.mm.execute_event(self.acknowledge(11, price=11710.0, number="S1"))
@@ -249,8 +247,8 @@ class TestTradeClose(MoneyManagerCase):
         self.mm.execute_event(self.fill(
             11, tradesClosed=[{"tradeID": "11"}], pl="1", financing="0",
             accountBalance="1"))
-        self.assertEqual(self.mm.signals, {})
-        self.assertEqual(len(self.mm.processed), 2)
+        self.assertEqual(list(self.mm.signals), ["S2"])
+        self.assertEqual(len(self.mm.processed), 1)
 
 
 class TestEventRouting(MoneyManagerCase):

@@ -192,6 +192,8 @@ class TestEngine(unittest.TestCase):
 # be exercised out of process.
 # The Engine main loop is an infinite loop that ends in os._exit, so it can
 # only be exercised out of process.
+# The Engine main loop is an infinite loop that ends in os._exit, so it can
+# only be exercised out of process.
 ENGINE_SCRIPT = textwrap.dedent('''
     import logging, sys, threading
     logging.disable(logging.CRITICAL)
@@ -199,10 +201,8 @@ ENGINE_SCRIPT = textwrap.dedent('''
     from parity_deriva.trading.engine import Engine
     from parity_deriva.event.event import StatusEvent, TickEvent
 
-    OUT, COUNT = sys.argv[1], int(sys.argv[2])
+    OUT, COUNT, MODE = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 
-    # the sink sets this once it has dispatched everything the feeder queued,
-    # which lets the feeder return at a known point instead of racing
     all_dispatched = threading.Event()
 
     class Feed(StreamHandler):
@@ -212,7 +212,10 @@ ENGINE_SCRIPT = textwrap.dedent('''
             for i in range(COUNT):
                 self.queue_event(TickEvent({"instrument": "X", "units": i}))
             self.queue_event(StatusEvent("DONE"))
-            all_dispatched.wait(20)
+            if MODE == "wait":
+                all_dispatched.wait(20)
+            # MODE == "nowait": return at once, leaving the queue full, so the
+            # shutdown drain is what has to deliver the events
 
     class Sink(ExecutionHandler):
         seen = 0
@@ -225,6 +228,9 @@ ENGINE_SCRIPT = textwrap.dedent('''
             Sink.seen += 1
             if Sink.seen >= COUNT + 1:
                 all_dispatched.set()
+        def quit(self):
+            self.fh.write("QUIT\\n")
+            self.fh.flush()
 
     e = Engine()
     e.heartbeat = 0.02
@@ -237,7 +243,7 @@ ENGINE_SCRIPT = textwrap.dedent('''
 class TestEngineRunLoop(unittest.TestCase):
     """Out-of-process tests for Engine.run()."""
 
-    def _run(self, count, tmpname):
+    def _run(self, count, tmpname, mode="wait"):
         import tempfile
         out = os.path.join(tempfile.mkdtemp(prefix="parity_deriva-engine-"), tmpname)
         script = os.path.join(os.path.dirname(out), "drive.py")
@@ -247,7 +253,7 @@ class TestEngineRunLoop(unittest.TestCase):
         root = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))))
         env['PYTHONPATH'] = root + os.pathsep + env.get('PYTHONPATH', '')
-        proc = subprocess.run([sys.executable, script, out, str(count)],
+        proc = subprocess.run([sys.executable, script, out, str(count), mode],
                               env=env, capture_output=True, timeout=60)
         with open(out) as fh:
             seen = fh.read().split()
@@ -255,31 +261,40 @@ class TestEngineRunLoop(unittest.TestCase):
 
     def test_every_queued_event_reaches_the_handlers_in_order(self):
         code, seen = self._run(4, "dispatched.txt")
-        self.assertEqual(seen, ['TICK', 'TICK', 'TICK', 'TICK', 'STATUS'])
-        self.assertEqual(code, 1)
+        self.assertEqual(seen[:5], ['TICK', 'TICK', 'TICK', 'TICK', 'STATUS'])
+        self.assertEqual(code, 0)
 
-    def test_the_engine_dispatches_one_event_per_liveness_check(self):
-        """
-        The loop body handles exactly one event and then walks self.threads,
-        so a larger batch still arrives whole as long as the producer is alive.
-        """
+    def test_a_larger_batch_arrives_whole(self):
         code, seen = self._run(50, "batch.txt")
-        self.assertEqual(len(seen), 51)
-        self.assertEqual(code, 1)
+        self.assertEqual(len([x for x in seen if x != 'QUIT']), 51)
+        self.assertEqual(code, 0)
 
-    def test_a_finished_stream_thread_terminates_the_whole_process(self):
+    def test_a_finished_stream_thread_stops_the_process_cleanly(self):
         """
-        run() polls `for t in self.threads: if not t.is_alive(): os._exit(1)`
-        after each dispatched event, so a producer that simply returns takes
-        the process down with status 1 - there is no graceful drain and no
-        shutdown hook. Whether anything still sitting in the queue gets
-        delivered first is a genuine race between the dispatch loop and thread
-        teardown, so a supervisor must treat exit 1 as "the feed ended" rather
-        than as a crash, and must not rely on a closing DONE event arriving.
+        A producer that returns ends the run. The engine no longer aborts with
+        status 1: it drains what is still queued, gives every handler its
+        quit() hook and exits 0, so "the feed ended" is distinguishable from a
+        crash and the closing events are not lost.
         """
         code, seen = self._run(4, "shutdown.txt")
-        self.assertEqual(code, 1)
-        self.assertGreaterEqual(len(seen), 1)
+        self.assertEqual(code, 0)
+        self.assertIn('QUIT', seen)
+
+    def test_the_queue_is_drained_when_the_producer_returns_immediately(self):
+        """
+        The producer enqueues everything and returns without waiting, so the
+        events are still queued when the liveness check fires. They used to go
+        down with the process; drain() now delivers them.
+        """
+        code, seen = self._run(30, "drained.txt", mode="nowait")
+        self.assertEqual(code, 0)
+        events = [x for x in seen if x != 'QUIT']
+        self.assertEqual(len(events), 31)
+        self.assertEqual(events[-1], 'STATUS')
+
+    def test_quit_runs_after_the_drain(self):
+        code, seen = self._run(30, "quitlast.txt", mode="nowait")
+        self.assertEqual(seen[-1], 'QUIT')
 
 
 if __name__ == "__main__":

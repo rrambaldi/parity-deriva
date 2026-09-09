@@ -118,11 +118,15 @@ class Analyzer(ExecutionHandler):
 				num_p += 1
 				tot_p += pl
 				max_p = max(max_p,pl)
+				# the run starts at this trade, so a lone winner counts as 1
 				if prev > 0:
 					curr_p += 1
 					draw_p += pl
-					cons_p = max(curr_p,cons_p)
-					max_cons_p = max(max_cons_p, draw_p)
+				else:
+					curr_p = 1
+					draw_p = pl
+				cons_p = max(curr_p,cons_p)
+				max_cons_p = max(max_cons_p, draw_p)
 
 			if pl<0:
 				draw_p = 0
@@ -135,24 +139,47 @@ class Analyzer(ExecutionHandler):
 				if prev < 0:
 					curr_l += 1
 					draw_l += abs(pl)
-					cons_l = max(curr_l,cons_l)
-					max_cons_l = max(max_cons_l, draw_l)
+				else:
+					curr_l = 1
+					draw_l = abs(pl)
+				cons_l = max(curr_l,cons_l)
+				max_cons_l = max(max_cons_l, draw_l)
 
 			prev = pl
 
+		# A one-sided day - all winners, all losers, or nothing at all - is
+		# exactly the day a monitoring job needs a report for, so none of the
+		# ratios below may divide by zero.
+		if tot == 0:
+			self.logger.info("NO CLOSED TRADES for %s%s" % (
+				instrument, "" if self.day is None else " on %s" % self.day))
+			return
+
+		avg_p = tot_p / num_p if num_p else 0.0
+		avg_l = tot_l / num_l if num_l else 0.0
+		gross = tot_p + tot_l
+		p = tot_p / gross if gross else 0.0
+
 		self.logger.info("	RESULT PL: %6.2f" % (tot_p-tot_l))
-		self.logger.info("WN TOT: %6.2f  NUM: %6.2f  AVG: %6.2f  MAX: %6.2f" % (tot_p, num_p, tot_p / num_p, max_p))
-		self.logger.info("LS TOT: %6.2f  NUM: %6.2f  AVG: %6.2f  MAX: %6.2f" % (tot_l, num_l, tot_l / num_l, max_l))
+		self.logger.info("WN TOT: %6.2f  NUM: %6.2f  AVG: %6.2f  MAX: %6.2f" % (tot_p, num_p, avg_p, max_p))
+		self.logger.info("LS TOT: %6.2f  NUM: %6.2f  AVG: %6.2f  MAX: %6.2f" % (tot_l, num_l, avg_l, max_l))
 		self.logger.info("WN MAX.CONS: %d  MAX.AMOUNT: %6.2f" % ( cons_p, max_cons_p))
 		self.logger.info("LS MAX.CONS: %d  MAX.AMOUNT: %6.2f" % ( cons_l, max_cons_l))
-		self.logger.info("WIN/LOSS RATIO: %6.2f" % (tot_p/(tot_p+tot_l)))
+		self.logger.info("WIN/LOSS RATIO: %6.2f" % p)
 		self.logger.info("TOTAL COSTS: %6.2f" % costs)
-		self.logger.info("OPTIMAL F: %6.2f" % (2*(tot_p/(tot_p+tot_l))-1))
-		c = (tot_p / num_p) / (tot_l / num_l)
-		p = (tot_p/(tot_p+tot_l))
-		self.logger.info("OPTIMAL F-AVG: %6.2f" % (((c+1)*p-1)/c))
-		c = max_p / max_l
-		self.logger.info("OPTIMAL F-MAX: %6.2f" % (((c+1)*p-1)/c))
+		self.logger.info("OPTIMAL F: %6.2f" % (2*p-1))
+		# optimal f needs a win/loss ratio, so it is undefined when either side
+		# of the day is empty
+		if avg_p > 0 and avg_l > 0:
+			c = avg_p / avg_l
+			self.logger.info("OPTIMAL F-AVG: %6.2f" % (((c+1)*p-1)/c))
+		else:
+			self.logger.info("OPTIMAL F-AVG: n/a (one-sided day)")
+		if max_p > 0 and max_l > 0:
+			c = max_p / max_l
+			self.logger.info("OPTIMAL F-MAX: %6.2f" % (((c+1)*p-1)/c))
+		else:
+			self.logger.info("OPTIMAL F-MAX: n/a (one-sided day)")
 
 
 
