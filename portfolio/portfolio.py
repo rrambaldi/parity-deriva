@@ -128,7 +128,7 @@ class Portfolio(object):
             print(out_line[:-2])
             self.backtest_file.write(out_line)
 
-    def execute_signal(self, signal_event):
+    def execute_event(self, signal_event):
         # Check that the prices ticker contains all necessary
         # currency pairs prior to executing an order
         execute = True

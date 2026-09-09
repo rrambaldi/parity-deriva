@@ -27,3 +27,14 @@ pip-log.txt
 
 #Mr Developer
 .mr.developer.cfg
+
+# Data warehouse and run artefacts
+*.hd5
+*.log
+LOG*
+backtest.csv
+equity.csv
+
+# Local settings overrides
+etc/settings_local.py
+.env

@@ -1,0 +1,173 @@
+from __future__ import print_function
+
+import json
+import datetime
+import logging
+
+from qsforex.etc import settings
+from qsforex.trading.handler import ExecutionHandler
+from qsforex.event.event import ClientOrderEvent
+from qsforex.lib.oanda import OANDAOrder
+from qsforex.lib.oanda import OANDATrade
+from qsforex.event.event import Event
+
+class OANDABacktester(ExecutionHandler):
+	currenct = 'EUR'
+	trades = []
+	orders = []
+	closed_orders = []
+	closed_trades = []
+	lastTradeID = 0
+	lastOrderID = 0
+	balance = 100000
+
+	def __init__(self, **args):
+		self.logger = logging.getLogger('qsforex.trading.trading')
+		self._set(args,'setup', settings)
+		self._set(args,'currency', 'EUR')
+		self._set(args,'balance', '100000')
+
+	def dumpOrders(self):
+		for o in self.orders:
+			self.logger.info("ORDER# %d: %s" % (o.id, o.dump()))
+
+	def dumpTrades(self):
+		for t in self.trades:
+			self.logger.info("TRADE# %d: %s" % (t.id, t.dump()))
+
+	def cancelOrder(self, event):
+		i=0
+		for o in self.orders:
+			if o.price==event.price:
+				'''
+				TODO: Che succede se e' FILLED ?
+				'''
+				if o.state=='PENDING':
+					o.state='CANCELED'
+					self.closed_orders.append(o)
+					del(self.orders[i])
+					self.logger.debug("CANCELED @price %s" % o.price)
+					return
+				if o.state=='FILLED':
+					self.logger.warning("WARNING CANCEL DI FILL %s" % o.dump())
+			i+=1
+		params = ""
+		return
+
+	def createOrder(self, event):
+#		self.logger.debug("== createOrder %s" % event.dump())
+		self.logger.debug("== createOrder price %s" % event.price)
+		self.lastOrderID = self.lastOrderID + 1
+		o = OANDAOrder(self.lastOrderID, event.to_dict())
+		o.state = 'PENDING'
+		self.orders.append(o)
+#		self.dumpOrders()
+		'''
+		qui dovrei inviare il segnale con l'orderID
+		'''
+
+
+	def handleSLTP(self, o, e):
+		if o.type in ['TAKE_PROFIT_ORDER','STOP_LOSS_ORDER']:
+			gain = abs((o.price - o.orig.price) * o.units)
+			o.state = 'CLOSED'
+			o.orig.state = 'CLOSED'
+			if o.type=='TAKE_PROFIT_ORDER':
+				if o.orig.SLOrder is not None:
+					o.orig.SLOrder = 'CANCELED'
+			if o.type=='STOP_LOSS_ORDER':
+				gain = -gain	
+				if o.orig.TPOrder is not None:
+					o.orig.TPOrder = 'CANCELED'
+			self.logger.info("******** CLOSED TRADE TYPE: %s PL: %d OPEN:%6.2f CLOSED:%6.2f"
+				% (o.type, gain, o.orig.price, o.price))
+			return 
+
+		o.batchID = o.id
+		o.SLOrder = None
+		o.TPOrder = None
+		o.type = None
+		if o.stopLoss is not None or o.stopLoss>0:
+			new = Event(o.to_dict)
+			if o.units > 0:
+				new.units = - o.units
+			new.price = o.stopLoss
+			new.type = 'STOP_LOSS_ORDER'
+			new.state = 'PENDING'
+			o.SLOrder = new
+			new.orig = o
+			self.createOrder(new)
+			self.logger.debug("== ADDED STOP LOSS @%f" % new.price)
+
+		if o.takeProfit is not None or o.takeProfit>0:
+			new = Event(o.to_dict)
+			new.units = - o.units
+			new.price = o.takeProfit
+			new.type = 'TAKE_PROFIT_ORDER'
+			new.state = 'PENDING'
+			o.TPOrder = new
+			new.orig = o
+			new.orig = o
+			self.createOrder(new)
+			self.logger.debug("== ADDED TAKE PROFIT @%f" % new.price)
+
+
+	def checkOrder(self, event):
+		self.logger.debug("TIME: %s o:%6.2f h:%6.2f l:%6.2f c:%6.2f"
+			% ( event.time, event.mid['o'], event.mid['h'], event.mid['l'], event.mid['c']))
+		for o in self.orders:
+			if o.state=='PENDING':
+				if o.units>0 and o.price > event.ask['l'] and o.price < event.ask['h']:
+					o.state='FILLED'
+					self.logger.info("===== FILLED BUY ORDER# %s %f [ %f %f ]" % (o.id, o.price, event.ask['l'], event.ask['h']))
+					self.handleSLTP(o, event)
+				if o.units<0 and o.price > event.bid['l'] and o.price < event.bid['h']:
+					o.state='FILLED'
+					self.logger.info("===== FILLED SELL ORDER# %s %f [ %f %f ]" % (o.id, o.price, event.bid['l'], event.bid['h']))
+					self.handleSLTP(o, event)
+			elif o.state=='FILLED':
+				pass
+
+	def execute_event(self, event):
+		if str(event)=='ORDERCANCEL':
+			return self.cancelOrder(event)
+	
+		if str(event)=='ORDER':
+			return self.createOrder(event)
+
+		if str(event)=='CANDLE':
+			return self.checkOrder(event)
+
+		return
+		'''
+{"batchID": "1253"
+, "_type": "TRANSACTION"
+, "triggerCondition": "TRIGGER_DEFAULT"
+, "price": 11720.0
+, "stopLossOnFill": {"timeInForce": "GTC", "price": "11730.0"}
+, "userID": 0
+, "takeProfitOnFill": {"timeInForce": "GTC", "price": "11710.0"}
+, "timeInForce": "GTD"
+, "instrument": "DE30_EUR"
+, "reason": "CLIENT_ORDER"
+, "id": "1253"
+, "time": "1970-01-01T00:00:00"
+, "units": "-1"
+, "_created": "2017-01-30T11:10:27.551657"
+, "gtdTime": "2017-01-30T14:17:00.000000000Z"
+, "type": "STOP_ORDER"
+, "positionFill": "DEFAULT"
+, "accountID": "101-000-0000000-000"}
+
+ORDER:
+{"order":
+{"instrument":"DE30_EUR"
+,"type":"STOP"
+,"units":"-1"
+,"price":"11690.2"
+,"timeInForce":"GTD"
+,"gtdTime":"2017-01-31T15:55:00.000Z"
+,"stopLossOnFill":{"price":"11704.2"}
+,"takeProfitOnFill":{"price":"11680.2"}
+}}
+		'''
