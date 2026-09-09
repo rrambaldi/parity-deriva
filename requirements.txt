@@ -28,7 +28,7 @@ urllib3>=2.2                   # tested with 2.7.0
 matplotlib>=3.9                # tested with 3.11.1
 seaborn>=0.13                  # tested with 0.13.2
 
-# --- the wider research environment, not imported by qsforex itself ---
+# --- the wider research environment, not imported by parity_deriva itself ---
 ipython>=9.0                   # tested with 9.17.1
 pytz>=2025.1                   # tested with 2026.3
 scikit-learn>=1.6              # tested with 1.9.0

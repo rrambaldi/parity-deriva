@@ -9,17 +9,17 @@ import queue
 import threading
 import time
 
-from qsforex.etc import settings
-from qsforex.lib.utils import getLogger
-from qsforex.strategy.BO03 import BO03
-from qsforex.strategy.BO04 import BO04
-from qsforex.data.candles import ForexCandles
-from qsforex.data.transaction import StreamingForexTransactions
-from qsforex.execution.execution import OANDAExecutionHandler
-from qsforex.backtest.oanda import OANDABacktester
-from qsforex.portfolio.moneymanager import MoneyManager
-from qsforex.trading.engine import Engine
-from qsforex.event.saver import EventSaver
+from parity_deriva.etc import settings
+from parity_deriva.lib.utils import getLogger
+from parity_deriva.strategy.BO03 import BO03
+from parity_deriva.strategy.BO04 import BO04
+from parity_deriva.data.candles import ForexCandles
+from parity_deriva.data.transaction import StreamingForexTransactions
+from parity_deriva.execution.execution import OANDAExecutionHandler
+from parity_deriva.backtest.oanda import OANDABacktester
+from parity_deriva.portfolio.moneymanager import MoneyManager
+from parity_deriva.trading.engine import Engine
+from parity_deriva.event.saver import EventSaver
 
 today=datetime.date.today().strftime('%Y-%m-%d')
 arg_parser = argparse.ArgumentParser(description='Test on dadata')

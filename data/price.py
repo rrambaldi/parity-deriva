@@ -8,8 +8,8 @@ import time
 import numpy as np
 import pandas as pd
 
-from qsforex.etc import settings
-from qsforex.event.event import TickEvent
+from parity_deriva.etc import settings
+from parity_deriva.event.event import TickEvent
 
 
 class PriceHandler(object):
@@ -23,7 +23,7 @@ class PriceHandler(object):
 
 	This will replicate how a live strategy would function as current
 	tick data would be streamed via a brokerage. Thus a historic and live
-	system will be treated identically by the rest of the QSForex 
+	system will be treated identically by the rest of the parity-deriva 
 	backtesting suite.
 	"""
 

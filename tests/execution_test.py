@@ -1,5 +1,5 @@
 """
-Characterisation tests for qsforex.execution.execution.
+Characterisation tests for parity_deriva.execution.execution.
 
 Everything here runs against a fake HTTPSConnection: no request ever leaves
 the machine. The point is to pin the exact wire format of an OANDA v3 order,
@@ -11,10 +11,10 @@ import json
 import unittest
 from unittest import mock
 
-from qsforex.event.event import OrderEvent, OrderCancelEvent, SignalEvent
-from qsforex.execution import execution as ex
-from qsforex.execution.execution import OANDAExecutionHandler, SimulatedExecution
-from qsforex.tests.helpers import FakeHTTPSConnection, Recorder, TempDirCase
+from parity_deriva.event.event import OrderEvent, OrderCancelEvent, SignalEvent
+from parity_deriva.execution import execution as ex
+from parity_deriva.execution.execution import OANDAExecutionHandler, SimulatedExecution
+from parity_deriva.tests.helpers import FakeHTTPSConnection, Recorder, TempDirCase
 
 
 ORDER_ACCEPTED = {

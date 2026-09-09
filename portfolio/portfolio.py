@@ -5,10 +5,10 @@ import os
 
 import pandas as pd
 
-from qsforex.event.event import OrderEvent
-from qsforex.performance.performance import create_drawdowns
-from qsforex.portfolio.position import Position
-from qsforex.etc.settings import OUTPUT_RESULTS_DIR
+from parity_deriva.event.event import OrderEvent
+from parity_deriva.performance.performance import create_drawdowns
+from parity_deriva.portfolio.position import Position
+from parity_deriva.etc.settings import OUTPUT_RESULTS_DIR
 
 
 class Portfolio(object):

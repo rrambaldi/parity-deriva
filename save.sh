@@ -5,5 +5,5 @@ exec 1>/tmp/log
 exec 2>/tmp/err
 source ../bin/activate
 while [ -f $RUN ]; do
-	python /home/rrambaldi/qsforex/qsforex/s.py
+	python /home/rrambaldi/parity_deriva/parity_deriva/s.py
 done

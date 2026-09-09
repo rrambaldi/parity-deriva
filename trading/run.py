@@ -5,14 +5,14 @@ import queue
 import threading
 import time
 
-from qsforex.execution.execution import OANDAExecutionHandler
-from qsforex.portfolio.portfolio import Portfolio
-from qsforex.etc import settings
-from qsforex.lib.utils import getLogger
-from qsforex.strategy.AG01 import AG01
-from qsforex.data.candles import ForexCandles
-from qsforex.data.transaction import StreamingForexTransactions
-from qsforex.trading.engine import Engine
+from parity_deriva.execution.execution import OANDAExecutionHandler
+from parity_deriva.portfolio.portfolio import Portfolio
+from parity_deriva.etc import settings
+from parity_deriva.lib.utils import getLogger
+from parity_deriva.strategy.AG01 import AG01
+from parity_deriva.data.candles import ForexCandles
+from parity_deriva.data.transaction import StreamingForexTransactions
+from parity_deriva.trading.engine import Engine
 
 # Set up logging
 logger = getLogger()

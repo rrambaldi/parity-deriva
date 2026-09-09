@@ -1,5 +1,5 @@
 """
-Characterisation tests for qsforex.portfolio.moneymanager.
+Characterisation tests for parity_deriva.portfolio.moneymanager.
 
 MoneyManager is the bookkeeper: it turns signals into sized orders, keeps the
 signalNumber -> [orders] index, emulates OCO by cancelling the losing leg of a
@@ -11,10 +11,10 @@ the natural anchor for a real-vs-simulated comparison.
 import logging
 import unittest
 
-from qsforex.event.event import (SignalEvent, OrderEvent, ClientOrderEvent,
+from parity_deriva.event.event import (SignalEvent, OrderEvent, ClientOrderEvent,
                                  TransactionEvent, StatusEvent, CandleEvent)
-from qsforex.portfolio.moneymanager import MoneyManager
-from qsforex.tests.helpers import Recorder, TempDirCase
+from parity_deriva.portfolio.moneymanager import MoneyManager
+from parity_deriva.tests.helpers import Recorder, TempDirCase
 
 
 class MoneyManagerCase(TempDirCase):

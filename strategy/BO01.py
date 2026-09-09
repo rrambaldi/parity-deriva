@@ -1,15 +1,15 @@
 import copy
 import logging
 import datetime
-from qsforex.event.event import SignalEvent
-from qsforex.trading.handler import ExecutionHandler
+from parity_deriva.event.event import SignalEvent
+from parity_deriva.trading.handler import ExecutionHandler
 
 
 class BO01(ExecutionHandler):
 	"""
 	"""
 	def __init__(self, **args):
-		self.logger = logging.getLogger('qsforex.trading.trading')
+		self.logger = logging.getLogger('parity_deriva.trading.trading')
 
 		self.stats_after = 500
 		self.prev = {}

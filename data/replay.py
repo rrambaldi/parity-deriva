@@ -5,13 +5,13 @@ import logging
 import json
 import time
 import os
-from qsforex.etc import settings
+from parity_deriva.etc import settings
 
 import requests
 
-from qsforex.event.event import CandleEvent
-from qsforex.event.event import StatusEvent
-from qsforex.trading.handler import StreamHandler
+from parity_deriva.event.event import CandleEvent
+from parity_deriva.event.event import StatusEvent
+from parity_deriva.trading.handler import StreamHandler
 
 
 class ForexCandles(StreamHandler):
@@ -22,7 +22,7 @@ class ForexCandles(StreamHandler):
 
 	def __init__( self, **args):
 
-		self.logger = logging.getLogger('qsforex.trading.trading')
+		self.logger = logging.getLogger('parity_deriva.trading.trading')
 		self._set(args,'setup', settings)
 
 		self._set(args,'pairs','DE30_EUR')

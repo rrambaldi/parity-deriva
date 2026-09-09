@@ -1,6 +1,6 @@
 """
 Characterisation tests for the tick-CSV backtest path inherited from upstream
-QSForex: HistoricCSVPriceHandler, the example strategies, Portfolio/Position
+parity-deriva: HistoricCSVPriceHandler, the example strategies, Portfolio/Position
 accounting, the drawdown maths and the Backtest driver.
 
 This path is separate from the live event bus: it predates the dictionary-based
@@ -17,16 +17,16 @@ from decimal import Decimal
 import numpy as np
 import pandas as pd
 
-from qsforex.backtest.backtest import Backtest
-from qsforex.data.price import PriceHandler, HistoricCSVPriceHandler
-from qsforex.event.event import TickEvent, SignalEvent
-from qsforex.execution.execution import SimulatedExecution
-from qsforex.performance.performance import create_drawdowns
-from qsforex.portfolio.portfolio import Portfolio
-from qsforex.portfolio.position import Position
-from qsforex.strategy.strategy import (TestStrategy, MovingAverageCrossStrategy,
+from parity_deriva.backtest.backtest import Backtest
+from parity_deriva.data.price import PriceHandler, HistoricCSVPriceHandler
+from parity_deriva.event.event import TickEvent, SignalEvent
+from parity_deriva.execution.execution import SimulatedExecution
+from parity_deriva.performance.performance import create_drawdowns
+from parity_deriva.portfolio.portfolio import Portfolio
+from parity_deriva.portfolio.position import Position
+from parity_deriva.strategy.strategy import (TestStrategy, MovingAverageCrossStrategy,
                                        _signal)
-from qsforex.tests.helpers import TempDirCase
+from parity_deriva.tests.helpers import TempDirCase
 
 
 TICKS = """Time,Ask,Bid,AskVolume,BidVolume
@@ -96,7 +96,7 @@ class CSVCase(TempDirCase):
             fh.write(body)
 
     def handler(self, pairs=("GBPUSD",)):
-        import qsforex.data.price as price_mod
+        import parity_deriva.data.price as price_mod
         self.patched = price_mod
         old = price_mod.settings.CSV_DATA_DIR
         price_mod.settings.CSV_DATA_DIR = self.tmpdir
@@ -300,7 +300,7 @@ class PortfolioCase(TempDirCase):
 
     def setUp(self):
         super(PortfolioCase, self).setUp()
-        import qsforex.portfolio.portfolio as pf
+        import parity_deriva.portfolio.portfolio as pf
         self.pf = pf
         self.old_dir = pf.OUTPUT_RESULTS_DIR
         pf.OUTPUT_RESULTS_DIR = self.tmpdir
@@ -508,15 +508,15 @@ class TestBacktestDriver(CSVCase):
 
     def test_it_wires_the_components_and_runs_to_completion(self):
         self.write("GBPUSD_20140102.csv", TICKS)
-        import qsforex.backtest.backtest as bt
-        import qsforex.portfolio.portfolio as pf
+        import parity_deriva.backtest.backtest as bt
+        import parity_deriva.portfolio.portfolio as pf
         old_csv, old_out = bt.settings.CSV_DATA_DIR, pf.OUTPUT_RESULTS_DIR
         bt.settings.CSV_DATA_DIR = self.tmpdir
         pf.OUTPUT_RESULTS_DIR = self.tmpdir
         self.addCleanup(setattr, bt.settings, 'CSV_DATA_DIR', old_csv)
         self.addCleanup(setattr, pf, 'OUTPUT_RESULTS_DIR', old_out)
 
-        import qsforex.data.price as price_mod
+        import parity_deriva.data.price as price_mod
         old_price = price_mod.settings.CSV_DATA_DIR
         price_mod.settings.CSV_DATA_DIR = self.tmpdir
         self.addCleanup(setattr, price_mod.settings, 'CSV_DATA_DIR', old_price)
@@ -533,16 +533,16 @@ class TestBacktestDriver(CSVCase):
 
     def test_the_driver_owns_its_own_queue(self):
         self.write("GBPUSD_20140102.csv", TICKS)
-        import qsforex.data.price as price_mod
+        import parity_deriva.data.price as price_mod
         old = price_mod.settings.CSV_DATA_DIR
         price_mod.settings.CSV_DATA_DIR = self.tmpdir
         self.addCleanup(setattr, price_mod.settings, 'CSV_DATA_DIR', old)
-        import qsforex.backtest.backtest as bt
+        import parity_deriva.backtest.backtest as bt
         old_csv = bt.settings.CSV_DATA_DIR
         bt.settings.CSV_DATA_DIR = self.tmpdir
         self.addCleanup(setattr, bt.settings, 'CSV_DATA_DIR', old_csv)
 
-        import qsforex.portfolio.portfolio as pf
+        import parity_deriva.portfolio.portfolio as pf
         old_out = pf.OUTPUT_RESULTS_DIR
         pf.OUTPUT_RESULTS_DIR = self.tmpdir
         self.addCleanup(setattr, pf, 'OUTPUT_RESULTS_DIR', old_out)

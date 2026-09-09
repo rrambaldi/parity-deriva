@@ -2,7 +2,7 @@
 import datetime
 import json
 import pandas as pd
-from qsforex.lib.candle import Candle
+from parity_deriva.lib.candle import Candle
 
 
 def parse_time(v):

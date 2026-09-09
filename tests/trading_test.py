@@ -1,5 +1,5 @@
 """
-Characterisation tests for qsforex.trading (handler contract + Engine).
+Characterisation tests for parity_deriva.trading (handler contract + Engine).
 
 The Engine is where a live execution handler and the local simulator run side
 by side on the same event stream, so its dispatch order, its shared state and
@@ -14,16 +14,16 @@ import textwrap
 import unittest
 from unittest import mock
 
-from qsforex.trading.engine import Engine
-from qsforex.trading.handler import MetaHandler, ExecutionHandler, StreamHandler
-from qsforex.tests.helpers import Recorder
+from parity_deriva.trading.engine import Engine
+from parity_deriva.trading.handler import MetaHandler, ExecutionHandler, StreamHandler
+from parity_deriva.tests.helpers import Recorder
 
 
 class _Args(ExecutionHandler):
     """Bare handler used to exercise _set()."""
 
     def __init__(self, args):
-        self.logger = logging.getLogger('qsforex.trading.trading')
+        self.logger = logging.getLogger('parity_deriva.trading.trading')
         self.taken = {}
 
     def execute_event(self, event):
@@ -195,9 +195,9 @@ class TestEngine(unittest.TestCase):
 ENGINE_SCRIPT = textwrap.dedent('''
     import logging, sys, threading
     logging.disable(logging.CRITICAL)
-    from qsforex.trading.handler import StreamHandler, ExecutionHandler
-    from qsforex.trading.engine import Engine
-    from qsforex.event.event import StatusEvent, TickEvent
+    from parity_deriva.trading.handler import StreamHandler, ExecutionHandler
+    from parity_deriva.trading.engine import Engine
+    from parity_deriva.event.event import StatusEvent, TickEvent
 
     OUT, COUNT = sys.argv[1], int(sys.argv[2])
 
@@ -207,7 +207,7 @@ ENGINE_SCRIPT = textwrap.dedent('''
 
     class Feed(StreamHandler):
         def __init__(self):
-            self.logger = logging.getLogger('qsforex.trading.trading')
+            self.logger = logging.getLogger('parity_deriva.trading.trading')
         def stream_to_queue(self):
             for i in range(COUNT):
                 self.queue_event(TickEvent({"instrument": "X", "units": i}))
@@ -217,7 +217,7 @@ ENGINE_SCRIPT = textwrap.dedent('''
     class Sink(ExecutionHandler):
         seen = 0
         def __init__(self):
-            self.logger = logging.getLogger('qsforex.trading.trading')
+            self.logger = logging.getLogger('parity_deriva.trading.trading')
             self.fh = open(OUT, "w")
         def execute_event(self, event):
             self.fh.write("%s\\n" % str(event))
@@ -239,7 +239,7 @@ class TestEngineRunLoop(unittest.TestCase):
 
     def _run(self, count, tmpname):
         import tempfile
-        out = os.path.join(tempfile.mkdtemp(prefix="qsforex-engine-"), tmpname)
+        out = os.path.join(tempfile.mkdtemp(prefix="parity_deriva-engine-"), tmpname)
         script = os.path.join(os.path.dirname(out), "drive.py")
         with open(script, "w") as fh:
             fh.write(ENGINE_SCRIPT)

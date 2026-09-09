@@ -1,5 +1,5 @@
 """
-Shared fixtures for the qsforex characterisation suite.
+Shared fixtures for the parity_deriva characterisation suite.
 
 The suite is deliberately a *characterisation* suite: it pins down what the
 code does today, quirks included, so the behaviour of the simulated side can
@@ -19,11 +19,11 @@ import unittest
 from unittest import mock
 
 
-# Most components fetch 'qsforex.trading.trading' by name; a few use
+# Most components fetch 'parity_deriva.trading.trading' by name; a few use
 # __name__. Silence the whole tree so the suite output stays readable.
 # assertLogs() raises the level on the specific logger it watches, so the
 # tests that assert on log output still work.
-for _name in ('qsforex', 'qsforex.trading.trading'):
+for _name in ('parity_deriva', 'parity_deriva.trading.trading'):
     _log = logging.getLogger(_name)
     _log.addHandler(logging.NullHandler())
     _log.setLevel(logging.CRITICAL)
@@ -68,7 +68,7 @@ def candle_series(directions, start=T0, step=datetime.timedelta(minutes=1),
     Build a list of CandleEvent from a sequence of booleans (True = bullish),
     already tagged with instrument/granularity the way a data source does.
     """
-    from qsforex.event.event import CandleEvent
+    from parity_deriva.event.event import CandleEvent
     out = []
     for i, up in enumerate(directions):
         maker = bull_candle if up else bear_candle
@@ -214,9 +214,9 @@ class TempDirCase(unittest.TestCase):
     """Base case giving each test its own DATA_DIR / LOG_DIR."""
 
     def setUp(self):
-        self.tmpdir = tempfile.mkdtemp(prefix="qsforex-test-")
+        self.tmpdir = tempfile.mkdtemp(prefix="parity_deriva-test-")
         self.addCleanup(shutil.rmtree, self.tmpdir, True)
-        from qsforex.etc import settings
+        from parity_deriva.etc import settings
         self.settings = mock.MagicMock()
         self.settings.DATA_DIR = self.tmpdir
         self.settings.LOG_DIR = self.tmpdir

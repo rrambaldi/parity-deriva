@@ -7,7 +7,7 @@ import sys
 import numpy as np
 import pandas as pd
 
-from qsforex.etc import settings
+from parity_deriva.etc import settings
 
 
 def month_weekdays(year_int, month_int):

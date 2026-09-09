@@ -1,5 +1,5 @@
 """
-Characterisation tests for qsforex.backtest.oanda.OANDABacktester.
+Characterisation tests for parity_deriva.backtest.oanda.OANDABacktester.
 
 This is the local broker simulator. In scripts/t01.py and t02.py it is
 registered on the Engine alongside the real OANDAExecutionHandler, so the
@@ -12,10 +12,10 @@ import datetime
 import logging
 import unittest
 
-from qsforex.backtest.oanda import OANDABacktester
-from qsforex.event.event import (CandleEvent, OrderEvent, OrderCancelEvent,
+from parity_deriva.backtest.oanda import OANDABacktester
+from parity_deriva.event.event import (CandleEvent, OrderEvent, OrderCancelEvent,
                                  SignalEvent, StatusEvent)
-from qsforex.tests.helpers import T0, candle_dict, Recorder, TempDirCase
+from parity_deriva.tests.helpers import T0, candle_dict, Recorder, TempDirCase
 
 
 class BacktesterCase(TempDirCase):

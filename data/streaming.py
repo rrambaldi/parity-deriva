@@ -4,12 +4,12 @@ import json
 
 import requests
 
-from qsforex.etc import settings
-from qsforex.event.event import TickEvent
-from qsforex.data.price import PriceHandler
-from qsforex.lib.candle import Candle
-from qsforex.event.event import TransactionEvent
-from qsforex.trading.handler import StreamHandler
+from parity_deriva.etc import settings
+from parity_deriva.event.event import TickEvent
+from parity_deriva.data.price import PriceHandler
+from parity_deriva.lib.candle import Candle
+from parity_deriva.event.event import TransactionEvent
+from parity_deriva.trading.handler import StreamHandler
 
 
 class StreamingForexPrices(StreamHandler, PriceHandler):

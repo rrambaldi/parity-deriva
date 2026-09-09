@@ -1,7 +1,7 @@
 import queue
 import time
 
-from qsforex.etc import settings
+from parity_deriva.etc import settings
 
 
 class Backtest(object):

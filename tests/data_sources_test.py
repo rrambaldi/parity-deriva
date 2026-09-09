@@ -14,11 +14,11 @@ import unittest
 from decimal import Decimal
 from unittest import mock
 
-from qsforex.data import candles as candles_mod
-from qsforex.data import resample as resample_mod
-from qsforex.data import streaming as streaming_mod
-from qsforex.data import transaction as transaction_mod
-from qsforex.tests.helpers import (T0, FakeRequests, FakeResponse, Recorder,
+from parity_deriva.data import candles as candles_mod
+from parity_deriva.data import resample as resample_mod
+from parity_deriva.data import streaming as streaming_mod
+from parity_deriva.data import transaction as transaction_mod
+from parity_deriva.tests.helpers import (T0, FakeRequests, FakeResponse, Recorder,
                                    TempDirCase, candles_response, candle_dict)
 
 

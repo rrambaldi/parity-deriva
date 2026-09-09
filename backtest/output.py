@@ -13,7 +13,7 @@ except ImportError:
     plt.switch_backend('Agg')
 import seaborn as sns
 
-from qsforex.etc.settings import OUTPUT_RESULTS_DIR
+from parity_deriva.etc.settings import OUTPUT_RESULTS_DIR
 
 
 if __name__ == "__main__":

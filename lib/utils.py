@@ -4,7 +4,7 @@ import logging.config
 import os
 import pandas as pd
 import datetime
-from qsforex.etc.settings import *
+from parity_deriva.etc.settings import *
 
 def datetimeToString(t):
 	return t.strftime('%Y-%m-%dT%H:%M:%S.%f') + "000Z"
@@ -55,14 +55,14 @@ def dctFromOanda(dct,typ='mid', onlyohlc=False):
 	return ret
 
 
-def getLogger(config=None,confstr='qsforex.trading.trading'):
+def getLogger(config=None,confstr='parity_deriva.trading.trading'):
 	if config is None or not os.path.exists(config):
 		if os.path.exists(DEF_CONFIG):
 			config = DEF_CONFIG
-		elif 'QSFOREX_HOME' in os.environ:
-			config = os.path.join(os.environ['QSFOREX_HOME'],'etc',DEF_CONFIG)
+		elif 'PARITY_DERIVA_HOME' in os.environ:
+			config = os.path.join(os.environ['PARITY_DERIVA_HOME'],'etc',DEF_CONFIG)
 		elif 'VIRTUAL_ENV' in os.environ:
-			config = os.path.join(os.environ['VIRTUAL_ENV'],'qsforex','etc',DEF_CONFIG)
+			config = os.path.join(os.environ['VIRTUAL_ENV'],'parity_deriva','etc',DEF_CONFIG)
 		else:
 			print("Missing logger config")
 			os._exit(-1)

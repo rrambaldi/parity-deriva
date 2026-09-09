@@ -16,7 +16,7 @@ class Engine(object):
 	
 	def __init__(self):
 		self.event_queue = queue.Queue()
-		self.logger = logging.getLogger('qsforex.trading.trading')
+		self.logger = logging.getLogger('parity_deriva.trading.trading')
 
 	def put(self, event):
 		self.event_queue.put(event)

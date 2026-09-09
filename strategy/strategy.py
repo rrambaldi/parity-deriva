@@ -1,6 +1,6 @@
 import copy
 
-from qsforex.event.event import SignalEvent
+from parity_deriva.event.event import SignalEvent
 
 
 def _signal(instrument, order_type, side, time):

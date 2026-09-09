@@ -1,9 +1,9 @@
 import copy
 import logging
 import datetime
-from qsforex.event.event import SignalEvent
-from qsforex.trading.handler import ExecutionHandler
-from qsforex.strategy.BO import BO
+from parity_deriva.event.event import SignalEvent
+from parity_deriva.trading.handler import ExecutionHandler
+from parity_deriva.strategy.BO import BO
 
 class BO05(BO):
 	"""

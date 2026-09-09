@@ -8,13 +8,13 @@ import datetime
 import time
 import argparse
 
-from qsforex.execution.execution import OANDAExecutionHandler
-#from qsforex.portfolio.portfolio import Portfolio
-from qsforex.etc import settings
-from qsforex.data.bulksaver import BulkSaver
-from qsforex.trading.engine import Engine
+from parity_deriva.execution.execution import OANDAExecutionHandler
+#from parity_deriva.portfolio.portfolio import Portfolio
+from parity_deriva.etc import settings
+from parity_deriva.data.bulksaver import BulkSaver
+from parity_deriva.trading.engine import Engine
 
-from qsforex.lib.utils import getLogger
+from parity_deriva.lib.utils import getLogger
 
 # Set up logging
 logger = getLogger()

@@ -5,16 +5,16 @@ import json
 import time
 import os
 import sys
-from qsforex.etc import settings
+from parity_deriva.etc import settings
 
-from qsforex.event.event import StatusEvent
-from qsforex.trading.handler import ExecutionHandler
+from parity_deriva.event.event import StatusEvent
+from parity_deriva.trading.handler import ExecutionHandler
 
 
 class EventSaver(ExecutionHandler):
 
 	def __init__( self, **args):
-		self.logger = logging.getLogger('qsforex.trading.trading')
+		self.logger = logging.getLogger('parity_deriva.trading.trading')
 		self.started = datetime.date.today()
 		today=self.started.strftime("%Y%m%d")
 

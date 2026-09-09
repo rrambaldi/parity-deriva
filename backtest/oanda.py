@@ -2,12 +2,12 @@ import json
 import datetime
 import logging
 
-from qsforex.etc import settings
-from qsforex.trading.handler import ExecutionHandler
-from qsforex.event.event import ClientOrderEvent
-from qsforex.lib.oanda import OANDAOrder
-from qsforex.lib.oanda import OANDATrade
-from qsforex.event.event import Event
+from parity_deriva.etc import settings
+from parity_deriva.trading.handler import ExecutionHandler
+from parity_deriva.event.event import ClientOrderEvent
+from parity_deriva.lib.oanda import OANDAOrder
+from parity_deriva.lib.oanda import OANDATrade
+from parity_deriva.event.event import Event
 
 class OANDABacktester(ExecutionHandler):
 	currenct = 'EUR'
@@ -20,7 +20,7 @@ class OANDABacktester(ExecutionHandler):
 	balance = 100000
 
 	def __init__(self, **args):
-		self.logger = logging.getLogger('qsforex.trading.trading')
+		self.logger = logging.getLogger('parity_deriva.trading.trading')
 		self._set(args,'setup', settings)
 		self._set(args,'currency', 'EUR')
 		self._set(args,'balance', '100000')

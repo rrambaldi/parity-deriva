@@ -11,10 +11,10 @@ pair into an OCO.
 import datetime
 import unittest
 
-from qsforex.event.event import CandleEvent, StatusEvent, TickEvent
-from qsforex.strategy.AG01 import AG01
-from qsforex.strategy.AG02 import AG02
-from qsforex.tests.helpers import (T0, bull_candle, bear_candle, Recorder,
+from parity_deriva.event.event import CandleEvent, StatusEvent, TickEvent
+from parity_deriva.strategy.AG01 import AG01
+from parity_deriva.strategy.AG02 import AG02
+from parity_deriva.tests.helpers import (T0, bull_candle, bear_candle, Recorder,
                                    candle_dict)
 
 

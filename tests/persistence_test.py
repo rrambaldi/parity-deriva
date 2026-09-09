@@ -16,14 +16,14 @@ from unittest import mock
 
 import pandas as pd
 
-from qsforex.data import bulksaver as bulk_mod
-from qsforex.data.bulksaver import BulkSaver
-from qsforex.data.datasaver import CandleSaver
-from qsforex.data import replay as replay_mod
-from qsforex.event.event import CandleEvent, StatusEvent, TickEvent, Event
-from qsforex.event.replay import EventReplay
-from qsforex.event.saver import EventSaver
-from qsforex.tests.helpers import (T0, FakeRequests, FakeResponse, Recorder,
+from parity_deriva.data import bulksaver as bulk_mod
+from parity_deriva.data.bulksaver import BulkSaver
+from parity_deriva.data.datasaver import CandleSaver
+from parity_deriva.data import replay as replay_mod
+from parity_deriva.event.event import CandleEvent, StatusEvent, TickEvent, Event
+from parity_deriva.event.replay import EventReplay
+from parity_deriva.event.saver import EventSaver
+from parity_deriva.tests.helpers import (T0, FakeRequests, FakeResponse, Recorder,
                                    TempDirCase, candle_dict, candles_response)
 
 

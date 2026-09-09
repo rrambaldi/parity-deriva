@@ -12,14 +12,14 @@ import datetime
 import logging
 import unittest
 
-from qsforex.event.event import CandleEvent, StatusEvent
-from qsforex.strategy.BO import BO
-from qsforex.strategy.BO01 import BO01
-from qsforex.strategy.BO02 import BO02
-from qsforex.strategy.BO03 import BO03
-from qsforex.strategy.BO04 import BO04
-from qsforex.strategy.BO05 import BO05, BO06
-from qsforex.tests.helpers import T0, bull_candle, bear_candle, Recorder
+from parity_deriva.event.event import CandleEvent, StatusEvent
+from parity_deriva.strategy.BO import BO
+from parity_deriva.strategy.BO01 import BO01
+from parity_deriva.strategy.BO02 import BO02
+from parity_deriva.strategy.BO03 import BO03
+from parity_deriva.strategy.BO04 import BO04
+from parity_deriva.strategy.BO05 import BO05, BO06
+from parity_deriva.tests.helpers import T0, bull_candle, bear_candle, Recorder
 
 
 ALL_DAY = ("00:00:00", "23:00:00")
@@ -110,7 +110,7 @@ class TestCommonSetUp(unittest.TestCase):
         """
         s = make(BO)
         with self.assertRaises(AssertionError):
-            with self.assertLogs('qsforex.trading.trading', level='INFO'):
+            with self.assertLogs('parity_deriva.trading.trading', level='INFO'):
                 s.execute_event(StatusEvent('DONE'))
 
 
@@ -268,7 +268,7 @@ class TestBOBaseClass(unittest.TestCase):
         """
         s = make(BO, depth=3)
         with self.assertRaises(AssertionError):
-            with self.assertLogs('qsforex.trading.trading', level='DEBUG'):
+            with self.assertLogs('parity_deriva.trading.trading', level='DEBUG'):
                 feed(s, [True, False, False, True])
 
 
@@ -276,20 +276,20 @@ class TestPrintStats(unittest.TestCase):
 
     def test_it_survives_an_empty_run(self):
         s = make(BO01)
-        with self.assertLogs('qsforex.trading.trading', level='DEBUG') as log:
+        with self.assertLogs('parity_deriva.trading.trading', level='DEBUG') as log:
             s.printStats()
         self.assertTrue(any("ALL TOT 0" in line for line in log.output))
 
     def test_the_base_class_report_takes_a_level(self):
         s = make(BO05)
-        with self.assertLogs('qsforex.trading.trading', level='INFO') as log:
+        with self.assertLogs('parity_deriva.trading.trading', level='INFO') as log:
             s.printStats(logging.INFO)
         self.assertTrue(any("BO05 DE30_EUR ALL TOT" in line for line in log.output))
 
     def test_percentages_are_computed_over_the_total(self):
         s = make(BO01, depth=5)
         feed(s, [True, False, False, False, True, True])
-        with self.assertLogs('qsforex.trading.trading', level='DEBUG') as log:
+        with self.assertLogs('parity_deriva.trading.trading', level='DEBUG') as log:
             s.printStats()
         self.assertTrue(any("ALL 1 NUM: 1 PERC: 100.00" in l for l in log.output))
 
@@ -297,7 +297,7 @@ class TestPrintStats(unittest.TestCase):
         """`if toth[h] > 9` - thinner hours are reported as 0.00, not omitted."""
         s = make(BO01, depth=5)
         feed(s, [True, False, False, False, True, True])
-        with self.assertLogs('qsforex.trading.trading', level='DEBUG') as log:
+        with self.assertLogs('parity_deriva.trading.trading', level='DEBUG') as log:
             s.printStats()
         line = [l for l in log.output if "HOUR 10-1" in l][0]
         self.assertIn("NUM: 1", line)
@@ -313,7 +313,7 @@ class TestPrintStats(unittest.TestCase):
         """
         s = make(BO01, depth=5)
         feed(s, [True, False, False, False, True, True])
-        with self.assertLogs('qsforex.trading.trading', level='DEBUG') as log:
+        with self.assertLogs('parity_deriva.trading.trading', level='DEBUG') as log:
             s.printStats()
         day_lines = [l for l in log.output if " DAY " in l]
         # 6 weekdays x depth buckets, emitted once for each day that has data
@@ -325,10 +325,10 @@ class TestPrintStats(unittest.TestCase):
     def test_the_periodic_report_fires_every_stats_after_matches(self):
         s = make(BO01, depth=5)
         s.stats_after = 2
-        with self.assertLogs('qsforex.trading.trading', level='DEBUG') as log:
+        with self.assertLogs('parity_deriva.trading.trading', level='DEBUG') as log:
             feed(s, [True, False, False, False, True, True])
         self.assertFalse(any("ALL TOT" in l for l in log.output))
-        with self.assertLogs('qsforex.trading.trading', level='DEBUG') as log:
+        with self.assertLogs('parity_deriva.trading.trading', level='DEBUG') as log:
             feed(s, [True], start=T0 + datetime.timedelta(minutes=6))
         self.assertTrue(any("ALL TOT" in l for l in log.output))
 

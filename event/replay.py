@@ -5,17 +5,17 @@ import json
 import time
 import os
 import sys
-from qsforex.etc import settings
+from parity_deriva.etc import settings
 
-from qsforex.event.event import StatusEvent
-from qsforex.event.event import Event
-from qsforex.trading.handler import StreamHandler
+from parity_deriva.event.event import StatusEvent
+from parity_deriva.event.event import Event
+from parity_deriva.trading.handler import StreamHandler
 
 
 class EventReplay(StreamHandler):
 
 	def __init__( self, **args):
-		self.logger = logging.getLogger('qsforex.trading.trading')
+		self.logger = logging.getLogger('parity_deriva.trading.trading')
 
 		self._set(args, 'setup', settings)
 		self._set(args, 'logname', 'EventSaver-20170131.log')

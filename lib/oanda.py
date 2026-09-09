@@ -4,7 +4,7 @@ import logging
 class OANDAObject(object):
 
 	def __init__(self, id, dct):
-		self.logger = logging.getLogger('qsforex.trading.trading')
+		self.logger = logging.getLogger('parity_deriva.trading.trading')
 		self.add(dct)
 		self.id = id
 

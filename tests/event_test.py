@@ -1,5 +1,5 @@
 """
-Characterisation tests for qsforex.event.event.
+Characterisation tests for parity_deriva.event.event.
 
 This module is the data contract shared by the live and the simulated side,
 so its coercion rules matter more than anywhere else: if a field silently
@@ -13,11 +13,11 @@ import unittest
 
 import pandas as pd
 
-from qsforex.event.event import (Event, CandleEvent, TickEvent, SignalEvent,
+from parity_deriva.event.event import (Event, CandleEvent, TickEvent, SignalEvent,
                                  OrderEvent, OrderCancelEvent, OrderFillEvent,
                                  ClientOrderEvent, StatusEvent,
                                  TransactionEvent, parse_time)
-from qsforex.tests.helpers import T0, candle_dict, oanda_time
+from parity_deriva.tests.helpers import T0, candle_dict, oanda_time
 
 
 class TestParseTime(unittest.TestCase):

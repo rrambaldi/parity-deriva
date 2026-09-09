@@ -1,5 +1,5 @@
 """
-Characterisation tests for qsforex.performance.analyze.
+Characterisation tests for parity_deriva.performance.analyze.
 
 Analyzer pulls closed trades from the account and reports win/loss statistics
 plus three flavours of optimal f. It is the natural place to hang a
@@ -12,9 +12,9 @@ import logging
 import unittest
 from unittest import mock
 
-from qsforex.performance import analyze as analyze_mod
-from qsforex.performance.analyze import Analyzer
-from qsforex.tests.helpers import (FakeRequests, FakeResponse, Recorder,
+from parity_deriva.performance import analyze as analyze_mod
+from parity_deriva.performance.analyze import Analyzer
+from parity_deriva.tests.helpers import (FakeRequests, FakeResponse, Recorder,
                                    TempDirCase, oanda_time)
 
 
@@ -44,7 +44,7 @@ class AnalyzerCase(TempDirCase):
 
     def report(self, trades, **kw):
         analyzer = self.build(trades, **kw)
-        with self.assertLogs('qsforex.trading.trading', level='INFO') as log:
+        with self.assertLogs('parity_deriva.trading.trading', level='INFO') as log:
             analyzer.analyze("DE30_EUR")
         return "\n".join(log.output)
 
@@ -220,7 +220,7 @@ class TestDegenerateInputs(AnalyzerCase):
         """pl > 0 and pl < 0 both miss zero, so a scratch trade only shows
         up in the trade count and in the financing total."""
         analyzer = self.build([trade(1, 100.0), trade(2, -50.0), trade(3, 0.0)])
-        with self.assertLogs('qsforex.trading.trading', level='INFO') as log:
+        with self.assertLogs('parity_deriva.trading.trading', level='INFO') as log:
             analyzer.analyze("DE30_EUR")
         report = "\n".join(log.output)
         self.assertIn("NUM:   1.00", self.field(report, "WN TOT"))

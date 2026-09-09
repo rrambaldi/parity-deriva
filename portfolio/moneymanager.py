@@ -1,9 +1,9 @@
 
 import datetime
-from qsforex.etc import settings
-from qsforex.event.event import OrderEvent
-from qsforex.event.event import OrderCancelEvent
-from qsforex.trading.handler import ExecutionHandler
+from parity_deriva.etc import settings
+from parity_deriva.event.event import OrderEvent
+from parity_deriva.event.event import OrderCancelEvent
+from parity_deriva.trading.handler import ExecutionHandler
 import logging
 
 
@@ -14,7 +14,7 @@ class MoneyManager(ExecutionHandler):
 	orderIssued = False
 
 	def __init__(self, **args):
-		self.logger = logging.getLogger('qsforex.trading.trading')
+		self.logger = logging.getLogger('parity_deriva.trading.trading')
 		self._set(args,'setup', settings)
 		self._set(args,'units', 1)
 		self.logger.debug("initialized...")

@@ -1,9 +1,9 @@
-from qsforex.backtest.backtest import Backtest
-from qsforex.execution.execution import SimulatedExecution
-from qsforex.portfolio.portfolio import Portfolio
-from qsforex.etc import settings
-from qsforex.strategy.strategy import MovingAverageCrossStrategy
-from qsforex.data.price import HistoricCSVPriceHandler
+from parity_deriva.backtest.backtest import Backtest
+from parity_deriva.execution.execution import SimulatedExecution
+from parity_deriva.portfolio.portfolio import Portfolio
+from parity_deriva.etc import settings
+from parity_deriva.strategy.strategy import MovingAverageCrossStrategy
+from parity_deriva.data.price import HistoricCSVPriceHandler
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Characterisation tests for qsforex.lib (utils, ohlc, candle, oanda)."""
+"""Characterisation tests for parity_deriva.lib (utils, ohlc, candle, oanda)."""
 
 import datetime
 import os
@@ -7,14 +7,14 @@ from unittest import mock
 
 import pandas as pd
 
-from qsforex.lib.candle import Candle
-from qsforex.lib.oanda import (OANDAObject, OANDAOrder, OANDATrade,
+from parity_deriva.lib.candle import Candle
+from parity_deriva.lib.oanda import (OANDAObject, OANDAOrder, OANDATrade,
                                OANDAPosition, OANDAPositionSize)
-from qsforex.lib.ohlc import ohlc
-from qsforex.lib.utils import (datetimeToString, timestampFromString,
+from parity_deriva.lib.ohlc import ohlc
+from parity_deriva.lib.utils import (datetimeToString, timestampFromString,
                                granularityToTimedelta, dctFromOanda,
                                serieToDict, getLogger)
-from qsforex.tests.helpers import T0, oanda_time
+from parity_deriva.tests.helpers import T0, oanda_time
 
 
 class TestTimeHelpers(unittest.TestCase):
@@ -107,18 +107,18 @@ class TestSerieToDict(unittest.TestCase):
 
 class TestGetLogger(unittest.TestCase):
 
-    def test_resolves_config_from_qsforex_home(self):
+    def test_resolves_config_from_parity_deriva_home(self):
         pkg = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with mock.patch.dict(os.environ, {'QSFOREX_HOME': pkg}, clear=False):
+        with mock.patch.dict(os.environ, {'PARITY_DERIVA_HOME': pkg}, clear=False):
             with mock.patch('os.path.exists', side_effect=lambda p: p != 'logging.conf'):
                 logger = getLogger()
-        self.assertEqual(logger.name, 'qsforex.trading.trading')
+        self.assertEqual(logger.name, 'parity_deriva.trading.trading')
 
     def test_explicit_config_path_is_honoured(self):
         pkg = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         conf = os.path.join(pkg, 'etc', 'logging.conf')
-        logger = getLogger(conf, 'qsforex.trading.trading')
-        self.assertEqual(logger.name, 'qsforex.trading.trading')
+        logger = getLogger(conf, 'parity_deriva.trading.trading')
+        self.assertEqual(logger.name, 'parity_deriva.trading.trading')
 
 
 class TestOhlc(unittest.TestCase):

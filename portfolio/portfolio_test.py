@@ -3,10 +3,10 @@ import shutil
 import tempfile
 import unittest
 
-import qsforex.portfolio.portfolio as portfolio_module
-from qsforex.portfolio.portfolio import Portfolio
-from qsforex.portfolio.position_test import TickerMock
-from qsforex.portfolio.position import Position
+import parity_deriva.portfolio.portfolio as portfolio_module
+from parity_deriva.portfolio.portfolio import Portfolio
+from parity_deriva.portfolio.position_test import TickerMock
+from parity_deriva.portfolio.position import Position
 
 
 class TestPortfolio(unittest.TestCase):
@@ -14,7 +14,7 @@ class TestPortfolio(unittest.TestCase):
         # Portfolio writes backtest.csv into OUTPUT_RESULTS_DIR; point it at a
         # scratch directory so the tests do not depend on that setting being
         # configured and writable.
-        tmpdir = tempfile.mkdtemp(prefix="qsforex-portfolio-test-")
+        tmpdir = tempfile.mkdtemp(prefix="parity_deriva-portfolio-test-")
         self.addCleanup(shutil.rmtree, tmpdir, True)
         original = portfolio_module.OUTPUT_RESULTS_DIR
         portfolio_module.OUTPUT_RESULTS_DIR = tmpdir

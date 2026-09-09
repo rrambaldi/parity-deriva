@@ -1,8 +1,8 @@
 import json
 import datetime
-from qsforex.etc import settings
-from qsforex.trading.handler import ExecutionHandler
-from qsforex.event.event import ClientOrderEvent
+from parity_deriva.etc import settings
+from parity_deriva.trading.handler import ExecutionHandler
+from parity_deriva.event.event import ClientOrderEvent
 import http.client as httplib
 import logging
 from urllib.parse import urlencode
@@ -25,7 +25,7 @@ class SimulatedExecution(object):
 class OANDAExecutionHandler(ExecutionHandler):
 
 	def __init__(self, **args):
-		self.logger = logging.getLogger('qsforex.trading.trading')
+		self.logger = logging.getLogger('parity_deriva.trading.trading')
 		self._set(args,'setup', settings)
 
 		self.api = "/v3/accounts/%s/orders" % str(self.setup.ACCOUNT_ID)

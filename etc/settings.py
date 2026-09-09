@@ -15,7 +15,7 @@ ENVIRONMENTS = {
     }
 }
 
-CSV_DATA_DIR = os.environ.get('QSFOREX_CSV_DATA_DIR', ".")
+CSV_DATA_DIR = os.environ.get('PARITY_DERIVA_CSV_DATA_DIR', ".")
 OUTPUT_RESULTS_DIR = os.environ.get('OUTPUT_RESULTS_DIR', ".")
 
 DOMAIN = "practice"
@@ -30,8 +30,8 @@ ACCESS_TOKEN = os.environ.get('OANDA_API_ACCESS_TOKEN', '')
 ACCOUNT_ID = os.environ.get('OANDA_API_ACCOUNT_ID', '')
 API_VERSION = '3'
 
-DATA_DIR = os.environ.get('QSFOREX_DATA_DIR', "/home/rrambaldi/DATA")
-LOG_DIR = os.environ.get('QSFOREX_LOG_DIR', "/home/rrambaldi/DATA")
+DATA_DIR = os.environ.get('PARITY_DERIVA_DATA_DIR', "/home/rrambaldi/DATA")
+LOG_DIR = os.environ.get('PARITY_DERIVA_LOG_DIR', "/home/rrambaldi/DATA")
 BASE_CURRENCY = "EUR"
 EQUITY = Decimal("100000.00")
 

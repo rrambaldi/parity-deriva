@@ -4,11 +4,11 @@ import os
 import glob
 import time
 import datetime
-import qsforex.etc.settings as settings
+import parity_deriva.etc.settings as settings
 import logging
 import logging.config
-from qsforex.data.bulksaver import BulkSaver
-from qsforex.lib.utils import granularityToTimedelta, getLogger
+from parity_deriva.data.bulksaver import BulkSaver
+from parity_deriva.lib.utils import granularityToTimedelta, getLogger
 logger = getLogger()
 
 

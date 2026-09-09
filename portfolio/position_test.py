@@ -1,7 +1,7 @@
 from decimal import Decimal
 import unittest
 
-from qsforex.portfolio.position import Position
+from parity_deriva.portfolio.position import Position
 
 
 class TickerMock(object):

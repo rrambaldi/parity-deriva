@@ -1,4 +1,4 @@
-import qsforex.lib.ohlc as ohlc
+import parity_deriva.lib.ohlc as ohlc
 import pandas as pd
 import datetime
 import time
