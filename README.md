@@ -1,30 +1,57 @@
-# QuantStart Forex
+# parity-deriva
 
-QSForex is an open-source event-driven backtesting and live trading platform for use in the foreign exchange ("forex") markets, currently in an "alpha" state.
+An event-driven lab for finding statistically interesting price patterns and,
+once one looks promising, trading it for real - with a simulated twin of the
+broker running alongside the live execution handler on the same event stream.
+The two are compared step by step; when reality drifts too far from the model,
+the divergence itself is the signal, and it can raise an alarm or stop trading.
+That is where the name comes from: *parity* is the invariant you want between
+the simulated and the real side, *deriva* is what you measure when it breaks.
 
-It has been created as part of the Forex Trading Diary series on QuantStart.com to provide the systematic trading community with a robust trading engine that allows straightforward forex strategy implementation and testing. 
+Instruments are whatever OANDA v3 offers - the work so far has been on
+DE30_EUR and EUR_USD, so not only forex. Historical candles are warehoused
+locally in HDF5 so research runs offline.
 
-The software is provided under a permissive "MIT" license (see below).
+Started as a fork of [QSForex](https://github.com/mhallsmoore/qsforex) by
+Michael Halls-Moore, and still MIT licensed (see below). Little of the
+original tick-based backtester survives: the engine, the event hierarchy, the
+data layer, the strategies and the execution path were rewritten around
+candles and the OANDA v3 API, then migrated from Python 2 to Python 3.
 
-# Current Features
+# What is in it
 
-* **Open-Source** - QSForex has been released under an extremely permissive open-source MIT License, which allows full usage in both research and commercial applications, without restriction, but with no warranty of any kind whatsoever.
-* **Free** - QSForex is completely free and costs nothing to download or use.
-* **Collaboration** - As QSForex is open-source many developers collaborate to improve the software. New features are added frequently. Any bugs are quickly determined and fixed.
-* **Software Development** - QSForex is written in the Python programming language for straightforward cross-platform support. QSForex contains a suite of unit tests for the majority of its calculation code and new tests are constantly added for new features.</li>
-* **Event-Driven Architecture** - QSForex is completely event-driven both for backtesting and live trading, which leads to straightforward transitioning of strategies from a research/testing phase to a live trading implementation.
-* **Transaction Costs** - Spread costs are included by default for all backtested strategies.
-* **Backtesting** - QSForex features intraday tick-resolution multi-day multi-currency pair backtesting.
-* **Trading** - QSForex currently supports live intraday trading using the OANDA Brokerage API across a portfolio of pairs.
-* **Performance Metrics** - QSForex currently supports basic performance measurement and equity visualisation via the Matplotlib and Seaborn visualisation libraries.
+* **Event bus** - `trading/engine.py` runs a thread per data source and fans
+  every event out to every handler. Strategies, the money manager, execution,
+  the simulator and the loggers are all handlers, so the same stack runs live,
+  against recorded events, or against the local HDF5 store.
+* **Shadow execution** - `backtest/oanda.py` is a local broker simulator that
+  mimics the OANDA order lifecycle. Registered on the engine next to the real
+  execution handler, it sees the same orders and the same candles, which is
+  what makes a step-by-step comparison possible.
+* **Pattern research** - the `BO` strategies place no orders. They measure how
+  long a run of candle directions persists before it flips, broken down by
+  hour of day and weekday, so a pattern can be judged before any money is at
+  risk.
+* **Trading strategies** - `AG01` and `AG02` bracket a two-bar reversal with a
+  pair of opposite pending orders; `AG01` plays the breakout with STOP orders,
+  `AG02` fades it with LIMIT orders. The money manager runs one trade at a
+  time and cancels the losing leg as soon as the other fills.
+* **Data warehouse** - `data/bulksaver.py` downloads years of candles into
+  per-instrument HDF5 stores, one process per instrument, resuming where it
+  left off; `scripts/check.py` audits those stores for missing bars.
+* **Audit trail** - every event is written to a JSONL log and can be replayed.
+* **Performance** - `performance/analyze.py` reports win/loss statistics,
+  consecutive runs and three flavours of optimal *f* over the closed trades
+  pulled from the account.
+* **Tests** - 462 characterisation tests, no network access required.
 
 # Installation and Usage
 
 1) Visit http://www.oanda.com/ and setup an account to obtain the API authentication credentials, which you will need to carry out live trading. I explain how to carry this out in this article: https://www.quantstart.com/articles/Forex-Trading-Diary-1-Automated-Forex-Trading-with-the-OANDA-API.
 
-2) Clone this git repository into a suitable location on your machine using the following command in your terminal: ```git clone https://github.com/mhallsmoore/qsforex.git```. Alternative you can download the zip file of the current master branch at https://github.com/mhallsmoore/qsforex/archive/master.zip.
+2) Clone this git repository into a suitable location on your machine using the following command in your terminal: ```git clone git@github.com:rrambaldi/parity-deriva.git```.
 
-3) Create a set of environment variables for all of the settings found in the ```etc/settings.py``` file. Alternatively, you can "hard code" your specific settings by overwriting the ```os.environ.get(...)``` calls for each setting. The environment variable names are the ones used in that file (```QSFOREX_CSV_DATA_DIR```, ```OUTPUT_RESULTS_DIR```, ```QSFOREX_DATA_DIR```, ```QSFOREX_LOG_DIR```, ```OANDA_API_ACCESS_TOKEN```, ```OANDA_API_ACCOUNT_ID```):
+3) Create a set of environment variables for all of the settings found in the ```etc/settings.py``` file. Alternatively, you can "hard code" your specific settings by overwriting the ```os.environ.get(...)``` calls for each setting. The environment variable names are the ones used in that file (```PARITY_DERIVA_CSV_DATA_DIR```, ```OUTPUT_RESULTS_DIR```, ```PARITY_DERIVA_DATA_DIR```, ```PARITY_DERIVA_LOG_DIR```, ```OANDA_API_ACCESS_TOKEN```, ```OANDA_API_ACCOUNT_ID```):
 
 ```
 # The data directory used to store your backtesting CSV files
@@ -50,19 +77,19 @@ BASE_CURRENCY = "GBP"
 EQUITY = Decimal("100000.00")
 ```
 
-4) QSForex requires **Python 3.11 or newer** (it was migrated off Python 2.7); the pinned requirements were verified on Python 3.12, and the newest NumPy/SciPy releases need 3.12. The code runs on both pandas 2.x and pandas 3.x. Create a virtual environment for the code and utilise pip to install the requirements. For instance in a Unix-based system (Mac or Linux) you might create such a directory as follows by entering the following commands in the terminal:
+4) parity-deriva requires **Python 3.11 or newer** (it was migrated off Python 2.7); the pinned requirements were verified on Python 3.12, and the newest NumPy/SciPy releases need 3.12. The code runs on both pandas 2.x and pandas 3.x. Create a virtual environment for the code and utilise pip to install the requirements. For instance in a Unix-based system (Mac or Linux) you might create such a directory as follows by entering the following commands in the terminal:
 
 ```
-mkdir -p ~/venv/qsforex
-cd ~/venv/qsforex
+mkdir -p ~/venv/parity-deriva
+cd ~/venv/parity-deriva
 python3 -m venv .
 ```
 
-This will create a new virtual environment to install the packages into. Assuming you downloaded the QSForex git repository into an example directory such as ```~/projects/qsforex/``` (change this directory below to wherever you installed QSForex), then in order to install the packages you will need to run the following commands:
+This will create a new virtual environment to install the packages into. Assuming you cloned the repository into an example directory such as ```~/projects/parity_deriva/``` (change this directory below to wherever you installed it), then in order to install the packages you will need to run the following commands:
 
 ```
-source ~/venv/qsforex/bin/activate
-pip install -r ~/projects/qsforex/requirements.txt
+source ~/venv/parity-deriva/bin/activate
+pip install -r ~/projects/parity_deriva/requirements.txt
 ```
 
 This will normally install pre-built wheels for NumPy, SciPy, Pandas, Scikit-Learn, Matplotlib and PyTables. There are many packages required for this to work, so please take a look at these two articles for more information:
@@ -70,13 +97,13 @@ This will normally install pre-built wheels for NumPy, SciPy, Pandas, Scikit-Lea
 * https://www.quantstart.com/articles/Quick-Start-Python-Quantitative-Research-Environment-on-Ubuntu-14-04
 * https://www.quantstart.com/articles/Easy-Multi-Platform-Installation-of-a-Scientific-Python-Stack-Using-Anaconda
 
-You will also need to create a symbolic link from your ```site-packages``` directory to your QSForex installation directory in order to be able to call ```import qsforex``` within the code. To do this you will need a command similar to the following:
+You will also need to create a symbolic link from your ```site-packages``` directory to your installation directory in order to be able to call ```import parity_deriva``` within the code. To do this you will need a command similar to the following:
 
 ```
-ln -s ~/projects/qsforex/ ~/venv/qsforex/lib/python3.12/site-packages/qsforex
+ln -s ~/projects/parity_deriva/ ~/venv/parity-deriva/lib/python3.12/site-packages/parity_deriva
 ```
 
-Make sure to change ```~/projects/qsforex``` to your installation directory and ```~/venv/qsforex/lib/python3.12/site-packages/``` to your virtualenv site packages directory (adjust the version to the Python 3 you created the venv with). Alternatively, put the directory that *contains* ```qsforex``` on ```PYTHONPATH```.
+Make sure to change ```~/projects/parity_deriva``` to your installation directory and ```~/venv/parity-deriva/lib/python3.12/site-packages/``` to your virtualenv site packages directory (adjust the version to the Python 3 you created the venv with). Alternatively, put the directory that *contains* ```parity_deriva``` on ```PYTHONPATH```.
 
 You will now be able to run the subsequent commands correctly.
 
@@ -90,12 +117,12 @@ Please look at ```strategy/strategy.py``` for details.
 
 ## Backtesting
 
-6) In order to carry out any backtesting it is necessary to generate simulated forex data or download historic tick data. If you wish to simply try the software out, the quickest way to generate an example backtest is to generate some simulated data. The current data format used by QSForex is the same as that provided by the DukasCopy Historical Data Feed at https://www.dukascopy.com/swiss/english/marketwatch/historical/.
+6) In order to carry out any backtesting it is necessary to generate simulated forex data or download historic tick data. If you wish to simply try the software out, the quickest way to generate an example backtest is to generate some simulated data. The current data format is the same as that provided by the DukasCopy Historical Data Feed at https://www.dukascopy.com/swiss/english/marketwatch/historical/.
 
 To generate some historical data, make sure that the ```CSV_DATA_DIR``` setting in ```settings.py``` is to set to a directory where you want the historical data to live. You then need to run ```generate_simulated_pair.py```, which is under the ```scripts/``` directory. It expects a single command line argument, which in this case is the currency pair in ```BBBQQQ``` format. For example:
 
 ```
-cd ~/projects/qsforex
+cd ~/projects/parity_deriva
 python scripts/generate_simulated_pair.py GBPUSD
 ```
 
@@ -123,20 +150,20 @@ And that's it! At this stage you are ready to begin creating your own backtests 
 
 If you have any questions about the installation then please feel free to email me at mike@quantstart.com.
 
-If you have any bugs or other issues that you think may be due to the codebase specifically, feel free to open a Github issue here: https://github.com/mhallsmoore/qsforex/issues
+If you have any bugs or other issues that you think may be due to the codebase specifically, they may well be inherited from upstream: https://github.com/mhallsmoore/qsforex/issues
 
 # Tests
 
-The project ships a characterisation test suite under ```qsforex/tests/```
+The project ships a characterisation test suite under ```parity_deriva/tests/```
 (plain ```unittest```, no network access, no OANDA account needed). Run it
 with:
 
 ```
-python -m unittest discover -s qsforex -p '*_test.py'
+python -m unittest discover -s parity_deriva -p '*_test.py'
 ```
 
 That also picks up the two original ```portfolio/*_test.py``` modules. See
-```qsforex/tests/README.md``` for what each module covers and for the list of
+```parity_deriva/tests/README.md``` for what each module covers and for the list of
 behaviours that are pinned deliberately because they look wrong.
 
 # License Terms

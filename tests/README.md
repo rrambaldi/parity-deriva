@@ -1,4 +1,4 @@
-# qsforex characterisation suite
+# parity_deriva characterisation suite
 
 Plain `unittest`, no plugins required. The suite is a *characterisation*
 suite: it describes what the code does today, quirks and all, so that the
@@ -14,20 +14,20 @@ break its test - that is the signal.
 
 The package must be importable (`PYTHONPATH`, or the `site-packages` symlink
 described in the top-level README). Nothing here touches the network, the
-OANDA account or `QSFOREX_DATA_DIR`: HTTP is stubbed and every test that
+OANDA account or `PARITY_DERIVA_DATA_DIR`: HTTP is stubbed and every test that
 writes gets its own temporary directory.
 
     # everything, including the two upstream portfolio test modules
-    python -m unittest discover -s qsforex -p '*_test.py'
+    python -m unittest discover -s parity_deriva -p '*_test.py'
 
     # just this suite
-    python -m unittest discover -s qsforex/tests -p '*_test.py'
+    python -m unittest discover -s parity_deriva/tests -p '*_test.py'
 
     # one module, verbose
-    python -m unittest -v qsforex.tests.backtest_oanda_test
+    python -m unittest -v parity_deriva.tests.backtest_oanda_test
 
     # under pytest, if preferred (*_test.py matches its default discovery)
-    pytest qsforex
+    pytest parity_deriva
 
 ## Layout
 
