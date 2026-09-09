@@ -10,20 +10,20 @@ from parity_deriva.lib.oanda import OANDATrade
 from parity_deriva.event.event import Event
 
 class OANDABacktester(ExecutionHandler):
-	currenct = 'EUR'
-	trades = []
-	orders = []
-	closed_orders = []
-	closed_trades = []
-	lastTradeID = 0
-	lastOrderID = 0
-	balance = 100000
 
 	def __init__(self, **args):
 		self.logger = logging.getLogger('parity_deriva.trading.trading')
+		# per instance, not per class: one simulator per instrument must keep
+		# its own book
+		self.trades = []
+		self.orders = []
+		self.closed_orders = []
+		self.closed_trades = []
+		self.lastTradeID = 0
+		self.lastOrderID = 0
 		self._set(args,'setup', settings)
 		self._set(args,'currency', 'EUR')
-		self._set(args,'balance', '100000')
+		self._set(args,'balance', 100000.0)
 
 	def dumpOrders(self):
 		for o in self.orders:
@@ -34,22 +34,25 @@ class OANDABacktester(ExecutionHandler):
 			self.logger.info("TRADE# %d: %s" % (t.id, t.dump()))
 
 	def cancelOrder(self, event):
-		i=0
-		for o in self.orders:
-			if o.price==event.price:
-				'''
-				TODO: Che succede se e' FILLED ?
-				'''
-				if o.state=='PENDING':
-					o.state='CANCELED'
-					self.closed_orders.append(o)
-					del(self.orders[i])
-					self.logger.debug("CANCELED @price %s" % o.price)
-					return
-				if o.state=='FILLED':
-					self.logger.warning("WARNING CANCEL DI FILL %s" % o.dump())
-			i+=1
-		params = ""
+		"""
+		Cancel a resting order. The simulator numbers its orders itself, so it
+		cannot match on the broker's orderID carried by the event: instrument
+		and price are the only fields both sides agree on.
+		"""
+		instrument = getattr(event, 'instrument', None)
+		for o in list(self.orders):
+			if o.price != event.price:
+				continue
+			if instrument is not None and getattr(o, 'instrument', None) != instrument:
+				continue
+			if o.state=='PENDING':
+				o.state='CANCELED'
+				self.closed_orders.append(o)
+				self.orders.remove(o)
+				self.logger.debug("CANCELED @price %s" % o.price)
+				return
+			if o.state=='FILLED':
+				self.logger.warning("WARNING CANCEL DI FILL %s" % o.dump())
 		return
 
 	def createOrder(self, event):
@@ -77,8 +80,9 @@ class OANDABacktester(ExecutionHandler):
 				gain = -gain	
 				if o.orig.TPOrder is not None:
 					o.orig.TPOrder = 'CANCELED'
-			self.logger.info("******** CLOSED TRADE TYPE: %s PL: %d OPEN:%6.2f CLOSED:%6.2f"
-				% (o.type, gain, o.orig.price, o.price))
+			self.balance += gain
+			self.logger.info("******** CLOSED TRADE TYPE: %s PL: %d OPEN:%6.2f CLOSED:%6.2f BALANCE:%6.2f"
+				% (o.type, gain, o.orig.price, o.price, self.balance))
 			return 
 
 		o.batchID = o.id
@@ -87,8 +91,7 @@ class OANDABacktester(ExecutionHandler):
 		o.type = None
 		if o.stopLoss is not None:
 			new = Event(o.to_dict())
-			if o.units > 0:
-				new.units = - o.units
+			new.units = - o.units
 			new.price = o.stopLoss
 			new.type = 'STOP_LOSS_ORDER'
 			new.state = 'PENDING'
@@ -113,13 +116,16 @@ class OANDABacktester(ExecutionHandler):
 	def checkOrder(self, event):
 		self.logger.debug("TIME: %s o:%6.2f h:%6.2f l:%6.2f c:%6.2f"
 			% ( event.time, event.mid['o'], event.mid['h'], event.mid['l'], event.mid['c']))
-		for o in self.orders:
+		# snapshot: handleSLTP appends the stop/target to self.orders, and a
+		# child must not be matched against the very bar that opened the trade
+		for o in list(self.orders):
 			if o.state=='PENDING':
-				if o.units>0 and o.price > event.ask['l'] and o.price < event.ask['h']:
+				# a real broker fills on touch, so the bounds are inclusive
+				if o.units>0 and o.price >= event.ask['l'] and o.price <= event.ask['h']:
 					o.state='FILLED'
 					self.logger.info("===== FILLED BUY ORDER# %s %f [ %f %f ]" % (o.id, o.price, event.ask['l'], event.ask['h']))
 					self.handleSLTP(o, event)
-				if o.units<0 and o.price > event.bid['l'] and o.price < event.bid['h']:
+				if o.units<0 and o.price >= event.bid['l'] and o.price <= event.bid['h']:
 					o.state='FILLED'
 					self.logger.info("===== FILLED SELL ORDER# %s %f [ %f %f ]" % (o.id, o.price, event.bid['l'], event.bid['h']))
 					self.handleSLTP(o, event)

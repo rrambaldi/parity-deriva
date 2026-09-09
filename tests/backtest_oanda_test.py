@@ -23,14 +23,6 @@ class BacktesterCase(TempDirCase):
     def setUp(self):
         super(BacktesterCase, self).setUp()
         self.bt = OANDABacktester(setup=self.settings)
-        # trades/orders/closed_* and the id counters are class attributes;
-        # give every test its own instance-level copies.
-        self.bt.orders = []
-        self.bt.trades = []
-        self.bt.closed_orders = []
-        self.bt.closed_trades = []
-        self.bt.lastOrderID = 0
-        self.bt.lastTradeID = 0
         self.sink = Recorder()
         self.bt.set_queue(self.sink)
 
@@ -47,25 +39,34 @@ class BacktesterCase(TempDirCase):
         return ev
 
 
-class TestSharedClassState(unittest.TestCase):
+class TestInstanceState(unittest.TestCase):
     """
-    trades / orders / closed_orders / closed_trades are declared at class
-    level, so two simulators in one process write into the same lists. A
-    monitoring setup that runs one simulator per instrument would silently
-    merge their books.
+    The book is per instance, so one simulator per instrument is safe.
     """
 
-    def test_two_instances_share_the_order_book(self):
+    def test_each_instance_keeps_its_own_book(self):
         a = OANDABacktester()
         b = OANDABacktester()
-        self.assertIs(a.orders, b.orders)
-        self.assertIs(a.trades, b.trades)
+        self.assertIsNot(a.orders, b.orders)
+        self.assertIsNot(a.trades, b.trades)
+        self.assertIsNot(a.closed_orders, b.closed_orders)
 
-    def test_the_currency_attribute_is_misspelled_on_the_class(self):
-        """`currenct = 'EUR'` is the class default; `currency` comes from _set."""
-        self.assertEqual(OANDABacktester.currenct, 'EUR')
-        self.assertFalse(hasattr(OANDABacktester, 'currency'))
-        self.assertEqual(OANDABacktester().currency, 'EUR')
+    def test_an_order_placed_on_one_simulator_is_invisible_to_the_other(self):
+        a, b = OANDABacktester(), OANDABacktester()
+        a.execute_event(OrderEvent({"instrument": "DE30_EUR", "units": 1,
+                                    "orderType": "STOP", "price": 1.0,
+                                    "stopLoss": None, "takeProfit": None}))
+        self.assertEqual(len(a.orders), 1)
+        self.assertEqual(b.orders, [])
+
+    def test_the_order_counter_is_per_instance(self):
+        a, b = OANDABacktester(), OANDABacktester()
+        self.assertEqual((a.lastOrderID, b.lastOrderID), (0, 0))
+
+    def test_currency_and_balance_defaults(self):
+        bt = OANDABacktester()
+        self.assertEqual(bt.currency, 'EUR')
+        self.assertEqual(bt.balance, 100000.0)
 
 
 class TestEventRouting(BacktesterCase):
@@ -142,15 +143,24 @@ class TestFillRules(BacktesterCase):
         self.bt.execute_event(self.candle())
         self.assertEqual(self.bt.orders[0].state, 'PENDING')
 
-    def test_touching_the_extreme_does_not_fill(self):
+    def test_an_order_resting_on_the_high_fills_on_touch(self):
         """
-        The test is strictly `price > low and price < high`, so an order
-        resting exactly on the candle high or low is not filled. A real broker
-        fills on touch, so a straddle placed exactly at the previous extreme -
-        which is what AG01 does - can fill live and not in simulation.
+        The bounds are inclusive, so a buy sitting exactly on the bar's ask
+        high is filled - which is what a real broker does, and what AG01
+        depends on, since it places its straddle on the previous extreme.
         """
         self.bt.execute_event(self.order(units=1, price=11706.2, sl=None, tp=None))
         self.bt.execute_event(self.candle(h=11706.0))  # ask high == 11706.2
+        self.assertEqual(self.bt.orders[0].state, 'FILLED')
+
+    def test_an_order_resting_on_the_low_fills_on_touch(self):
+        self.bt.execute_event(self.order(units=-1, price=11693.8, sl=None, tp=None))
+        self.bt.execute_event(self.candle(l=11694.0))  # bid low == 11693.8
+        self.assertEqual(self.bt.orders[0].state, 'FILLED')
+
+    def test_a_price_just_beyond_the_extreme_still_does_not_fill(self):
+        self.bt.execute_event(self.order(units=1, price=11706.3, sl=None, tp=None))
+        self.bt.execute_event(self.candle(h=11706.0))
         self.assertEqual(self.bt.orders[0].state, 'PENDING')
 
     def test_a_filled_order_is_not_refilled_by_later_candles(self):
@@ -210,38 +220,49 @@ class TestStopLossTakeProfitChildren(BacktesterCase):
         self.assertEqual(orders[1].units, -1)   # stop loss sells
         self.assertEqual(orders[2].units, -1)   # take profit sells
 
-    def test_short_stop_loss_keeps_the_sell_side(self):
-        """
-        The stop-loss branch flips the sign only `if o.units > 0`, while the
-        take-profit branch flips unconditionally. So for a short position the
-        stop loss stays a sell and can never close the trade: checkOrder will
-        only ever match it against the bid range as another sell. Shorts are
-        simulated without a working stop.
-        """
+    def test_short_stop_loss_is_flipped_to_a_buy(self):
+        """Both legs of a short close by buying back."""
         self.bt.execute_event(self.order(units=-1, price=11700.0,
                                          sl=11720.0, tp=11680.0))
         self.bt.execute_event(self.candle(l=11699.0, h=11701.0))
         parent, stop, take = self.bt.orders
         self.assertEqual(parent.units, -1)
-        self.assertEqual(stop.units, -1)        # not flipped: still a sell
-        self.assertEqual(take.units, 1)         # flipped correctly
+        self.assertEqual(stop.units, 1)
+        self.assertEqual(take.units, 1)
 
-    def test_children_can_fill_on_the_very_candle_that_opened_the_trade(self):
+    def test_a_short_stop_actually_closes_the_trade(self):
+        self.bt.execute_event(self.order(units=-1, price=11700.0,
+                                         sl=11720.0, tp=11680.0))
+        self.bt.execute_event(self.candle(l=11699.0, h=11701.0))
+        self.bt.execute_event(self.candle(T0 + datetime.timedelta(minutes=1),
+                                          l=11719.0, h=11721.0))
+        parent, stop, take = self.bt.orders
+        self.assertEqual(stop.state, 'CLOSED')
+        self.assertEqual(parent.state, 'CLOSED')
+
+    def test_children_are_not_matched_against_the_opening_bar(self):
         """
-        createOrder appends to self.orders while checkOrder is iterating it, so
-        the freshly created stop/target are tested against the same bar. A wide
-        bar therefore opens and closes a trade instantly, which a live account
-        would not do at the same prices.
+        checkOrder walks a snapshot of the book, so the stop and target created
+        by a fill are only live from the next bar on. A wide bar opens the
+        trade and leaves it open, the way a live account would.
         """
         self.bt.execute_event(self.order(units=1, price=11700.0,
                                          sl=11695.0, tp=11705.0))
         self.bt.execute_event(self.candle(l=11690.0, h=11710.0))
         parent, stop, take = self.bt.orders
-        # opened and closed inside a single bar: the parent never even rests
-        # in the FILLED state that a live account would report.
+        self.assertEqual(parent.state, 'FILLED')
+        self.assertEqual(stop.state, 'PENDING')
+        self.assertEqual(take.state, 'PENDING')
+
+    def test_the_children_are_live_from_the_next_bar(self):
+        self.bt.execute_event(self.order(units=1, price=11700.0,
+                                         sl=11695.0, tp=11705.0))
+        self.bt.execute_event(self.candle(l=11690.0, h=11710.0))
+        self.bt.execute_event(self.candle(T0 + datetime.timedelta(minutes=1),
+                                          l=11690.0, h=11710.0))
+        parent, stop, take = self.bt.orders
         self.assertEqual(parent.state, 'CLOSED')
         self.assertEqual(stop.state, 'CLOSED')
-        self.assertEqual(parent.TPOrder, 'CANCELED')
 
     def test_hitting_the_take_profit_closes_both_legs(self):
         self.fill_a_long()
@@ -279,15 +300,20 @@ class TestStopLossTakeProfitChildren(BacktesterCase):
         self.assertEqual(self.bt.closed_orders, [])
         self.assertEqual(self.bt.closed_trades, [])
 
-    def test_no_profit_and_loss_is_accumulated_anywhere(self):
-        """
-        handleSLTP computes `gain` and logs it, but nothing adds it to
-        self.balance. The simulator tracks order state, not equity.
-        """
+    def test_a_winning_trade_is_realised_into_the_balance(self):
         self.fill_a_long()
+        self.assertEqual(self.bt.balance, 100000.0)
         self.bt.execute_event(self.candle(T0 + datetime.timedelta(minutes=1),
                                           l=11719.0, h=11721.0))
-        self.assertEqual(self.bt.balance, '100000')
+        # entry 11700, target 11720, one unit
+        self.assertAlmostEqual(self.bt.balance, 100020.0)
+
+    def test_a_losing_trade_reduces_the_balance(self):
+        self.fill_a_long()
+        self.bt.execute_event(self.candle(T0 + datetime.timedelta(minutes=1),
+                                          l=11689.0, h=11691.0))
+        # entry 11700, stop 11690, one unit
+        self.assertAlmostEqual(self.bt.balance, 99990.0)
 
 
 class TestCancel(BacktesterCase):
@@ -309,6 +335,18 @@ class TestCancel(BacktesterCase):
         self.bt.execute_event(self.order(price=11700.0, sl=None, tp=None))
         self.bt.execute_event(OrderCancelEvent({"orderID": 2, "price": 11700.0}))
         self.assertEqual([o.id for o in self.bt.orders], [2])
+
+    def test_cancel_does_not_touch_another_instrument(self):
+        """The event carries the instrument, so two pairs resting at the same
+        price are told apart even though the broker orderID cannot be used."""
+        self.bt.execute_event(self.order(price=11700.0, sl=None, tp=None))
+        other = OrderEvent({"instrument": "EUR_USD", "units": 1,
+                            "orderType": "STOP", "price": 11700.0,
+                            "stopLoss": None, "takeProfit": None})
+        self.bt.execute_event(other)
+        self.bt.execute_event(OrderCancelEvent({"orderID": 1, "price": 11700.0,
+                                                "instrument": "EUR_USD"}))
+        self.assertEqual([o.instrument for o in self.bt.orders], ["DE30_EUR"])
 
     def test_cancelling_an_unknown_price_is_a_no_op(self):
         self.bt.execute_event(self.order(price=11700.0, sl=None, tp=None))
