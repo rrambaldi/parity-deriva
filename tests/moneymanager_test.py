@@ -271,3 +271,173 @@ class TestEventRouting(MoneyManagerCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOrdersThatNeverFill(MoneyManagerCase):
+    """
+    A signal whose orders all die has to stop blocking the next one.
+
+    Was: nothing cleared orderIssued except a trade closing. An order that
+         expired or that the broker refused left the manager believing orders
+         were outstanding, and handleSignal refuses every new signal number
+         while it believes that - so a bracket that simply expired unfilled
+         stopped the strategy for the rest of the process's life. OANDA's
+         orders are GTD and expire nightly, so it was a matter of time rather
+         than of bad luck.
+    Now: an order reported cancelled, expired or rejected is marked, and a
+         group with no surviving order is released.
+    """
+
+    def straddle(self, low=11690.0, high=11710.0, number="S1"):
+        """AG01's pair of opposite orders, both acknowledged."""
+        self.mm.execute_event(self.signal(units=1, price=high, number=number))
+        self.mm.execute_event(self.signal(units=-1, price=low, number=number))
+        self.mm.execute_event(self.acknowledge(1, price=high, number=number))
+        self.mm.execute_event(self.acknowledge(2, price=low, number=number))
+        self.sink.events = []
+
+    def cancel(self, order_id=None, price=None, reason=None):
+        from parity_deriva.event.event import OrderCancelEvent
+        payload = {"instrument": "DE30_EUR"}
+        if order_id is not None:
+            payload["orderID"] = order_id
+        if price is not None:
+            payload["price"] = price
+        if reason is not None:
+            payload["reason"] = reason
+        return OrderCancelEvent(payload)
+
+    def reject(self, price=11710.0, number="S1"):
+        return TransactionEvent({"type": "ORDER_REJECT", "price": price,
+                                 "instrument": "DE30_EUR",
+                                 "rejectReason": "MARKET_HALTED",
+                                 "signalNumber": number})
+
+    # ------------------------------------------------------------- releasing
+
+    def test_a_straddle_that_expires_unfilled_is_released(self):
+        self.straddle()
+        self.mm.execute_event(self.cancel(order_id=1, price=11710.0))
+        self.mm.execute_event(self.cancel(order_id=2, price=11690.0))
+        self.assertEqual(self.mm.signals, {})
+        self.assertFalse(self.mm.orderIssued)
+
+    def test_the_next_signal_gets_through_afterwards(self):
+        """The point of the fix: the strategy keeps working."""
+        self.straddle()
+        self.mm.execute_event(self.cancel(order_id=1, price=11710.0))
+        self.mm.execute_event(self.cancel(order_id=2, price=11690.0))
+        self.mm.execute_event(self.signal(number="S2"))
+        self.assertEqual(len(self.sink.of('ORDER')), 1)
+
+    def test_one_leg_dying_releases_nothing(self):
+        """The other is still resting and may still fill."""
+        self.straddle()
+        self.mm.execute_event(self.cancel(order_id=1, price=11710.0))
+        self.assertIn("S1", self.mm.signals)
+        self.assertTrue(self.mm.orderIssued)
+
+    def test_a_released_group_is_kept_in_processed(self):
+        """The audit trail should not lose a signal just because it went nowhere."""
+        self.straddle()
+        self.mm.execute_event(self.cancel(order_id=1, price=11710.0))
+        self.mm.execute_event(self.cancel(order_id=2, price=11690.0))
+        self.assertEqual(len(self.mm.processed), 1)
+        self.assertEqual(len(self.mm.processed[0]), 2)
+
+    # ------------------------------------------------------------ rejections
+
+    def test_a_rejected_order_is_matched_by_price(self):
+        """
+        A rejected order never got an id - the broker refused it before
+        issuing one - so instrument and price are all there is to match on.
+        """
+        self.mm.execute_event(self.signal(units=1, price=11710.0))
+        self.mm.execute_event(self.reject(price=11710.0))
+        self.assertEqual(self.mm.signals, {})
+        self.assertFalse(self.mm.orderIssued)
+
+    def test_both_legs_rejected_releases_the_signal(self):
+        self.mm.execute_event(self.signal(units=1, price=11710.0))
+        self.mm.execute_event(self.signal(units=-1, price=11690.0))
+        self.mm.execute_event(self.reject(price=11710.0))
+        self.assertTrue(self.mm.orderIssued)
+        self.mm.execute_event(self.reject(price=11690.0))
+        self.assertFalse(self.mm.orderIssued)
+
+    def test_oandas_per_type_reject_names_are_understood(self):
+        """
+        The transaction stream spells it per order type, where both execution
+        handlers publish the normalised 'ORDER_REJECT'.
+        """
+        self.mm.execute_event(self.signal(units=1, price=11710.0))
+        self.mm.execute_event(TransactionEvent(
+            {"type": "STOP_ORDER_REJECT", "price": 11710.0,
+             "instrument": "DE30_EUR"}))
+        self.assertEqual(self.mm.signals, {})
+
+    def test_a_transaction_cancel_from_the_stream_counts(self):
+        self.straddle()
+        for order_id, price in ((1, 11710.0), (2, 11690.0)):
+            self.mm.execute_event(TransactionEvent(
+                {"type": "ORDER_CANCEL", "orderID": str(order_id),
+                 "price": price, "instrument": "DE30_EUR"}))
+        self.assertEqual(self.mm.signals, {})
+
+    # -------------------------------------------------- not releasing a trade
+
+    def test_a_filled_leg_keeps_its_group_alive(self):
+        """
+        OANDA's stream also reports the cancel of the losing leg after a fill,
+        and eToro's expiry pass can fire on the same tick. The group has to
+        survive until closeTrade, or the manager would take new signals while
+        a trade is open.
+        """
+        self.straddle()
+        self.mm.execute_event(self.fill(1, price=11710.0))
+        self.mm.execute_event(self.cancel(order_id=2, price=11690.0))
+        self.assertIn("S1", self.mm.signals)
+        self.assertTrue(self.mm.onTrade)
+        self.assertTrue(self.mm.orderIssued)
+
+    def test_a_fill_status_is_never_overwritten_by_a_late_cancel(self):
+        self.straddle()
+        self.mm.execute_event(self.fill(1, price=11710.0))
+        self.mm.execute_event(self.cancel(order_id=1, price=11710.0))
+        order = [o for o in self.mm.signals["S1"] if o.orderID == 1][0]
+        self.assertEqual(order.orderStatus, 'FILLED')
+
+    def test_a_signal_is_still_refused_while_a_trade_is_open(self):
+        self.straddle()
+        self.mm.execute_event(self.fill(1, price=11710.0))
+        self.sink.events = []
+        self.mm.execute_event(self.signal(number="S2"))
+        self.assertEqual(self.sink.of('ORDER'), [])
+
+    # ------------------------------------------------------------- stragglers
+
+    def test_a_cancel_for_an_unknown_order_is_harmless(self):
+        """Another strategy's order, or one from before this process started."""
+        self.straddle()
+        self.mm.execute_event(self.cancel(order_id=999, price=12345.0))
+        self.assertIn("S1", self.mm.signals)
+        self.assertTrue(self.mm.orderIssued)
+
+    def test_a_cancel_with_nothing_to_match_on_is_harmless(self):
+        self.straddle()
+        self.mm.execute_event(self.cancel())
+        self.assertIn("S1", self.mm.signals)
+
+    def test_an_empty_group_is_not_a_finished_one(self):
+        """all() of an empty sequence is True, which would release it."""
+        self.mm.signals["S9"] = []
+        self.mm.orderIssued = True
+        self.mm.release()
+        self.assertIn("S9", self.mm.signals)
+        self.assertTrue(self.mm.orderIssued)
+
+    def test_release_does_not_unblock_while_a_trade_is_open(self):
+        self.mm.onTrade = True
+        self.mm.orderIssued = True
+        self.mm.release()
+        self.assertTrue(self.mm.orderIssued)

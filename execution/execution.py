@@ -3,6 +3,7 @@ import datetime
 from parity_deriva.etc import settings
 from parity_deriva.trading.handler import ExecutionHandler
 from parity_deriva.event.event import ClientOrderEvent
+from parity_deriva.event.event import TransactionEvent
 import http.client as httplib
 import logging
 from urllib.parse import urlencode
@@ -137,6 +138,26 @@ ORDER:
 #		self.logger.debug(resp)
 		if "errorCode" in resp:
 			self.logger.error("ORDER REJECTED: %s" % resp['errorCode'])
+			# Was: logged and dropped. The money manager was then left
+			#      believing an order was outstanding that the broker had
+			#      refused, and it refuses every new signal number while it
+			#      believes that - so a rejected bracket stopped the strategy
+			#      for good.
+			# Now: published, and normalised to the same 'ORDER_REJECT' type
+			#      data/etoro.py publishes when it finds a rejection by
+			#      polling, so the money manager has one branch rather than
+			#      one per broker.
+			rejection = TransactionEvent({
+				'type': 'ORDER_REJECT',
+				'instrument': event.instrument,
+				'price': event.price,
+				'units': event.units,
+				'orderType': event.orderType,
+				'rejectReason': resp['errorCode'],
+				'errorMessage': resp.get('errorMessage'),
+			})
+			rejection.signalNumber = event.signalNumber
+			self.queue_event(rejection)
 			return
 
 		coe = ClientOrderEvent(resp['orderCreateTransaction'])

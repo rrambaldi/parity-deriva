@@ -156,10 +156,50 @@ class TestOrderSubmission(ExecutionCase):
         self.handler.execute_event(self.order(signalNumber="S42"))
         self.assertEqual(self.sink.events[0].signalNumber, "S42")
 
-    def test_rejected_order_emits_nothing(self):
+    def test_rejected_order_is_published(self):
+        """
+        Was: the rejection was logged and dropped. The money manager was then
+             left believing an order was outstanding that the broker had
+             refused, and it refuses every new signal number while it
+             believes that - so a rejected bracket stopped the strategy for
+             the rest of the process's life.
+        Now: it reaches the bus, and MoneyManager.orderDied releases the
+             signal.
+        """
         FakeHTTPSConnection.reset(json.dumps(ORDER_REJECTED).encode("utf-8"))
         self.handler.execute_event(self.order())
-        self.assertEqual(self.sink.events, [])
+        self.assertEqual(self.sink.kinds(), ['TRANSACTION'])
+        rejection = self.sink.events[0]
+        self.assertEqual(rejection.type, 'ORDER_REJECT')
+        self.assertEqual(rejection.rejectReason,
+                         ORDER_REJECTED['errorCode'])
+
+    def test_a_rejection_is_not_a_client_order(self):
+        """
+        Publishing it as one would have the money manager record an orderID
+        for an order that does not exist, and the fill poller wait on it.
+        """
+        FakeHTTPSConnection.reset(json.dumps(ORDER_REJECTED).encode("utf-8"))
+        self.handler.execute_event(self.order())
+        self.assertEqual(self.sink.of('CLIENTORDER'), [])
+
+    def test_the_signal_number_is_carried_onto_the_rejection(self):
+        """Without it the money manager cannot tell which signal to release."""
+        FakeHTTPSConnection.reset(json.dumps(ORDER_REJECTED).encode("utf-8"))
+        self.handler.execute_event(self.order(signalNumber="S42"))
+        self.assertEqual(self.sink.events[0].signalNumber, "S42")
+
+    def test_the_rejection_is_normalised_across_brokers(self):
+        """
+        data/etoro.py publishes the same type when it finds a rejection by
+        polling, so the money manager has one branch rather than one per
+        broker.
+        """
+        from parity_deriva.data.etoro import STATUS_REJECTED
+        self.assertEqual(STATUS_REJECTED, 4)
+        FakeHTTPSConnection.reset(json.dumps(ORDER_REJECTED).encode("utf-8"))
+        self.handler.execute_event(self.order())
+        self.assertEqual(self.sink.events[0].type, 'ORDER_REJECT')
 
 
 class TestEventRouting(ExecutionCase):

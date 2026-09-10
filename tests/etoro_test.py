@@ -1624,3 +1624,99 @@ class ParityAcrossEToroTest(unittest.TestCase):
         self.assertEqual(self.monitor.undecided, 1)
         self.assertEqual(self.monitor.reconciled, 1)
 
+
+class ExpiryReleasesTheSignalTest(unittest.TestCase):
+    """
+    The eToro case that made MoneyManager's stuck state unavoidable.
+
+    On OANDA an unfilled bracket expires broker-side and the transaction
+    stream says so. On eToro nothing expires and nothing is pushed, so the
+    poller enforces the expiry itself - and if that cancel did not reach the
+    money manager, a bracket that never triggered would stop the strategy for
+    the rest of the session. The two halves have to meet.
+    """
+
+    def setUp(self):
+        from parity_deriva.portfolio.moneymanager import MoneyManager
+        MoneyManager.signals = {}
+        MoneyManager.processed = []
+        self.settings = settings_stub()
+        self.api = FakeAPI()
+        self.sink = Recorder()
+
+        self.manager = MoneyManager(setup=self.settings, units=1)
+        self.manager.onTrade = False
+        self.manager.orderIssued = False
+        self.manager.set_queue(self.sink)
+        self.poller = EToroTransactions(setup=self.settings, pairs=['EUR_USD'],
+                                        api=self.api)
+        self.poller.set_queue(self.sink)
+
+    def leg(self, order_id, price, units):
+        from parity_deriva.event.event import SignalEvent
+        signal = SignalEvent({'instrument': 'EUR_USD', 'units': units,
+                              'orderType': 'STOP', 'price': price,
+                              'stopLoss': 1.1900, 'takeProfit': 1.2100,
+                              'signalNumber': SIGNAL, 'gtdTime': T0})
+        self.manager.execute_event(signal)
+        ack = acknowledgement(order_id=order_id, price=price, gtd=T0,
+                              units=units)
+        self.manager.execute_event(ack)
+        self.poller.execute_event(ack)
+
+    def test_a_bracket_that_never_triggered_stops_blocking(self):
+        self.leg(555, 1.2010, 1)
+        self.leg(556, 1.1990, -1)
+        self.assertTrue(self.manager.orderIssued)
+
+        # both legs still resting, both past their gtdTime
+        self.api.queue('order_lookup', 200,
+                       lookup_payload(status_id=data_etoro.STATUS_WAITING_FOR_MARKET,
+                                      executions=False))
+        self.poller.pollOrders(now=T0 + datetime.timedelta(minutes=1))
+
+        cancels = self.sink.of('ORDERCANCEL')
+        self.assertEqual(len(cancels), 2)
+        for cancel in cancels:
+            self.manager.execute_event(cancel)
+
+        self.assertEqual(self.manager.signals, {})
+        self.assertFalse(self.manager.orderIssued)
+
+    def test_and_the_next_signal_is_accepted(self):
+        self.leg(555, 1.2010, 1)
+        self.leg(556, 1.1990, -1)
+        self.api.queue('order_lookup', 200,
+                       lookup_payload(status_id=data_etoro.STATUS_PLACED,
+                                      executions=False))
+        self.poller.pollOrders(now=T0 + datetime.timedelta(minutes=1))
+        for cancel in self.sink.of('ORDERCANCEL'):
+            self.manager.execute_event(cancel)
+
+        from parity_deriva.event.event import SignalEvent
+        self.sink.events = []
+        self.manager.execute_event(SignalEvent(
+            {'instrument': 'EUR_USD', 'units': 1, 'orderType': 'STOP',
+             'price': 1.2050, 'stopLoss': 1.1950, 'takeProfit': 1.2150,
+             'signalNumber': 'AG01:EUR_USD:H1:20180115T110000',
+             'gtdTime': None}))
+        self.assertEqual(len(self.sink.of('ORDER')), 1)
+
+    def test_a_rejection_found_by_polling_releases_the_signal_too(self):
+        """
+        eToro accepts an order with a 200 and refuses it later, so the
+        rejection arrives here rather than in the reply to the order.
+        """
+        self.leg(555, 1.2010, 1)
+        self.api.queue('order_lookup', 200,
+                       lookup_payload(status_id=data_etoro.STATUS_REJECTED,
+                                      executions=False, error_code=7,
+                                      error_message='market closed'))
+        self.poller.pollOrders(now=T0)
+
+        rejects = [e for e in self.sink.of('TRANSACTION')
+                   if e.type == 'ORDER_REJECT']
+        self.assertEqual(len(rejects), 1)
+        self.manager.execute_event(rejects[0])
+        self.assertEqual(self.manager.signals, {})
+        self.assertFalse(self.manager.orderIssued)

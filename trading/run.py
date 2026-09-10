@@ -6,6 +6,7 @@ import threading
 import time
 
 from parity_deriva.execution.execution import OANDAExecutionHandler
+from parity_deriva.portfolio.moneymanager import MoneyManager
 from parity_deriva.portfolio.portfolio import Portfolio
 from parity_deriva.etc import settings
 from parity_deriva.lib.utils import getLogger
@@ -30,6 +31,12 @@ pairs = ["EUR_USD"]
 # Create the strategy/signal generator, passing the
 # instrument and the events queue
 e.add_handler( AG01( pairs=pairs) )
+
+# Size the signals and hold the account to one trade at a time.
+# Was: missing. AG01 published SignalEvents and nothing turned them into
+#      orders, so this wiring streamed prices and traded nothing - while the
+#      README said it wired a MoneyManager.
+e.add_handler( MoneyManager( pairs=pairs, units=1) )
 
 # Create the portfolio object that will be used to
 # compare the OANDA positions with the local, to

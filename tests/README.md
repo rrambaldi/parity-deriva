@@ -38,9 +38,9 @@ writes gets its own temporary directory.
 | `lib_test.py` | `lib/utils.py`, `lib/ohlc.py`, `lib/candle.py`, `lib/oanda.py` |
 | `event_test.py` | the whole `event/event.py` hierarchy and its coercion rules |
 | `trading_test.py` | the handler ABC contract, `_set()`, and `Engine` (including its run loop, out of process) |
-| `execution_test.py` | `OANDAExecutionHandler` order wire format, rejects, cancels |
+| `execution_test.py` | `OANDAExecutionHandler` order wire format, rejects (published, not dropped), cancels |
 | `backtest_oanda_test.py` | `OANDABacktester`, the local broker simulator |
-| `moneymanager_test.py` | `MoneyManager`: sizing, the signal index, OCO, trade close |
+| `moneymanager_test.py` | `MoneyManager`: sizing, the signal index, OCO, trade close, and the signals whose orders all died |
 | `strategy_ag_test.py` | `AG01`/`AG02`, the straddle strategies |
 | `strategy_bo_test.py` | `BO`..`BO06`, the pattern research engines |
 | `data_sources_test.py` | `data/candles.py`, `data/resample.py`, `data/transaction.py`, `data/streaming.py` |

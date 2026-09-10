@@ -50,7 +50,7 @@ candles and the OANDA v3 API, then migrated from Python 2 to Python 3.
 * **Performance** - `performance/analyze.py` reports win/loss statistics,
   consecutive runs and three flavours of optimal *f* over the closed trades
   pulled from the account.
-* **Tests** - 844 tests, no network access required.
+* **Tests** - 865 tests, no network access required.
 
 # Installation and Usage
 
@@ -131,7 +131,7 @@ python scripts/live.py --provider oanda --instrument DE30_EUR --granularity M5
 python scripts/live.py --provider etoro --instrument EUR_USD --granularity H1
 ```
 
-The older wirings are still there: ```python trading/run.py``` wires an ```AG01``` strategy, the OANDA execution handler and the price/transaction streams into the ```Engine``` (note that it registers no ```MoneyManager```, so its strategy's signals reach nothing that sizes them), and ```scripts/t01.py``` .. ```t05.py``` and ```onlydata.py``` hold further ready-made OANDA stacks. None of those registers the parity monitor. Do not point any of these at a live account until you have read what they do!
+The older wirings are still there: ```python trading/run.py``` wires an ```AG01``` strategy, a ```MoneyManager```, the OANDA execution handler and the price/transaction streams into the ```Engine```, and ```scripts/t01.py``` .. ```t05.py``` and ```onlydata.py``` hold further ready-made OANDA stacks. None of those registers the parity monitor, so the alarm is not watching them. Do not point any of these at a live account until you have read what they do!
 
 If you wish to create a more useful strategy, then simply create a new class with a descriptive name, e.g. ```MeanReversionMultiPairStrategy```. Strategies driven by the ```Engine``` subclass ```ExecutionHandler``` and implement ```execute_event(event)``` (see ```strategy/AG01.py``` and ```strategy/BO.py```); the backtester's example strategies instead implement ```calculate_signals(event)``` and take the ```pairs``` list plus the ```events``` queue.
 
@@ -348,6 +348,30 @@ when the simulator is fed H1 bars, and 0.09% when it is fed M1 - the concrete
 reason to keep minute history for a strategy that signals on hours. A
 threshold below the figure that applies to you will fire on the width of the
 bars rather than on the market.
+
+## Orders that never fill
+
+The money manager holds the account to one trade at a time, which it does by
+refusing a new signal number while orders from the last one are outstanding.
+That only works if it is told when orders stop being outstanding *without* a
+trade, and there are three ways that happens:
+
+* the broker expires them - OANDA's orders are GTD, so an untriggered
+  bracket dies nightly and the transaction stream reports it
+* the broker refuses them - a price precision error, a halted market
+* nothing expires them, because the broker has no expiry, and
+  `data/etoro.py` cancels them on our side once their `gtdTime` has passed
+
+All three end up at `MoneyManager.orderDied`, and a signal group whose every
+order is dead is released: dropped from the live index, kept in `processed`
+for the audit trail, and the block on new signals lifted. A group still
+holding a fill is not released, which is what keeps the one-trade-at-a-time
+rule intact while a trade is open.
+
+Both execution handlers publish a rejection as a `TransactionEvent` of type
+`ORDER_REJECT`, so there is one thing to handle rather than one per broker -
+OANDA's arrives in the reply to the order, eToro's is found later by polling,
+and downstream neither is distinguishable from the other.
 
 ## Migrating a store written under Python 2
 
