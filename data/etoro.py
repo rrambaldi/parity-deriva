@@ -42,7 +42,7 @@ from parity_deriva.event.event import TransactionEvent
 from parity_deriva.event.event import OrderCancelEvent
 from parity_deriva.lib.etoro import (EToroAPI, EToroError, candleTime,
 									 instrumentId, instrumentName, interval,
-									 spreadModel)
+									 spreadModel, utcnow)
 from parity_deriva.lib.utils import granularityToTimedelta
 from parity_deriva.trading.handler import StreamHandler
 
@@ -172,7 +172,8 @@ class EToroCandles(StreamHandler):
 		if self._set(args, 'dtfrom', datetime.datetime(1970, 1, 1, 0, 0, 0)):
 			self.live = False
 			self._set(args, 'batch_size', 500)
-			self._set(args, 'dtto', datetime.datetime.today())
+			# UTC, like every timestamp the candle route returns
+			self._set(args, 'dtto', utcnow())
 			self._set(args, 'sleep', 0)
 		else:
 			self._set(args, 'batch_size')
@@ -233,10 +234,19 @@ class EToroCandles(StreamHandler):
 		question is answered from the candle's start and the interval. With
 		no period known for the granularity, nothing is called complete:
 		refusing to emit is recoverable, emitting a partial bar is not.
+
+		Was: the comparison was against datetime.today(), which is local
+		     while `when` came through candleTime() and is UTC. On a CEST
+		     host that made every candle look two hours older than it was, so
+		     the bar still forming passed this check and was published - the
+		     one thing the check exists to prevent. Only real data showed it:
+		     a fixture's timestamps are as naive as the clock they are
+		     compared with.
+		Now: utcnow(), so both sides are UTC.
 		"""
 		if self.period is None:
 			return False
-		now = now if now is not None else datetime.datetime.today()
+		now = now if now is not None else utcnow()
 		return when + self.period <= now
 
 	def event(self, pair, row):
@@ -251,6 +261,11 @@ class EToroCandles(StreamHandler):
 				ohlc[short] = 0.0
 
 		payload = {
+			# eToro reports volume as null on forex, and 0.0 at the range
+			# level, so there is no volume to record. It is carried as 0
+			# because CandleEvent.to_dict() coerces it with int(), and
+			# nothing here reads it - but 0 is the absence of the figure,
+			# not a measurement of no trading.
 			'time': when,
 			'volume': row.get('volume') or 0,
 			'complete': True,
@@ -576,7 +591,9 @@ class EToroTransactions(StreamHandler):
 		"""
 		days = [p['opened'] for p in self.positions.values()
 				if p.get('opened') is not None]
-		when = min(days) if days else datetime.datetime.today()
+		# UTC: the opened times came through candleTime(), and near midnight
+		# a local clock would ask for the wrong day
+		when = min(days) if days else utcnow()
 		return when.strftime('%Y-%m-%d')
 
 	def history(self):
@@ -670,6 +687,11 @@ class EToroTransactions(StreamHandler):
 		when = known.get('gtdTime')
 		if when is None:
 			return False
+		# Local time here, deliberately, where everything else in this module
+		# is UTC. gtdTime is not a broker timestamp: the strategies build it
+		# with datetime.today().replace(hour=...), so it is a local wall-clock
+		# instant - AG01's "expire at 23:59:59" means the operator's evening.
+		# Converting it would move the expiry by the machine's offset.
 		now = now if now is not None else datetime.datetime.today()
 		if when > now:
 			return False

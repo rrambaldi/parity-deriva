@@ -280,18 +280,21 @@ the key pair - a request carrying both is rejected with 422, so setting both
 raises rather than being sent:
 
 ```
-export ETORO_API_DOMAIN=...        # the public API host
 export ETORO_ACCESS_TOKEN=...      # OAuth bearer token
 # or
-export ETORO_USER_KEY=...
-export ETORO_API_KEY=...
+export ETORO_USER_KEY=...          # the user key ("secret")
+export ETORO_API_KEY=...           # the application key ("public")
 ```
 
-`ETORO_API_DOMAIN` has no default on purpose. Every other host in
-`etc/settings.py` is one OANDA publishes; the eToro public API host is
-whatever your developer account gives you, and a guess would either fail
-obscurely or, worse, reach something. Unset, the client refuses to be built
-and says so.
+`ETORO_API_DOMAIN` defaults to `public-api.etoro.com`, and the default is
+there because that host was checked rather than guessed: it holds a
+certificate issued to that name, unauthenticated it answers with the
+`gatewayErrorEnvelope` shape the published OpenAPI documents for a missing
+key - which a different service would not - and `GET /api/v1/me` on it
+returns the account. It stays an environment variable because the tooling
+describes the host as a property of the deployment, so a partner application
+may be given another one; set it empty and the client refuses to be built
+rather than reaching somewhere unintended.
 
 Then the instruments. This project names them the way OANDA does and eToro
 keys everything by a numeric id, and nothing derives one from the other, so
@@ -304,6 +307,15 @@ python scripts/etoro_instruments.py EURUSD GER40
 prints what the API answers, for you to check and paste. It deliberately
 stops there rather than resolving ids at runtime, where a search result would
 be quietly deciding which market the money goes into.
+
+Two entries are already in, resolved against the live API: `EUR_USD` is
+eToro's `EURUSD`, instrument 1, and `DE30_EUR` is `GER40`, instrument 32.
+That second pairing deserves a look before you trade it - eToro has no GER30
+and no DE30, and GER40 is a forty-constituent index where OANDA's DE30_EUR
+tracks thirty. The two are not the same basket, so a strategy calibrated on
+one is not calibrated on the other, and the parity monitor comparing a GER40
+account against a simulator fed DE30_EUR candles would be measuring the
+index change as if it were execution.
 
 The rest, all documented in `etc/settings.py`: `ETORO_LEVERAGE` (anything
 above 1 makes eToro require a stop loss, which the execution handler then

@@ -32,7 +32,7 @@ from parity_deriva.lib import etoro as lib_etoro
 from parity_deriva.lib.etoro import (EToroAPI, EToroError, RateLimiter,
                                      SpreadModel, candleTime, instrument,
                                      instrumentId, instrumentName, interval,
-                                     pricePrecision, requestId)
+                                     pricePrecision, requestId, utcnow)
 from parity_deriva.tests.helpers import FakeRequests, FakeResponse, Recorder
 
 T0 = datetime.datetime(2018, 1, 15, 10, 0, 0)
@@ -265,6 +265,37 @@ class CandleTimeTest(unittest.TestCase):
     def test_garbage_falls_back_to_the_epoch(self):
         self.assertEqual(candleTime('not a date'),
                          datetime.datetime(1970, 1, 1, 0, 0, 0))
+
+
+class UtcNowTest(unittest.TestCase):
+    """
+    The clock has to be on the same scale as the timestamps it is compared
+    with. This is the defect real data found: candle times come through
+    candleTime() and are UTC, the completeness check used datetime.today()
+    which is local, and on a CEST host that made every candle look two hours
+    older than it was - so the bar still forming was published as complete.
+
+    These assertions are written to hold on any machine, including a UTC one
+    where the bug would have been invisible.
+    """
+
+    def test_it_is_naive(self):
+        """Mixing it with an aware datetime would raise, which is the point
+        of dropping the offset rather than keeping it."""
+        self.assertIsNone(utcnow().tzinfo)
+
+    def test_it_is_utc_not_local(self):
+        reference = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        self.assertLess(abs((utcnow() - reference).total_seconds()), 5)
+
+    def test_it_agrees_with_candletime_on_the_same_instant(self):
+        """
+        The two have to be usable in one comparison, which is the only
+        property that matters here.
+        """
+        stamp = datetime.datetime.now(datetime.timezone.utc)
+        parsed = candleTime(stamp.isoformat().replace('+00:00', 'Z'))
+        self.assertLess(abs((utcnow() - parsed).total_seconds()), 5)
 
 
 class SpreadModelTest(unittest.TestCase):
@@ -601,6 +632,37 @@ class EToroCandlesTest(unittest.TestCase):
         self.assertEqual(sent, 1)
         self.assertEqual(len(self.sink.of('CANDLE')), 1)
         self.assertEqual(self.sink.of('CANDLE')[0].time, T0)
+
+    def test_the_forming_candle_is_not_emitted_on_the_real_clock(self):
+        """
+        The same claim as the test above, but through the default clock rather
+        than an injected one - which is where it was actually wrong. A candle
+        that began half its period ago has not finished, whatever the
+        machine's timezone.
+        """
+        source = self.candles()
+        half = source.period / 2
+        self.assertFalse(source.complete(utcnow() - half))
+        self.assertTrue(source.complete(utcnow() - source.period * 2))
+
+    def test_a_local_clock_would_have_called_a_forming_candle_complete(self):
+        """
+        Pins the shape of the defect rather than the fix: on a host with a
+        positive UTC offset, comparing against local time accepts a candle
+        that has not finished. Skipped where the machine is on UTC, since
+        there the two clocks agree and there is nothing to catch.
+        """
+        offset = datetime.datetime.today() - utcnow()
+        if abs(offset.total_seconds()) < 60:
+            self.skipTest("machine is on UTC; the two clocks cannot disagree")
+        source = self.candles()
+        forming = utcnow() - source.period / 2
+        self.assertFalse(source.complete(forming))
+        self.assertTrue(source.complete(forming, now=datetime.datetime.today()))
+
+    def test_the_offline_window_is_on_the_candles_own_scale(self):
+        source = self.candles(dtfrom=T0)
+        self.assertLess(abs((source.dtto - utcnow()).total_seconds()), 5)
 
     def test_nothing_is_complete_without_a_known_period(self):
         """

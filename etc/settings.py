@@ -151,12 +151,19 @@ DEFAULT_PRICE_PRECISION = 5
 #   export ETORO_USER_KEY=...
 #   export ETORO_API_KEY=...
 #
-# ETORO_API_DOMAIN has no default on purpose. Every other host in this file
-# is one OANDA publishes; the eToro public API host is whatever your
-# developer account gives you, and a wrong guess would either fail obscurely
-# or, worse, reach something. Unset, lib/etoro.EToroAPI refuses to be built
-# and says so.
-ETORO_API_DOMAIN = os.environ.get('ETORO_API_DOMAIN', '')
+# The host below is evidenced rather than assumed, which is the only reason
+# it has a default at all:
+#   - it holds a Google Trust Services certificate issued to
+#     public-api.etoro.com, so it is eToro's and not a lookalike
+#   - unauthenticated it answers {"errorCode":"Unauthorized",...}, which is
+#     the gatewayErrorEnvelope the published OpenAPI documents for exactly
+#     that case - a different service would not answer in that shape
+#   - GET /api/v1/me on it returns this account's profile and scopes
+# It is still an environment variable because the tooling describes the host
+# as a property of the deployment, so a partner application may be given a
+# different one. Set it to empty and lib/etoro.EToroAPI refuses to be built
+# rather than reaching somewhere unintended.
+ETORO_API_DOMAIN = os.environ.get('ETORO_API_DOMAIN', 'public-api.etoro.com')
 ETORO_ACCESS_TOKEN = os.environ.get('ETORO_ACCESS_TOKEN', '')
 ETORO_USER_KEY = os.environ.get('ETORO_USER_KEY', '')
 ETORO_API_KEY = os.environ.get('ETORO_API_KEY', '')
@@ -171,9 +178,16 @@ ETORO_API_KEY = os.environ.get('ETORO_API_KEY', '')
 #     python scripts/etoro_instruments.py EUR_USD DE30_EUR
 # which prints what the API answers for a symbol, for you to paste here.
 # 'precision' is optional and overrides INSTRUMENT_PRECISION for eToro only.
+# The two below were resolved against the live API and are evidenced, not
+# guessed: symbols=EURUSD returns instrumentId 1, "EUR/USD", type Forex, and
+# symbols=GER40 returns instrumentId 32, "GER40 Index (Non Expiry)", type
+# Indices. eToro has no GER30 and no DE30 - both 404 - so the counterpart of
+# OANDA's DE30_EUR is GER40, a 40-constituent index where DE30_EUR tracks 30.
+# They are not the same basket, and a strategy calibrated on one is not
+# calibrated on the other.
 ETORO_INSTRUMENTS = {
-    # 'EUR_USD': {'symbol': 'EURUSD', 'instrumentId': None, 'precision': 5},
-    # 'DE30_EUR': {'symbol': 'GER40', 'instrumentId': None, 'precision': 1},
+    'EUR_USD': {'symbol': 'EURUSD', 'instrumentId': 1, 'precision': 5},
+    'DE30_EUR': {'symbol': 'GER40', 'instrumentId': 32, 'precision': 1},
 }
 
 # eToro serves ONE OHLC per candle. OANDA serves three, and the strategies
@@ -187,12 +201,25 @@ ETORO_INSTRUMENTS = {
 # off, not filled in with something plausible.
 #
 # Set it to a spread in the instrument's own units, or per instrument:
-#     ETORO_SPREAD = 0.00008
-#     ETORO_SPREAD = {'EUR_USD': 0.00008, 'DE30_EUR': 1.2}
-# Half of it is applied either side of the served price. Measure your own
-# with scripts/etoro_spread.py before choosing one; whatever you pick is a
-# constant standing in for something that varies by the hour, and the
-# difference is what trading/parity.py will be measuring.
+#     ETORO_SPREAD = 0.0001
+#     ETORO_SPREAD = {'EUR_USD': 0.0001, 'DE30_EUR': 2.2}
+# Half of it is applied either side of the served price.
+#
+# scripts/etoro_spread.py samples the rates route, and one thing it found is
+# worth knowing before trusting it. On 2026-09-10, quiet market, twelve
+# samples, it reported a spread constant to the last digit: 0.00001 on
+# EUR_USD and 2.20 on GER40. The index figure is credible - eToro charges a
+# fixed spread on indices. The EUR_USD one is a tenth of a pip, an order of
+# magnitude tighter than eToro's published forex spread, and the v1 rates
+# route agrees with it, so the feed is consistent rather than wrong: it is
+# simply not the tradable price. A fill's openingData carries marketSpread
+# and markup as SEPARATE fields, which is the API saying that execution
+# applies its own cost on top of this quote.
+#
+# So the rates route gives a floor, not the spread an order meets. The figure
+# that settles it is marketSpread + markup on a real fill - one demo trade
+# reports both. Until then, a value taken from the feed alone will have the
+# strategies computing levels as if entering cost nothing.
 ETORO_SPREAD = None
 
 # Leverage on every order. Anything above 1 makes eToro require a stopLossRate,

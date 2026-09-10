@@ -477,6 +477,21 @@ class EToroAPI(object):
 		return rows or []
 
 
+def utcnow():
+	"""
+	Now, as the naive UTC datetime candleTime() produces.
+
+	datetime.today() is local, and eToro timestamps everything in UTC. Mixing
+	the two silently shifts every comparison by the machine's offset: on a
+	CEST host it made every candle look two hours older than it was, so the
+	bar still forming was emitted as complete and a strategy would have
+	signalled on a high that was not yet the high. Anything comparing against
+	a value that came through candleTime() has to come through here.
+	"""
+	import datetime as _dt
+	return _dt.datetime.now(_dt.timezone.utc).replace(tzinfo=None)
+
+
 def candleTime(value):
 	"""
 	An eToro ISO timestamp as the naive UTC datetime this project uses.
