@@ -1,11 +1,8 @@
-# Python 3 requirements (the project was pinned to a Python 2.7 stack until the
-# 3.x migration). Verified against Python 3.12 with the versions listed on the
-# right, which were the latest stable releases at the time of writing.
+# What parity_deriva itself imports. Verified on Python 3.12 with the versions
+# noted on the right, which were the latest stable releases at the time.
 #
-# What the code actually imports: pandas, numpy, requests, urllib3,
-# python-dateutil, matplotlib, seaborn, and PyTables (indirectly, through
-# pandas.HDFStore). The rest is the QuantStart research environment the README
-# describes and is not imported anywhere - drop it if you do not want it.
+# The wider QuantStart research environment (IPython, SciPy, scikit-learn) is
+# in requirements-research.txt and is not imported by any module here.
 #
 # Notes on what changed from the Python 2 list:
 #  - "nose" removed: it does not run on Python 3.10+. The tests are plain
@@ -13,10 +10,12 @@
 #  - "mock" removed: unittest.mock has been in the standard library since 3.3.
 #  - "six" removed: no 2/3 compatibility shims are left in the code.
 #  - "tables" added: pandas.HDFStore is used by data/bulksaver.py,
-#    data/datasaver.py, data/replay.py and scripts/check.py and needs PyTables.
-#    It was never listed, so those modules only worked by accident.
+#    data/datasaver.py, data/replay.py and scripts/check.py and needs
+#    PyTables. It was never listed, so those modules only worked by accident.
+#
+# A store written under Python 2 needs one pass of scripts/migrate_store.py
+# before pandas 3 can read or append to it. See the README.
 
-# --- required ---------------------------------------------------------
 numpy>=2.0,<3                  # tested with 2.5.3
 pandas>=2.2,<4                 # tested with 3.0.5 (Copy-on-Write default)
 python-dateutil>=2.9           # tested with 2.9.0.post0
@@ -24,15 +23,6 @@ requests>=2.32                 # tested with 2.34.2
 tables>=3.10                   # tested with 3.11.1
 urllib3>=2.2                   # tested with 2.7.0
 
-# --- required for backtest/output.py only -----------------------------
+# required by backtest/output.py only
 matplotlib>=3.9                # tested with 3.11.1
 seaborn>=0.13                  # tested with 0.13.2
-
-# --- the wider research environment, not imported by parity_deriva itself ---
-ipython>=9.0                   # tested with 9.17.1
-pytz>=2025.1                   # tested with 2026.3
-scikit-learn>=1.6              # tested with 1.9.0
-scipy>=1.14                    # tested with 1.18.1
-
-# --- test runner (optional: the suite also runs under python -m unittest) ---
-pytest>=8.0                    # tested with 9.1.1

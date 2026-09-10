@@ -47,6 +47,7 @@ writes gets its own temporary directory.
 | `persistence_test.py` | `data/bulksaver.py`, `data/datasaver.py`, `data/replay.py`, `event/saver.py`, `event/replay.py` |
 | `backtest_path_test.py` | the tick-CSV path: `data/price.py`, `strategy/strategy.py`, `Portfolio`, `Position`, drawdowns, `Backtest` |
 | `analyze_test.py` | `performance/analyze.py` trade statistics and optimal f |
+| `migrate_store_test.py` | `scripts/migrate_store.py`, the Python 2 store migration |
 
 ## Class-level mutable state
 

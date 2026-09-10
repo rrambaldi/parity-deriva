@@ -43,7 +43,7 @@ candles and the OANDA v3 API, then migrated from Python 2 to Python 3.
 * **Performance** - `performance/analyze.py` reports win/loss statistics,
   consecutive runs and three flavours of optimal *f* over the closed trades
   pulled from the account.
-* **Tests** - 483 tests, no network access required.
+* **Tests** - 508 tests, no network access required.
 
 # Installation and Usage
 
@@ -90,6 +90,13 @@ This will create a new virtual environment to install the packages into. Assumin
 ```
 source ~/venv/parity-deriva/bin/activate
 pip install -r ~/projects/parity_deriva/requirements.txt
+```
+
+That installs what the code imports. The wider research environment
+(IPython, SciPy, scikit-learn) is separate and optional:
+
+```
+pip install -r ~/projects/parity_deriva/requirements-research.txt
 ```
 
 This will normally install pre-built wheels for NumPy, SciPy, Pandas, Scikit-Learn, Matplotlib and PyTables. There are many packages required for this to work, so please take a look at these two articles for more information:
@@ -152,19 +159,39 @@ If you have any questions about the installation then please feel free to email 
 
 If you have any bugs or other issues that you think may be due to the codebase specifically, they may well be inherited from upstream: https://github.com/mhallsmoore/qsforex/issues
 
+## Migrating a store written under Python 2
+
+An HDF5 candle store created by the Python 2 version of this code cannot be
+used by pandas 3. Nothing is wrong with the rows - both problems are metadata:
+
+* the store's own descriptors were written as bytes, and opening it raises
+  ```TypeError: a bytes-like object is required, not 'str'``` before any row
+  is read
+* its timestamp index is at nanosecond resolution while pandas 3 gives new
+  timestamps microsecond resolution, so appending a freshly downloaded block
+  raises ```TypeError: incompatible kind in col [datetime64[ns] -
+  datetime64[us]]``` - which is what ```data/bulksaver.py``` does on every run
+
+One pass fixes both, in place, keeping a ```.bak``` copy:
+
+```
+python scripts/migrate_store.py --dry-run    # report, change nothing
+python scripts/migrate_store.py              # every store in DATA_DIR
+```
+
+It is idempotent, so a store that needs nothing is reported and skipped.
+
 # Tests
 
-The project ships a characterisation test suite under ```parity_deriva/tests/```
-(plain ```unittest```, no network access, no OANDA account needed). Run it
-with:
+The project ships a test suite under ```parity_deriva/tests/``` (plain
+```unittest```, no network access, no OANDA account needed). Run it with:
 
 ```
 python -m unittest discover -s parity_deriva -p '*_test.py'
 ```
 
 That also picks up the two original ```portfolio/*_test.py``` modules. See
-```parity_deriva/tests/README.md``` for what each module covers and for the list of
-behaviours that are pinned deliberately because they look wrong.
+```parity_deriva/tests/README.md``` for what each module covers.
 
 # License Terms
 

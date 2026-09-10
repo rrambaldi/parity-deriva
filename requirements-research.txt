@@ -1,0 +1,13 @@
+# The wider QuantStart research environment the original README described.
+# No module in parity_deriva imports any of it, so a plain install does not
+# need it - it is here for interactive work alongside the code.
+#
+#   pip install -r requirements.txt -r requirements-research.txt
+
+ipython>=9.0                   # tested with 9.17.1
+pytz>=2025.1                   # tested with 2026.3
+scikit-learn>=1.6              # tested with 1.9.0
+scipy>=1.14                    # tested with 1.18.1
+
+# test runner (the suite also runs under python -m unittest)
+pytest>=8.0                    # tested with 9.1.1
