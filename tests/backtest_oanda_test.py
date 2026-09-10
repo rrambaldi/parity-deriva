@@ -121,6 +121,71 @@ class TestOrderCreation(BacktesterCase):
         self.assertEqual(o.signalNumber, "S1")
 
 
+class TestOnlyTheRightCandlesDriveFills(BacktesterCase):
+    """
+    Was: checkOrder matched every resting order against every candle on the
+         bus, whatever instrument or granularity it belonged to. Masked only
+         because the runners drive one instrument at a time - two on the same
+         bus and EUR_USD orders would fill on DAX candles.
+    Now: an order is matched only by its own instrument, which is intrinsic
+         and needs no configuration, and the simulator can be pinned to one
+         granularity when the strategy watches a coarser one.
+    """
+
+    def eur_candle(self, dt=T0, low=1.2, high=1.3):
+        ev = CandleEvent({"time": dt.strftime("%Y-%m-%dT%H:%M:%S.%f") + "000Z",
+                          "volume": 1, "complete": True,
+                          "ask": {"o": "1.25", "h": str(high), "l": str(low), "c": "1.25"},
+                          "bid": {"o": "1.25", "h": str(high), "l": str(low), "c": "1.25"},
+                          "mid": {"o": "1.25", "h": str(high), "l": str(low), "c": "1.25"}})
+        ev.instrument, ev.granularity = "EUR_USD", "M1"
+        return ev
+
+    def test_a_candle_for_another_instrument_does_not_fill_the_order(self):
+        self.bt.execute_event(self.order(price=11700.0, sl=None, tp=None))
+        self.bt.execute_event(self.eur_candle())
+        self.assertEqual(self.bt.orders[0].state, 'PENDING')
+
+    def test_each_instrument_is_filled_by_its_own_candles(self):
+        self.bt.execute_event(self.order(price=11700.0, sl=None, tp=None))
+        self.bt.execute_event(OrderEvent(
+            {"instrument": "EUR_USD", "units": 1, "orderType": "STOP",
+             "price": 1.25, "stopLoss": None, "takeProfit": None}))
+        self.bt.execute_event(self.eur_candle())
+        states = {o.instrument: o.state for o in self.bt.orders}
+        self.assertEqual(states, {"DE30_EUR": 'PENDING', "EUR_USD": 'FILLED'})
+        self.bt.execute_event(self.candle())
+        states = {o.instrument: o.state for o in self.bt.orders}
+        self.assertEqual(states["DE30_EUR"], 'FILLED')
+
+    def test_by_default_any_granularity_drives_the_fills(self):
+        self.bt.execute_event(self.order(price=11700.0, sl=None, tp=None))
+        candle = self.candle()
+        candle.granularity = "H1"
+        self.bt.execute_event(candle)
+        self.assertEqual(self.bt.orders[0].state, 'FILLED')
+
+    def test_a_pinned_simulator_ignores_the_other_stream(self):
+        """
+        The strategy watches H1 while the simulator shadows it on M1, so that
+        the ambiguity inside a bar - stop and target both touched, order
+        unknown - shrinks by a factor of sixty.
+        """
+        bt = OANDABacktester(setup=self.settings, granularity="M1")
+        bt.execute_event(self.order(price=11700.0, sl=None, tp=None))
+        coarse = self.candle()
+        coarse.granularity = "H1"
+        bt.execute_event(coarse)
+        self.assertEqual(bt.orders[0].state, 'PENDING')
+        fine = self.candle()
+        fine.granularity = "M1"
+        bt.execute_event(fine)
+        self.assertEqual(bt.orders[0].state, 'FILLED')
+
+    def test_the_default_granularity_is_unset(self):
+        self.assertIsNone(OANDABacktester(setup=self.settings).granularity)
+
+
 class TestFillRules(BacktesterCase):
 
     def test_a_buy_fills_inside_the_ask_range(self):

@@ -118,6 +118,32 @@ class TestOrderSubmission(ExecutionCase):
         body = json.loads(self._submit(gtdTime=when)['body'])
         self.assertEqual(body['order']['gtdTime'], "2017-01-31T20:00:00.000Z")
 
+    def test_the_signal_key_travels_with_the_order(self):
+        """
+        OANDA echoes clientExtensions back on every transaction the order
+        generates, so a live fill arrives already carrying the key its
+        simulated counterpart is filed under. The strategies have always built
+        the field; the handler simply never sent it.
+        """
+        extension = {'id': 'AG01:DE30_EUR:M5:20170131T155900',
+                     'tag': 'AG01', 'comment': 'M5'}
+        self.handler.execute_event(self.order(clientExtension=extension))
+        body = json.loads(FakeHTTPSConnection.last()['body'])
+        self.assertEqual(body['order']['clientExtensions'], extension)
+
+    def test_an_order_without_extensions_sends_none(self):
+        self.handler.execute_event(self.order(clientExtension=None))
+        body = json.loads(FakeHTTPSConnection.last()['body'])
+        self.assertNotIn('clientExtensions', body['order'])
+
+    def test_an_order_that_never_had_the_field_sends_none(self):
+        self.handler.execute_event(OrderEvent(
+            {"instrument": "DE30_EUR", "units": -1, "orderType": "STOP",
+             "price": 11583.3, "stopLoss": None, "takeProfit": None,
+             "gtdTime": None, "signalNumber": "S1"}))
+        body = json.loads(FakeHTTPSConnection.last()['body'])
+        self.assertNotIn('clientExtensions', body['order'])
+
     def test_accepted_order_emits_a_client_order_event(self):
         self.handler.execute_event(self.order())
         self.assertEqual(self.sink.kinds(), ['CLIENTORDER'])

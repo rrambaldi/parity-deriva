@@ -34,6 +34,24 @@ def serieToDict(serie):
 	pass
 
 
+def signalNumber(tag, instrument, granularity, when):
+	"""
+	The identity of a signal, as a function of the data that produced it.
+
+	This is the key a live trade and its simulated counterpart are joined on,
+	so it must not depend on when the code ran: replaying the same candles has
+	to yield the same keys as the live session did. It used to be
+	datetime.today() to the second, which meant a replay could never be
+	matched against the run it was replaying, and which collided outright
+	whenever two signals landed in the same second - 116 of them shared one
+	key in a single replay.
+
+	    AG01:EUR_USD:H1:20180115T010000
+	"""
+	stamp = when.strftime('%Y%m%dT%H%M%S') if hasattr(when, 'strftime') else str(when)
+	return "%s:%s:%s:%s" % (tag, instrument, granularity, stamp)
+
+
 def pricePrecision(instrument, setup=None):
 	"""
 	Decimal places OANDA accepts for an order price on this instrument.

@@ -3,7 +3,7 @@ import logging
 import datetime
 from parity_deriva.event.event import SignalEvent
 from parity_deriva.trading.handler import ExecutionHandler
-from parity_deriva.lib.utils import roundPrice
+from parity_deriva.lib.utils import roundPrice, signalNumber
 
 
 class AG02(ExecutionHandler):
@@ -51,7 +51,8 @@ class AG02(ExecutionHandler):
 		## il engulfing
 		spread = event.ask['c'] - event.bid['c']
 		sb = SignalEvent()
-		sb.signalNumber = datetime.datetime.today().strftime("%Y%m%d%H%M%S")
+		sb.signalNumber = signalNumber(self.__class__.__name__, i,
+				self.granularity, event.time)
 		sb.clientExtension = { 'id': sb.signalNumber
 				, 'tag': self.__class__.__name__
 				, 'comment': '%s' % self.granularity

@@ -108,6 +108,15 @@ ORDER:
 			order["stopLossOnFill"] = {  "price": str(event.stopLoss) }
 		if event.takeProfit is not None:
 			order["takeProfitOnFill"] = { "price": str(event.takeProfit) }
+		# Tag the order with the signal that produced it. OANDA echoes
+		# clientExtensions back on every transaction the order generates, so a
+		# fill arrives already carrying the key its simulated counterpart is
+		# filed under - no bookkeeping of our own is needed to join the two.
+		# Note: OANDA refuses clientExtensions on accounts linked to MT4, and
+		# limits the length of each field; check them against
+		# GET /v3/accounts/{id} before relying on long ids.
+		if event.has_attr('clientExtension') and event.clientExtension:
+			order["clientExtensions"] = event.clientExtension
 	
 		self.logger.debug("GOT REQUEST %s" % event.info() )
 

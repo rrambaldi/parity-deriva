@@ -124,7 +124,45 @@ class TestAG01Breakout(AGCase):
         self.reversal(s)
         buy, sell = self.sink.events
         self.assertEqual(buy.signalNumber, sell.signalNumber)
-        self.assertEqual(len(buy.signalNumber), 14)   # %Y%m%d%H%M%S
+
+    def test_the_signal_number_is_derived_from_the_data(self):
+        """
+        Was: datetime.today() to the second - so a replay could never be
+             joined to the live run it replayed, and signals landing in the
+             same second collided outright (116 shared one key in one replay).
+        Now: strategy, instrument, granularity and the candle's own time.
+        """
+        s = self.make()
+        first, second = self.reversal(s)
+        self.assertEqual(self.sink.events[0].signalNumber,
+                         "AG01:DE30_EUR:M5:%s" % second.time.strftime('%Y%m%dT%H%M%S'))
+
+    def test_replaying_the_same_candles_gives_the_same_key(self):
+        first = self.make()
+        self.reversal(first)
+        keys_one = [e.signalNumber for e in self.sink.events]
+        second = self.make()
+        self.reversal(second)
+        keys_two = [e.signalNumber for e in self.sink.events]
+        self.assertEqual(keys_one, keys_two)
+
+    def test_two_instruments_do_not_collide(self):
+        s = self.make(pairs=["DE30_EUR", "EUR_USD"])
+        for instrument in ("DE30_EUR", "EUR_USD"):
+            s.execute_event(self.candle(True, T0, instrument=instrument))
+            s.execute_event(self.candle(False, T0 + datetime.timedelta(minutes=1),
+                                        instrument=instrument))
+        keys = {e.signalNumber for e in self.sink.events}
+        self.assertEqual(len(keys), 2)
+        self.assertTrue(any('EUR_USD' in k for k in keys))
+
+    def test_successive_candles_do_not_collide(self):
+        s = self.make()
+        s.execute_event(self.candle(True, T0, base=11700.0))
+        s.execute_event(self.candle(False, T0 + datetime.timedelta(minutes=1), base=11710.0))
+        s.execute_event(self.candle(True, T0 + datetime.timedelta(minutes=2), base=11720.0))
+        keys = {e.signalNumber for e in self.sink.events}
+        self.assertEqual(len(keys), 2)
 
     def test_the_client_extension_tags_the_strategy(self):
         s = self.make()

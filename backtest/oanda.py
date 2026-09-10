@@ -24,6 +24,15 @@ class OANDABacktester(ExecutionHandler):
 		self._set(args,'setup', settings)
 		self._set(args,'currency', 'EUR')
 		self._set(args,'balance', 100000.0)
+		# Which candle stream drives the fills. An order is only ever matched
+		# against its own instrument - that is intrinsic and needs no
+		# configuration - but nothing in a candle says whether it is the
+		# stream this simulator should be reading, so when two granularities
+		# of the same instrument are on the bus, say the H1 the strategy sees
+		# and the M1 the simulator shadows it with, name the one to use.
+		# _set() only assigns when the default is not None, so seed it first
+		self.granularity = None
+		self._set(args,'granularity')
 
 	def dumpOrders(self):
 		for o in self.orders:
@@ -114,11 +123,17 @@ class OANDABacktester(ExecutionHandler):
 
 
 	def checkOrder(self, event):
+		if self.granularity is not None and getattr(event, 'granularity', None) != self.granularity:
+			return
+		instrument = getattr(event, 'instrument', None)
 		self.logger.debug("TIME: %s o:%6.2f h:%6.2f l:%6.2f c:%6.2f"
 			% ( event.time, event.mid['o'], event.mid['h'], event.mid['l'], event.mid['c']))
 		# snapshot: handleSLTP appends the stop/target to self.orders, and a
 		# child must not be matched against the very bar that opened the trade
 		for o in list(self.orders):
+			# an order is only ever filled by its own instrument's candles
+			if instrument is not None and getattr(o, 'instrument', None) != instrument:
+				continue
 			if o.state=='PENDING':
 				# a real broker fills on touch, so the bounds are inclusive
 				if o.units>0 and o.price >= event.ask['l'] and o.price <= event.ask['h']:
