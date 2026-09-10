@@ -52,7 +52,28 @@ writes gets its own temporary directory.
 | `offline_test.py` | the offline half of the parallel design: the simulator's own events, `backtest/offline.py`, `backtest/driver.py` |
 | `resolution_test.py` | `backtest/resolution.py`, reading a trade's outcome off candles |
 | `divergence_band_test.py` | `scripts/divergence_band.py`, the threshold calibration |
-| `parity_test.py` | `trading/parity.py`, the configurable alarm, and MoneyManager honouring it |
+| `parity_test.py` | `trading/parity.py`, the configurable alarm, MoneyManager honouring it, and the outcomes neither side can judge |
+| `providers_test.py` | `trading/providers.py`: the broker registry, and the capability refusals |
+| `etoro_test.py` | the eToro provider: `lib/etoro.py`, `data/etoro.py`, `execution/etoro.py` |
+
+## The eToro module's shape
+
+`etoro_test.py` is mostly refusals, which is what the eToro code is mostly
+made of: no API host means no client, an unmapped instrument means no order, a
+granularity eToro does not serve means no data source, a short without a stop
+means nothing sent. Each of those is a place where the alternative would be a
+plausible-looking value nobody measured.
+
+The rest is translation, pinned field by field, because the failure mode there
+is not a crash. An order with the trigger in the wrong field, or a fill whose
+price came from the wrong key, is a trade that happens at a price nobody
+chose.
+
+`MoneyManagerCompatibilityTest` is worth its own note. `Engine.run()` calls
+`os._exit(1)` when a handler raises, so a synthesised close event missing a
+field `MoneyManager.closeTrade` reads would take the process down with the
+trade still open. Those tests feed the real money manager the events the
+eToro poller builds.
 
 ## Class-level mutable state
 

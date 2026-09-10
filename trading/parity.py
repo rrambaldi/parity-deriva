@@ -10,6 +10,16 @@ from parity_deriva.trading.handler import ExecutionHandler
 OUTCOME = 'outcome'
 SLIPPAGE = 'slippage'
 UNPAIRED = 'unpaired'
+#: not a finding: a comparison that could not be made
+UNDECIDED = 'undecided'
+
+#: outcomes that mean "nobody could tell", as against "the trade ended this
+#: way". OANDA states which leg closed a trade; eToro reports only the rate
+#: it closed at, and data/etoro.closeReason() infers the leg from that rate
+#: and says UNKNOWN where the rate belongs to neither leg clearly - a manual
+#: close, a margin call, a gap. Counting that as a mismatch would score our
+#: own ignorance as the market disagreeing with the simulator.
+UNKNOWN_OUTCOMES = frozenset([None, '', 'UNKNOWN'])
 
 
 def policy_for(instrument, setup=None):
@@ -41,12 +51,19 @@ class ParityMonitor(ExecutionHandler):
 	"""
 	Watch a live account against its simulated shadow and raise the alarm.
 
-	Both are on the bus: the real execution handler and OANDA's transaction
-	stream on one side, the simulator on the other, publishing its own event
-	types so the two can be told apart. This handler joins them on the signal
-	key - which is a function of the candle that produced the signal, so the
-	same key appears on both sides and in any later replay - and counts where
-	they disagree.
+	Both are on the bus: the real execution handler and the broker's
+	transactions on one side, the simulator on the other, publishing its own
+	event types so the two can be told apart. This handler joins them on the
+	signal key - which is a function of the candle that produced the signal,
+	so the same key appears on both sides and in any later replay - and counts
+	where they disagree.
+
+	Which broker is behind the live side does not matter here, but what it can
+	report does. OANDA pushes a transaction naming the leg that closed a
+	trade; eToro pushes nothing and never names the leg, so its poller infers
+	it and marks it inferred, and says UNKNOWN when the closing rate belongs
+	to neither leg clearly. An UNKNOWN on either side makes that trade
+	undecidable rather than divergent - see UNKNOWN_OUTCOMES.
 
 	Judgement is deliberately not per trade. A simulator reading bars cannot
 	say which of the stop and the target a single bar reached first, so a
@@ -75,6 +92,7 @@ class ParityMonitor(ExecutionHandler):
 		self.window = collections.deque(maxlen=self.policy.get('window', 200))
 		self.divergences = []
 		self.reconciled = 0
+		self.undecided = 0
 		self.halted = False
 
 	# ---------------------------------------------------------------- intake
@@ -115,9 +133,16 @@ class ParityMonitor(ExecutionHandler):
 			return
 
 		found = []
-		if self._outcome(mine['close']) != self._outcome(theirs['close']):
-			found.append(Divergence(key, OUTCOME, "real %s, simulated %s" % (
-				self._outcome(mine['close']), self._outcome(theirs['close']))))
+		real, simulated = self._outcome(mine['close']), self._outcome(theirs['close'])
+		decidable = (real not in UNKNOWN_OUTCOMES
+					 and simulated not in UNKNOWN_OUTCOMES)
+		if not decidable:
+			self.undecided += 1
+			self.logger.warning(
+				"PARITY undecided %s: real %s, simulated %s" % (key, real, simulated))
+		elif real != simulated:
+			found.append(Divergence(key, OUTCOME,
+									"real %s, simulated %s" % (real, simulated)))
 
 		limit = self.policy.get('max_slippage')
 		if limit is not None and 'fill' in mine and 'fill' in theirs:
@@ -127,7 +152,11 @@ class ParityMonitor(ExecutionHandler):
 										"%.6f > %.6f" % (gap, limit)))
 
 		self.reconciled += 1
-		self.window.append(bool(found))
+		# An undecidable comparison enters the window only if something else
+		# about the trade diverged. Scoring it as agreement would dilute the
+		# rate and hide real mismatches behind trades nobody could judge.
+		if decidable or found:
+			self.window.append(bool(found))
 		self.divergences.extend(found)
 		for one in found:
 			self.logger.warning("PARITY %s" % one)
@@ -174,6 +203,10 @@ class ParityMonitor(ExecutionHandler):
 			if stranded > limit:
 				out.append("%d trades reported by one side only > %d"
 						   % (stranded, limit))
+		limit = self.policy.get('max_undecided')
+		if limit is not None and self.undecided > limit:
+			out.append("%d trades whose outcome could not be judged > %d"
+					   % (self.undecided, limit))
 		return out
 
 	def _judge(self):

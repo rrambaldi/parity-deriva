@@ -148,12 +148,22 @@ class FakeRequests(object):
 
     # -- requests.Request ------------------------------------------------
     def Request(self, method, url, headers=None, params=None, **kwargs):
+        # data/json are recorded too: the eToro client sends its order bodies
+        # this way, and a test that could only see the URL would be unable to
+        # assert on what was actually ordered.
         self.sent.append({"method": method, "url": url,
                           "headers": dict(headers or {}),
-                          "params": dict(params or {})})
+                          "params": dict(params or {}),
+                          "data": kwargs.get("data"),
+                          "json": kwargs.get("json")})
         req = mock.MagicMock()
         req.prepare.return_value = "PREPARED"
         return req
+
+    def body(self, index=-1):
+        """The JSON body of a recorded request, parsed."""
+        raw = self.sent[index].get("data")
+        return json.loads(raw) if raw else None
 
     # -- requests.Session ------------------------------------------------
     def Session(self):

@@ -8,9 +8,11 @@ the divergence itself is the signal, and it can raise an alarm or stop trading.
 That is where the name comes from: *parity* is the invariant you want between
 the simulated and the real side, *deriva* is what you measure when it breaks.
 
-Instruments are whatever OANDA v3 offers - the work so far has been on
+There are two brokers behind it, OANDA and eToro, chosen with one setting.
+Instruments are whatever the chosen one offers - the work so far has been on
 DE30_EUR and EUR_USD, so not only forex. Historical candles are warehoused
-locally in HDF5 so research runs offline.
+locally in HDF5 so research runs offline, which on eToro is a shallower
+warehouse than on OANDA for reasons set out below.
 
 Started as a fork of [QSForex](https://github.com/mhallsmoore/qsforex) by
 Michael Halls-Moore, and still MIT licensed (see below). Little of the
@@ -39,11 +41,16 @@ candles and the OANDA v3 API, then migrated from Python 2 to Python 3.
 * **Data warehouse** - `data/bulksaver.py` downloads years of candles into
   per-instrument HDF5 stores, one process per instrument, resuming where it
   left off; `scripts/check.py` audits those stores for missing bars.
+* **Two brokers** - `trading/providers.py` names the handlers each broker
+  needs and, more to the point, declares what each broker *cannot* do. A
+  wiring asks for the capabilities it needs and fails at startup when they
+  are missing, so an unsupported combination is a refusal rather than a run
+  that looks fine and is not. `scripts/live.py` is one wiring for either.
 * **Audit trail** - every event is written to a JSONL log and can be replayed.
 * **Performance** - `performance/analyze.py` reports win/loss statistics,
   consecutive runs and three flavours of optimal *f* over the closed trades
   pulled from the account.
-* **Tests** - 656 tests, no network access required.
+* **Tests** - 844 tests, no network access required.
 
 # Installation and Usage
 
@@ -116,7 +123,15 @@ You will now be able to run the subsequent commands correctly.
 
 ## Practice/Live Trading
 
-5) At this stage, if you simply wish to carry out practice or live trading then you can run ```python trading/run.py```, which wires an ```AG01``` strategy, a ```MoneyManager```, the OANDA execution handler and the price/transaction streams into the ```Engine```. The ```scripts/``` directory holds further ready-made wirings (```t01.py``` .. ```t05.py```, ```onlydata.py```). Do not point any of these at a live account until you have read what they do!
+5) At this stage, if you simply wish to carry out practice or live trading then run ```python scripts/live.py --dry-run```, which prints the stack it would build and the chosen broker's capabilities without touching the network. Drop ```--dry-run``` to run it. That wiring takes the broker as an argument and registers the strategy, the money manager, the real execution handler, the simulator shadowing it and the parity monitor comparing the two:
+
+```
+python scripts/live.py --dry-run
+python scripts/live.py --provider oanda --instrument DE30_EUR --granularity M5
+python scripts/live.py --provider etoro --instrument EUR_USD --granularity H1
+```
+
+The older wirings are still there: ```python trading/run.py``` wires an ```AG01``` strategy, the OANDA execution handler and the price/transaction streams into the ```Engine``` (note that it registers no ```MoneyManager```, so its strategy's signals reach nothing that sizes them), and ```scripts/t01.py``` .. ```t05.py``` and ```onlydata.py``` hold further ready-made OANDA stacks. None of those registers the parity monitor. Do not point any of these at a live account until you have read what they do!
 
 If you wish to create a more useful strategy, then simply create a new class with a descriptive name, e.g. ```MeanReversionMultiPairStrategy```. Strategies driven by the ```Engine``` subclass ```ExecutionHandler``` and implement ```execute_event(event)``` (see ```strategy/AG01.py``` and ```strategy/BO.py```); the backtester's example strategies instead implement ```calculate_signals(event)``` and take the ```pairs``` list plus the ```events``` queue.
 
@@ -158,6 +173,154 @@ And that's it! At this stage you are ready to begin creating your own backtests 
 If you have any questions about the installation then please feel free to email me at mike@quantstart.com.
 
 If you have any bugs or other issues that you think may be due to the codebase specifically, they may well be inherited from upstream: https://github.com/mhallsmoore/qsforex/issues
+
+## Choosing the broker: OANDA or eToro
+
+One setting, and the whole stack follows:
+
+```
+PROVIDER = os.environ.get('PARITY_DERIVA_PROVIDER', 'oanda')   # etc/settings.py
+```
+
+`DOMAIN` still decides practice against real, for both. On eToro that is not
+a different host but a different set of routes (`/trading/execution/demo/orders`
+against `/trading/execution/orders`), and `/demo` goes in a different place
+per route family, so `lib/etoro.py` spells out both variants of every route
+rather than transforming one into the other.
+
+The event bus does not change. Strategies, the money manager, the simulator
+and the parity monitor see the same events either way. What changes is what
+the broker on the other end can do, and that is declared rather than
+discovered:
+
+```
+python scripts/live.py --dry-run --provider etoro
+```
+
+prints the declaration. `trading/providers.py` holds it, a wiring asks for
+what it needs with `providers.require()`, and a missing capability is a
+startup error naming it. The alternative is worse than a crash: a strategy
+buying the high of a price series it believes is the ask.
+
+### What eToro does not have
+
+| | OANDA | eToro |
+| --- | --- | --- |
+| candles by date range | `from`/`to`, unlimited | **no** - only the last N, N ≤ 1000 |
+| bid/ask candles | three OHLC series | **one series**, no split |
+| price stream | pushed | **polled** |
+| transaction stream | pushed | **polled** |
+| STOP against LIMIT | different orders | **both become `mit`** |
+| which leg closed a trade | stated | **inferred from the closing rate** |
+| order expiry | `gtdTime` | **none** |
+| order result | in the reply | **200 means accepted, then poll** |
+| write rate limit | generous | **20 / 60s**, shared across every execution route |
+
+Five of those needed a decision rather than a translation.
+
+**One price series.** AG01 and AG02 read a candle's ask and bid - they buy
+the high of the ask and stop out at the low of the bid - and eToro serves one
+OHLC. No measurement recovers two numbers from one, so bid and ask are a
+model or they are nothing. `ETORO_SPREAD` is unset by default, which leaves
+candles carrying mid only, makes the provider decline `bid_ask_candles`, and
+makes those strategies refuse to start with a message saying why. Measure
+your own before setting it:
+
+```
+python scripts/etoro_spread.py --instrument EUR_USD --samples 60
+```
+
+Whatever you set is a constant standing in for something that varies by the
+hour, and the difference is what the parity alarm will be measuring. That is
+the right place for it: the model belongs under the alarm, not above it.
+
+**No history to speak of.** The candle route answers "the last N candles",
+N at most 1000, with no `from` or `to`. So `data/bulksaver.py` cannot be
+pointed at eToro, nothing can be backfilled, and an offline run makes one
+pass and stops - asking again would return the same window. Keep the research
+and the warehouse on OANDA.
+
+**One resting order type.** eToro has `mkt`, `mit` (market-if-touched) and
+`limitIOC`. A resting entry is `mit` with a trigger rate, and that single type
+covers AG01's breakout STOP above the market and AG02's fade LIMIT below it.
+The strategies and the simulator tell the two apart; the broker cannot. The
+provider declares `distinct_stop_limit` false rather than pretending, and
+where it matters the disagreement is exactly what the parity monitor exists
+to surface.
+
+**No expiry.** The strategies bracket one reversal with orders meant to die
+at the end of the day, and eToro leaves a resting order resting. So
+`data/etoro.py` cancels it once the `gtdTime` the order was issued with has
+passed, publishing an `OrderCancelEvent` so the real book and the simulator's
+drop it together. That is our action, not the broker's, it is logged each
+time, and `ETORO_ENFORCE_EXPIRY = False` turns it off.
+
+**No closing reason.** OANDA's transaction says which leg took the trade.
+eToro reports the rate it closed at, and `data/etoro.closeReason()` reads the
+leg off that: the stop and the target bound the interval the trade lived in,
+so a close at or beyond a level reached it and a close strictly between them
+reached neither and was something else - a manual close, a margin call, a
+gap. Stated that way the rule needs no invented tolerance. Where it errs it
+declines to judge: a target that slipped and filled just inside its level is
+reported `UNKNOWN` rather than claimed as a target.
+
+`trading/parity.py` therefore treats an `UNKNOWN` on either side as
+**undecidable** rather than as a divergence, and keeps it out of the window
+the mismatch rate is measured over. Counting our own ignorance as the market
+disagreeing with the simulator would have the alarm fire loudest on the
+broker that explains itself least, and counting it as agreement would dilute
+the rate - nineteen unjudgeable trades would hide one real mismatch under a
+5% threshold. `max_undecided` in `PARITY_ALARM` can alarm on being blind
+instead, and like every other threshold there it is off unless you set it.
+
+### Configuring eToro
+
+Credentials come from the environment. Use **either** a bearer token **or**
+the key pair - a request carrying both is rejected with 422, so setting both
+raises rather than being sent:
+
+```
+export ETORO_API_DOMAIN=...        # the public API host
+export ETORO_ACCESS_TOKEN=...      # OAuth bearer token
+# or
+export ETORO_USER_KEY=...
+export ETORO_API_KEY=...
+```
+
+`ETORO_API_DOMAIN` has no default on purpose. Every other host in
+`etc/settings.py` is one OANDA publishes; the eToro public API host is
+whatever your developer account gives you, and a guess would either fail
+obscurely or, worse, reach something. Unset, the client refuses to be built
+and says so.
+
+Then the instruments. This project names them the way OANDA does and eToro
+keys everything by a numeric id, and nothing derives one from the other, so
+`ETORO_INSTRUMENTS` has to be filled in:
+
+```
+python scripts/etoro_instruments.py EURUSD GER40
+```
+
+prints what the API answers, for you to check and paste. It deliberately
+stops there rather than resolving ids at runtime, where a search result would
+be quietly deciding which market the money goes into.
+
+The rest, all documented in `etc/settings.py`: `ETORO_LEVERAGE` (anything
+above 1 makes eToro require a stop loss, which the execution handler then
+refuses to send an order without - as it does for every short),
+`ETORO_SETTLEMENT_TYPE` (optional, and left unset because the eligible values
+differ per instrument, direction and leverage), and `ETORO_POLL_SECONDS`
+(nothing is pushed, so this is the resolution at which candles, prices, fills
+and closes arrive).
+
+### One thing the eToro path cannot see
+
+`data/etoro.EToroTransactions` learns which orders exist by listening to the
+bus for the acknowledgements the execution handler publishes, then polls after
+those. An order nobody acknowledged is invisible to it - a position opened
+from eToro's own app, say. The parity monitor counts unpaired trades
+separately for exactly this sort of reason, so such a position surfaces
+there rather than silently.
 
 ## The parity alarm
 

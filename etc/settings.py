@@ -15,6 +15,19 @@ ENVIRONMENTS = {
     }
 }
 
+# --------------------------------------------------------------------------
+# Which broker the stack talks to
+#
+# 'oanda' or 'etoro'. The event bus is the same either way - strategies, the
+# money manager, the simulator and the parity monitor do not know which is
+# behind them - but the two brokers are not the same shape, and what each can
+# do is declared in trading/providers.py rather than discovered. A wiring
+# asks for what it needs with providers.require() and fails at startup if the
+# chosen provider does not have it.
+#
+# DOMAIN below still decides practice against real, for both.
+PROVIDER = os.environ.get('PARITY_DERIVA_PROVIDER', 'oanda')
+
 CSV_DATA_DIR = os.environ.get('PARITY_DERIVA_CSV_DATA_DIR', ".")
 OUTPUT_RESULTS_DIR = os.environ.get('OUTPUT_RESULTS_DIR', ".")
 
@@ -97,6 +110,15 @@ PARITY_ALARM = {
     # the reverse - so it is deliberately tighter than the rate above
     'max_unpaired': 5,
 
+    # trades the two sides closed but whose outcome could not be judged at
+    # all. On OANDA this stays zero: the broker states which leg closed a
+    # trade. On eToro it does not, so data/etoro.closeReason() infers the leg
+    # from the closing rate and reports UNKNOWN where the rate belongs to
+    # neither leg clearly - and a monitor that is blind to the outcome is
+    # worth knowing about even though it is not itself a divergence.
+    # None disables the check rather than defaulting to something invented
+    'max_undecided': None,
+
     # 'warn' logs and keeps going; 'halt' also publishes StatusEvent('HALT'),
     # which MoneyManager honours by refusing further signals until a
     # StatusEvent('RESUME')
@@ -116,3 +138,85 @@ PARITY_ALARM_BY_INSTRUMENT = {
 # been silently rounded away.
 DEFAULT_PRICE_PRECISION = 5
 
+# --------------------------------------------------------------------------
+# eToro
+#
+# Credentials come from the environment, like OANDA's. Use EITHER a bearer
+# token OR the user-key/api-key pair - a request carrying both is rejected
+# with 422, so setting both raises here instead.
+#
+#   export ETORO_API_DOMAIN=...        # the public API host
+#   export ETORO_ACCESS_TOKEN=...      # OAuth bearer token
+#   # or
+#   export ETORO_USER_KEY=...
+#   export ETORO_API_KEY=...
+#
+# ETORO_API_DOMAIN has no default on purpose. Every other host in this file
+# is one OANDA publishes; the eToro public API host is whatever your
+# developer account gives you, and a wrong guess would either fail obscurely
+# or, worse, reach something. Unset, lib/etoro.EToroAPI refuses to be built
+# and says so.
+ETORO_API_DOMAIN = os.environ.get('ETORO_API_DOMAIN', '')
+ETORO_ACCESS_TOKEN = os.environ.get('ETORO_ACCESS_TOKEN', '')
+ETORO_USER_KEY = os.environ.get('ETORO_USER_KEY', '')
+ETORO_API_KEY = os.environ.get('ETORO_API_KEY', '')
+
+# This project names instruments the way OANDA does. eToro keys everything by
+# a numeric instrumentId, and the mapping between the two is not derivable -
+# 'DE30_EUR' and eToro's German index are the same market under two names and
+# an id only eToro knows. So it is configuration, and an unmapped instrument
+# raises rather than being resolved at runtime to whatever a search returns.
+#
+# Fill it in with:
+#     python scripts/etoro_instruments.py EUR_USD DE30_EUR
+# which prints what the API answers for a symbol, for you to paste here.
+# 'precision' is optional and overrides INSTRUMENT_PRECISION for eToro only.
+ETORO_INSTRUMENTS = {
+    # 'EUR_USD': {'symbol': 'EURUSD', 'instrumentId': None, 'precision': 5},
+    # 'DE30_EUR': {'symbol': 'GER40', 'instrumentId': None, 'precision': 1},
+}
+
+# eToro serves ONE OHLC per candle. OANDA serves three, and the strategies
+# read them: AG01 buys the high of the ask and stops out at the low of the
+# bid. Those two prices do not exist in eToro's candle data, and no
+# measurement recovers them, so bid and ask are a model or they are nothing.
+#
+# Unset (the default), candles carry mid only, the provider declines
+# bid_ask_candles, and a wiring that needs them refuses to start and says
+# why. That is the same rule PARITY_ALARM follows: a value nobody measured is
+# off, not filled in with something plausible.
+#
+# Set it to a spread in the instrument's own units, or per instrument:
+#     ETORO_SPREAD = 0.00008
+#     ETORO_SPREAD = {'EUR_USD': 0.00008, 'DE30_EUR': 1.2}
+# Half of it is applied either side of the served price. Measure your own
+# with scripts/etoro_spread.py before choosing one; whatever you pick is a
+# constant standing in for something that varies by the hour, and the
+# difference is what trading/parity.py will be measuring.
+ETORO_SPREAD = None
+
+# Leverage on every order. Anything above 1 makes eToro require a stopLossRate,
+# which execution/etoro.py then refuses to send an order without.
+ETORO_LEVERAGE = 1
+
+# Settlement type: cfd, real, realFutures or marginTrade. Optional on the v2
+# create route and left unset here, because the eligible values differ per
+# instrument, direction and leverage - POST /api/v2/trading/info/eligibility
+# lists the valid combinations for your account.
+ETORO_SETTLEMENT_TYPE = None
+
+# eToro does not expire orders. This project's strategies place brackets that
+# are meant to die at the end of the day, and a bracket still resting a week
+# later is not that trade any more, so data/etoro.EToroTransactions cancels a
+# resting order once the gtdTime it was issued with has passed. That is our
+# action, not the broker's, and it is logged each time. Set False and a
+# resting order rests until it triggers.
+ETORO_ENFORCE_EXPIRY = True
+
+# Seconds between polls. Nothing in the eToro public API is pushed, so this
+# is the resolution at which candles, prices, fills and closes arrive. The
+# published quotas are shared per group - 120/60s across eleven market-data
+# endpoints, 20/60s across every execution endpoint, 60/60s for order info -
+# and lib/etoro.RateLimiter paces against those, but a poll interval short
+# enough to fight the limiter just adds latency.
+ETORO_POLL_SECONDS = 5

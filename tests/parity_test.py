@@ -13,8 +13,8 @@ from unittest import mock
 from parity_deriva.event.event import (SimulatedFillEvent, StatusEvent,
                                        TransactionEvent)
 from parity_deriva.portfolio.moneymanager import MoneyManager
-from parity_deriva.trading.parity import (OUTCOME, SLIPPAGE, ParityMonitor,
-                                          policy_for)
+from parity_deriva.trading.parity import (OUTCOME, SLIPPAGE, UNKNOWN_OUTCOMES,
+                                          ParityMonitor, policy_for)
 from parity_deriva.tests.helpers import Recorder, TempDirCase
 
 
@@ -376,3 +376,128 @@ class TestTheMoneyManagerHonoursTheAlarm(TempDirCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUndecidableOutcomes(ParityCase):
+    """
+    A side that cannot say how a trade ended is not a side that disagrees.
+
+    OANDA states which leg closed a trade. eToro reports only the rate it
+    closed at, so data/etoro.closeReason() reads the leg off the rate and
+    says UNKNOWN where the rate reached neither level - a manual close, a
+    margin call, a gap. Scoring that as a mismatch would put our own
+    ignorance into the rate the alarm fires on, and the alarm would go off
+    loudest on the broker that explains itself least.
+    """
+
+    def test_what_counts_as_unable_to_say(self):
+        self.assertIn(None, UNKNOWN_OUTCOMES)
+        self.assertIn('UNKNOWN', UNKNOWN_OUTCOMES)
+        self.assertIn('', UNKNOWN_OUTCOMES)
+
+    def test_an_unknown_real_outcome_is_not_a_divergence(self):
+        mon = self.monitor()
+        self.trade(mon, 'k1', 'UNKNOWN', 'TAKE_PROFIT_ORDER')
+        self.assertEqual(mon.divergences, [])
+        self.assertEqual(mon.undecided, 1)
+
+    def test_an_unknown_simulated_outcome_is_not_a_divergence_either(self):
+        mon = self.monitor()
+        self.trade(mon, 'k1', 'TAKE_PROFIT_ORDER', 'UNKNOWN')
+        self.assertEqual(mon.divergences, [])
+        self.assertEqual(mon.undecided, 1)
+
+    def test_both_unknown_is_not_agreement_either(self):
+        """
+        Two sides that both shrug have not agreed on anything, so the trade
+        must not be counted as one that matched.
+        """
+        mon = self.monitor()
+        self.trade(mon, 'k1', 'UNKNOWN', 'UNKNOWN')
+        self.assertEqual(mon.divergences, [])
+        self.assertEqual(mon.undecided, 1)
+        self.assertEqual(len(mon.window), 0)
+
+    def test_an_undecidable_trade_is_still_reconciled(self):
+        """It was paired, so it must not linger in the unpaired count."""
+        mon = self.monitor()
+        self.trade(mon, 'k1', 'UNKNOWN', 'TAKE_PROFIT_ORDER')
+        self.assertEqual(mon.reconciled, 1)
+        self.assertEqual(mon.unpaired(), [])
+
+    def test_it_stays_out_of_the_window(self):
+        """
+        Counting it as agreement would dilute the rate: nineteen trades
+        nobody could judge would hide one real mismatch under a 5% threshold.
+        """
+        mon = self.monitor()
+        for i in range(19):
+            self.trade(mon, 'u%d' % i, 'UNKNOWN', 'TAKE_PROFIT_ORDER')
+        self.trade(mon, 'real', 'STOP_LOSS_ORDER', 'TAKE_PROFIT_ORDER')
+        self.assertEqual(len(mon.window), 1)
+        self.assertEqual(mon.rate(), 1.0)
+
+    def test_slippage_is_still_judged_on_an_undecidable_trade(self):
+        """
+        The outcome is what could not be read; the fill prices were both
+        reported, and comparing them needs no outcome at all.
+        """
+        mon = self.monitor(max_slippage=0.001)
+        self.trade(mon, 'k1', 'UNKNOWN', 'TAKE_PROFIT_ORDER',
+                   real_price=1.5, sim_price=1.6)
+        self.assertEqual([d.kind for d in mon.divergences], [SLIPPAGE])
+        self.assertEqual(mon.undecided, 1)
+
+    def test_a_trade_that_slipped_does_enter_the_window(self):
+        mon = self.monitor(max_slippage=0.001)
+        self.trade(mon, 'k1', 'UNKNOWN', 'TAKE_PROFIT_ORDER',
+                   real_price=1.5, sim_price=1.6)
+        self.assertEqual(list(mon.window), [True])
+
+    def test_a_decidable_mismatch_still_diverges(self):
+        """The new branch must not have swallowed the old one."""
+        mon = self.monitor()
+        self.trade(mon, 'k1', 'STOP_LOSS_ORDER', 'TAKE_PROFIT_ORDER')
+        self.assertEqual([d.kind for d in mon.divergences], [OUTCOME])
+        self.assertEqual(mon.undecided, 0)
+
+
+class TestUndecidedThreshold(ParityCase):
+    """
+    A monitor that can never read the outcome is blind, and being blind is
+    worth an alarm of its own - but only if the operator asked for one.
+    """
+
+    def test_unset_means_off(self):
+        mon = self.monitor(max_undecided=None)
+        for i in range(50):
+            self.trade(mon, 'u%d' % i, 'UNKNOWN', 'TAKE_PROFIT_ORDER')
+        self.assertEqual(mon.undecided, 50)
+        self.assertEqual(mon.breaches(), [])
+
+    def test_over_the_limit_is_a_breach(self):
+        mon = self.monitor(max_undecided=2)
+        for i in range(3):
+            self.trade(mon, 'u%d' % i, 'UNKNOWN', 'TAKE_PROFIT_ORDER')
+        breaches = mon.breaches()
+        self.assertEqual(len(breaches), 1)
+        self.assertIn('could not be judged', breaches[0])
+
+    def test_at_the_limit_is_not_a_breach(self):
+        mon = self.monitor(max_undecided=2)
+        for i in range(2):
+            self.trade(mon, 'u%d' % i, 'UNKNOWN', 'TAKE_PROFIT_ORDER')
+        self.assertEqual(mon.breaches(), [])
+
+    def test_it_can_halt_like_any_other_breach(self):
+        mon = self.monitor(max_undecided=0, action='halt')
+        self.trade(mon, 'u1', 'UNKNOWN', 'TAKE_PROFIT_ORDER')
+        self.assertEqual(self.sink.statuses(), ['HALT'])
+
+    def test_the_shipped_setting_is_off(self):
+        """
+        Consistent with every other threshold in PARITY_ALARM: a check the
+        operator has not set is off, not given a number we invented.
+        """
+        from parity_deriva.etc import settings
+        self.assertIsNone(policy_for('EUR_USD', settings).get('max_undecided'))
