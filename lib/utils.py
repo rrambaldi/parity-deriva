@@ -34,6 +34,40 @@ def serieToDict(serie):
 	pass
 
 
+def pricePrecision(instrument, setup=None):
+	"""
+	Decimal places OANDA accepts for an order price on this instrument.
+
+	Unknown instruments fall back to DEFAULT_PRICE_PRECISION and are logged,
+	because the alternative - guessing low - silently moves the level instead
+	of being rejected by the broker.
+	"""
+	table = INSTRUMENT_PRECISION
+	default = DEFAULT_PRICE_PRECISION
+	if setup is not None:
+		table = getattr(setup, 'INSTRUMENT_PRECISION', table)
+		default = getattr(setup, 'DEFAULT_PRICE_PRECISION', default)
+	if instrument in table:
+		return table[instrument]
+	logging.getLogger('parity_deriva.trading.trading').warning(
+		"no precision configured for %s, using %d decimals"
+		% (instrument, default))
+	return default
+
+
+def roundPrice(instrument, value, setup=None):
+	"""
+	Round a derived price to what the instrument accepts.
+
+	This exists because the strategies used to round to one decimal place
+	whatever the instrument. That is the DAX's precision; on EUR_USD it
+	collapsed a take profit of 1.22380 to 1.2, two figures the wrong side of
+	the entry, so the stop always triggered first and a live order would have
+	been rejected.
+	"""
+	return round(value, pricePrecision(instrument, setup))
+
+
 def dctFromOanda(dct,typ='mid', onlyohlc=False):
 	if onlyohlc:
 		return {

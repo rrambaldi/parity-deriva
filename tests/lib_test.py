@@ -13,7 +13,8 @@ from parity_deriva.lib.oanda import (OANDAObject, OANDAOrder, OANDATrade,
 from parity_deriva.lib.ohlc import ohlc
 from parity_deriva.lib.utils import (datetimeToString, timestampFromString,
                                granularityToTimedelta, dctFromOanda,
-                               serieToDict, getLogger)
+                               serieToDict, getLogger, pricePrecision,
+                               roundPrice)
 from parity_deriva.tests.helpers import T0, oanda_time
 
 
@@ -97,6 +98,60 @@ class TestDctFromOanda(unittest.TestCase):
 
     def test_default_price_type_is_mid(self):
         self.assertEqual(dctFromOanda(self.raw, onlyohlc=True)['o'], 1.0)
+
+
+class TestPricePrecision(unittest.TestCase):
+    """
+    How many decimals an order price may carry, per instrument.
+
+    Was: the AG strategies rounded every derived level to one decimal place,
+         which is the DAX's precision. On EUR_USD a take profit of 1.22380
+         became 1.2 - two figures below the entry of a buy - so the stop
+         always triggered first and OANDA would have rejected the order.
+    Now: the precision comes from the instrument.
+    """
+
+    def test_the_configured_instruments(self):
+        self.assertEqual(pricePrecision('EUR_USD'), 5)
+        self.assertEqual(pricePrecision('DE30_EUR'), 1)
+
+    def test_an_unknown_instrument_falls_back_to_the_default(self):
+        """
+        Erring towards too many decimals is deliberate: the broker rejects
+        the order loudly instead of silently accepting a moved level.
+        """
+        with self.assertLogs('parity_deriva.trading.trading', level='WARNING') as log:
+            got = pricePrecision('NOT_AN_INSTRUMENT')
+        self.assertEqual(got, 5)
+        self.assertTrue(any('no precision configured' in line for line in log.output))
+
+    def test_a_setup_can_override_the_table(self):
+        setup = mock.MagicMock()
+        setup.INSTRUMENT_PRECISION = {'XAU_USD': 2}
+        setup.DEFAULT_PRICE_PRECISION = 3
+        self.assertEqual(pricePrecision('XAU_USD', setup), 2)
+        with self.assertLogs('parity_deriva.trading.trading', level='WARNING'):
+            self.assertEqual(pricePrecision('EUR_USD', setup), 3)
+
+    def test_rounding_an_fx_level_keeps_five_decimals(self):
+        self.assertEqual(roundPrice('EUR_USD', 1.2238012345), 1.2238)
+        self.assertEqual(roundPrice('EUR_USD', 1.223867), 1.22387)
+
+    def test_rounding_an_index_level_keeps_one(self):
+        self.assertEqual(roundPrice('DE30_EUR', 11714.04), 11714.0)
+        self.assertEqual(roundPrice('DE30_EUR', 11714.06), 11714.1)
+
+    def test_an_fx_take_profit_stays_on_the_right_side_of_the_entry(self):
+        """The regression this exists for, with the real numbers that found it."""
+        entry, stop, spread = 1.22096, 1.21871, 0.00014
+        take = roundPrice('EUR_USD', entry + (entry - stop) * 1.2 + spread)
+        self.assertGreater(take, entry)
+        self.assertEqual(round(take, 1), 1.2)      # what the old code produced
+
+    def test_the_old_one_decimal_rounding_would_have_destroyed_it(self):
+        entry, stop, spread = 1.22096, 1.21871, 0.00014
+        raw = entry + (entry - stop) * 1.2 + spread
+        self.assertLess(round(raw, 1), stop)       # below the stop, let alone the entry
 
 
 class TestSerieToDict(unittest.TestCase):

@@ -210,6 +210,94 @@ class TestAG01Breakout(AGCase):
         self.assertEqual(len(self.sink.of('SIGNAL')), 2)
 
 
+class TestPerInstrumentPrecision(AGCase):
+    """
+    The levels a strategy derives are rounded to the instrument's precision.
+
+    Was: every level was rounded to one decimal place - the DAX's precision -
+         so on EUR_USD the take profit collapsed to 1.2, below the entry of a
+         buy. The stop always won and a live order would have been rejected.
+    Now: the precision comes from etc/settings.INSTRUMENT_PRECISION.
+    """
+
+    strategy = AG01
+
+    def fx_candle(self, up, dt, base):
+        """An EUR_USD-scale candle: five decimals, a 1.4 pip spread."""
+        o, c = (base, base + 0.0003) if up else (base + 0.0003, base)
+        def px(delta):
+            return {"o": "%.5f" % (o + delta), "h": "%.5f" % (max(o, c) + 0.0006 + delta),
+                    "l": "%.5f" % (min(o, c) - 0.0006 + delta), "c": "%.5f" % (c + delta)}
+        ev = CandleEvent({"time": dt.strftime("%Y-%m-%dT%H:%M:%S.%f") + "000Z",
+                          "volume": 10, "complete": True,
+                          "ask": px(0.00007), "bid": px(-0.00007), "mid": px(0.0)})
+        ev.instrument, ev.granularity = "EUR_USD", "H1"
+        return ev
+
+    def fx_reversal(self, s):
+        first = self.fx_candle(True, T0, 1.22000)
+        second = self.fx_candle(False, T0 + datetime.timedelta(hours=1), 1.22050)
+        s.execute_event(first)
+        s.execute_event(second)
+        return first, second
+
+    def make_fx(self):
+        s = AG01(pairs=["EUR_USD"], granularity="H1")
+        self.sink = Recorder()
+        s.set_queue(self.sink)
+        return s
+
+    def test_the_fx_take_profit_keeps_five_decimals(self):
+        s = self.make_fx()
+        first, second = self.fx_reversal(s)
+        buy = self.sink.events[0]
+        spread = second.ask['c'] - second.bid['c']
+        expected = round(buy.price + (buy.price - buy.stopLoss) * 1.2 + spread, 5)
+        self.assertEqual(buy.takeProfit, expected)
+
+    def test_the_fx_buy_take_profit_is_above_the_entry(self):
+        s = self.make_fx()
+        self.fx_reversal(s)
+        buy = self.sink.events[0]
+        self.assertGreater(buy.takeProfit, buy.price)
+        self.assertLess(buy.stopLoss, buy.price)
+
+    def test_the_fx_sell_take_profit_is_below_the_entry(self):
+        s = self.make_fx()
+        self.fx_reversal(s)
+        sell = self.sink.events[1]
+        self.assertLess(sell.takeProfit, sell.price)
+        self.assertGreater(sell.stopLoss, sell.price)
+
+    def test_one_decimal_rounding_would_have_broken_both_legs(self):
+        s = self.make_fx()
+        self.fx_reversal(s)
+        buy, sell = self.sink.events
+        self.assertEqual(round(buy.takeProfit, 1), 1.2)
+        self.assertLess(round(buy.takeProfit, 1), buy.stopLoss)
+        self.assertEqual(round(sell.takeProfit, 1), 1.2)
+
+    def test_the_index_levels_are_unchanged(self):
+        """DE30_EUR keeps one decimal, so nothing the strategy ever traded moves."""
+        s = self.make()
+        first, second = self.reversal(s)
+        buy = self.sink.events[0]
+        spread = second.ask['c'] - second.bid['c']
+        self.assertEqual(buy.takeProfit,
+                         round(buy.price + (buy.price - buy.stopLoss) * 1.2 + spread, 1))
+
+    def test_ag02_also_uses_the_instrument_precision(self):
+        s = AG02(pairs=["EUR_USD"], granularity="H1")
+        self.sink = Recorder()
+        s.set_queue(self.sink)
+        self.fx_reversal(s)
+        fade = self.sink.events[0]
+        spread = 0.00014
+        self.assertGreater(fade.stopLoss, fade.price)
+        self.assertEqual(fade.stopLoss, round(fade.stopLoss, 5))
+        self.assertNotEqual(round(fade.stopLoss, 1), fade.stopLoss)
+
+
 class TestAG02MeanReversion(AGCase):
 
     strategy = AG02

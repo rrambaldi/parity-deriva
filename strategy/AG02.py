@@ -3,6 +3,7 @@ import logging
 import datetime
 from parity_deriva.event.event import SignalEvent
 from parity_deriva.trading.handler import ExecutionHandler
+from parity_deriva.lib.utils import roundPrice
 
 
 class AG02(ExecutionHandler):
@@ -63,7 +64,7 @@ class AG02(ExecutionHandler):
 		sb.time = event.time
 		sb.takeProfit = min(p.bid['l'], event.bid['l'])
 		sb.price = max(p.ask['h'], event.ask['h'])
-		sb.stopLoss = round(sb.price + ( sb.price - sb.takeProfit ) * 1.2 + spread, 1)
+		sb.stopLoss = roundPrice(i, sb.price + ( sb.price - sb.takeProfit ) * 1.2 + spread)
 		sb.units = -1 ## sell
 		sb.type = 'LIMIT'
 		if self.event_queue is not None:
@@ -73,7 +74,7 @@ class AG02(ExecutionHandler):
 		ss = SignalEvent( sb.to_dict() )
 		ss.takeProfit = max(p.ask['h'], event.ask['h'])
 		ss.price = min(p.bid['l'], event.bid['l'])
-		ss.stopLoss = round(ss.price - ( ss.takeProfit - ss.price ) * 1.2 + spread,1)
+		ss.stopLoss = roundPrice(i, ss.price - ( ss.takeProfit - ss.price ) * 1.2 + spread)
 		ss.units = +1  ## SELL
 
 		if self.event_queue is not None:
