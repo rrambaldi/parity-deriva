@@ -8,6 +8,8 @@ from parity_deriva.event.event import ClientOrderEvent
 from parity_deriva.lib.oanda import OANDAOrder
 from parity_deriva.lib.oanda import OANDATrade
 from parity_deriva.event.event import Event
+from parity_deriva.event.event import SimulatedOrderEvent
+from parity_deriva.event.event import SimulatedFillEvent
 
 class OANDABacktester(ExecutionHandler):
 
@@ -71,10 +73,16 @@ class OANDABacktester(ExecutionHandler):
 		o = OANDAOrder(self.lastOrderID, event.to_dict())
 		o.state = 'PENDING'
 		self.orders.append(o)
-#		self.dumpOrders()
-		'''
-		qui dovrei inviare il segnale con l'orderID
-		'''
+		# Acknowledge it the way the broker does, so the signal it came from
+		# can be told which order id it now owns on this side.
+		self.queue_event(SimulatedOrderEvent({
+			'id': o.id,
+			'batchID': o.id,
+			'price': o.price,
+			'instrument': getattr(o, 'instrument', None),
+			'units': o.units,
+			'signalNumber': getattr(o, 'signalNumber', None),
+		}))
 
 
 	def handleSLTP(self, o, e):
@@ -92,6 +100,20 @@ class OANDABacktester(ExecutionHandler):
 			self.balance += gain
 			self.logger.info("******** CLOSED TRADE TYPE: %s PL: %d OPEN:%6.2f CLOSED:%6.2f BALANCE:%6.2f"
 				% (o.type, gain, o.orig.price, o.price, self.balance))
+			self.queue_event(SimulatedFillEvent({
+				'orderID': o.orig.id,
+				'closingOrderID': o.id,
+				'instrument': getattr(o, 'instrument', None),
+				'units': o.units,
+				'price': o.price,
+				'time': e.time,
+				'pl': gain,
+				'financing': 0.0,
+				'accountBalance': self.balance,
+				'reason': o.type,
+				'tradesClosed': [{'tradeID': o.orig.id, 'realizedPL': gain}],
+				'signalNumber': getattr(o.orig, 'signalNumber', None),
+			}))
 			return 
 
 		o.batchID = o.id
@@ -122,6 +144,23 @@ class OANDABacktester(ExecutionHandler):
 			self.logger.debug("== ADDED TAKE PROFIT @%f" % new.price)
 
 
+	def reportFill(self, o, event):
+		"""
+		Publish an opening fill. Only the parent order is reported here: the
+		stop and target legs report through handleSLTP when they close the
+		trade, which is the shape OANDA's transaction stream has.
+		"""
+		self.queue_event(SimulatedFillEvent({
+			'orderID': o.id,
+			'instrument': getattr(o, 'instrument', None),
+			'units': o.units,
+			'price': o.price,
+			'time': event.time,
+			'reason': 'ORDER_FILL',
+			'accountBalance': self.balance,
+			'signalNumber': getattr(o, 'signalNumber', None),
+		}))
+
 	def checkOrder(self, event):
 		if self.granularity is not None and getattr(event, 'granularity', None) != self.granularity:
 			return
@@ -139,10 +178,12 @@ class OANDABacktester(ExecutionHandler):
 				if o.units>0 and o.price >= event.ask['l'] and o.price <= event.ask['h']:
 					o.state='FILLED'
 					self.logger.info("===== FILLED BUY ORDER# %s %f [ %f %f ]" % (o.id, o.price, event.ask['l'], event.ask['h']))
+					self.reportFill(o, event)
 					self.handleSLTP(o, event)
 				if o.units<0 and o.price >= event.bid['l'] and o.price <= event.bid['h']:
 					o.state='FILLED'
 					self.logger.info("===== FILLED SELL ORDER# %s %f [ %f %f ]" % (o.id, o.price, event.bid['l'], event.bid['h']))
+					self.reportFill(o, event)
 					self.handleSLTP(o, event)
 			elif o.state=='FILLED':
 				pass

@@ -48,6 +48,8 @@ writes gets its own temporary directory.
 | `backtest_path_test.py` | the tick-CSV path: `data/price.py`, `strategy/strategy.py`, `Portfolio`, `Position`, drawdowns, `Backtest` |
 | `analyze_test.py` | `performance/analyze.py` trade statistics and optimal f |
 | `migrate_store_test.py` | `scripts/migrate_store.py`, the Python 2 store migration |
+| `resample_store_test.py` | `scripts/resample_store.py`, building a coarser granularity |
+| `offline_test.py` | the offline half of the parallel design: the simulator's own events, `backtest/offline.py`, `backtest/driver.py` |
 
 ## Class-level mutable state
 

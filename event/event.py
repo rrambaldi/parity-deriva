@@ -230,6 +230,34 @@ class OrderEvent(Event):
 		)
 
 
+class SimulatedOrderEvent(Event):
+	"""
+	The simulator acknowledging an order, the way the broker's reply does.
+
+	Deliberately not a ClientOrderEvent: in the parallel deployment the real
+	execution handler and the simulator are on the same bus, and a component
+	that cannot tell the two apart would act on both. Dispatch is on
+	str(event), so a distinct type is ignored by every existing handler
+	without them being changed.
+	"""
+
+	def info(self):
+		return "SIM ORDER id: %s @%s signal: %s" % (
+			self.id, self.price, getattr(self, 'signalNumber', None))
+
+
+class SimulatedFillEvent(Event):
+	"""
+	The simulator reporting a fill or a close, mirroring the fields OANDA's
+	ORDER_FILL transaction carries so the two can be compared field by field.
+	"""
+
+	def info(self):
+		closed = " CLOSE" if self.has_attr('tradesClosed') else ""
+		return "SIM FILL%s orderID: %s @%s signal: %s" % (
+			closed, self.orderID, self.price, getattr(self, 'signalNumber', None))
+
+
 class StatusEvent(Event):
 	def info(self):
 		return "STATUS msg: %s" % ( self.status )

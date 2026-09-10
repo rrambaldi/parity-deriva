@@ -93,16 +93,21 @@ class TestEventRouting(BacktesterCase):
             self.assertIsNone(self.bt.execute_event(ev))
         self.assertEqual(self.bt.orders, [])
 
-    def test_the_simulator_never_emits_events(self):
+    def test_the_simulator_reports_what_it_did(self):
         """
-        It records into its own book and logs; it publishes nothing back to
-        the Engine. Comparing it with reality therefore means reading its
-        state, not listening for events - that is the shape any reconciliation
-        component has to take.
+        Was: it recorded into its own book and published nothing, so nothing
+             downstream could learn that a simulated trade had opened.
+        Now: it publishes SIMULATEDORDER and SIMULATEDFILL - its own types,
+             not the broker's, so that in the parallel deployment a component
+             listening for the real thing does not act on them.
+
+        The events themselves are covered in tests/offline_test.py.
         """
         self.bt.execute_event(self.order())
         self.bt.execute_event(self.candle())
-        self.assertEqual(self.sink.events, [])
+        kinds = set(self.sink.kinds())
+        self.assertTrue(kinds)
+        self.assertLessEqual(kinds, {'SIMULATEDORDER', 'SIMULATEDFILL'})
 
 
 class TestOrderCreation(BacktesterCase):
