@@ -62,7 +62,14 @@ class ForexCandles(StreamHandler):
 			store_name  = "%s.hd5" % p
 			self.candles[p] = 0
 			self.curr[p] = pd.to_datetime(self.dtfrom)
-			s=pd.HDFStore(os.path.join(self.setup.DATA_DIR,store_name))[self.granularity]
+			# open read-only and close it: pd.HDFStore(path)[key] leaves the
+			# handle open in append mode, which then refuses any read-only
+			# open of the same file elsewhere in the process
+			store = pd.HDFStore(os.path.join(self.setup.DATA_DIR,store_name), mode='r')
+			try:
+				s = store[self.granularity]
+			finally:
+				store.close()
 			a=s.to_dict('split')
 			self.last[p] = min(s.index.max(), self.dtto)
 			self.samples[p] = len(s.loc[self.curr[p]:self.last[p]])

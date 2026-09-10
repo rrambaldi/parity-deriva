@@ -50,6 +50,8 @@ writes gets its own temporary directory.
 | `migrate_store_test.py` | `scripts/migrate_store.py`, the Python 2 store migration |
 | `resample_store_test.py` | `scripts/resample_store.py`, building a coarser granularity |
 | `offline_test.py` | the offline half of the parallel design: the simulator's own events, `backtest/offline.py`, `backtest/driver.py` |
+| `resolution_test.py` | `backtest/resolution.py`, reading a trade's outcome off candles |
+| `divergence_band_test.py` | `scripts/divergence_band.py`, the threshold calibration |
 
 ## Class-level mutable state
 
