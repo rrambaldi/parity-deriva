@@ -325,6 +325,38 @@ differ per instrument, direction and leverage), and `ETORO_POLL_SECONDS`
 (nothing is pushed, so this is the resolution at which candles, prices, fills
 and closes arrive).
 
+### What has been run against the live API
+
+On 2026-09-10, against a demo account whose granted scopes are `trade.demo`
+read and write with no `trade.real` of any kind - so these credentials cannot
+place a real-money order at all:
+
+* the client, the candle source and the rate source work, and the candle
+  source's completeness check was **wrong** until this run caught it: it
+  compared a UTC candle time against a local clock, so on a CEST host the bar
+  still forming was published as complete. No fixture could have shown that.
+* a resting `mit` order was accepted, reported `PendingTriggeredRate` with
+  every field echoed back as sent, and cancelled to `Canceled`.
+* re-sending an order under the same derived key was **refused** with a 400
+  naming the original order, which is the idempotency property the uuid5 key
+  exists for, enforced by eToro rather than merely intended.
+* a market order filled, the poller assembled the fill from the lookup, the
+  position was closed, and `closeReason()` read the manual close as `UNKNOWN`
+  - correctly, since it reached neither the stop nor the target.
+
+Two things the API does not do that the OpenAPI suggests it might.
+`orders:lookup?referenceId=` answered 404 for an order the same route
+returned by `orderId`, so the derived key is an idempotency key and not a
+handle; nothing here relies on it. And a fill's `marketSpread` and `markup`
+come back in a unit the API never states, which cannot be price - 0.01 on a
+1.16 instrument would be a hundred pips, and the round trip's realised P&L
+says otherwise.
+
+What remains unexercised is the path that matters most and cannot be
+rehearsed: a bracket left resting until one leg triggers and the other is
+cancelled, its stop or target actually taken, and the parity monitor judging
+the pair. That needs a market, not a test.
+
 ### One thing the eToro path cannot see
 
 `data/etoro.EToroTransactions` learns which orders exist by listening to the

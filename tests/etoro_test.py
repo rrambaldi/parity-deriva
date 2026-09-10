@@ -1522,6 +1522,26 @@ class EToroExecutionTest(unittest.TestCase):
         self.handler.execute_event(order_event())
         self.assertEqual(self.sink.events, [])
 
+    def test_a_duplicate_is_refused_by_the_broker_and_not_acknowledged(self):
+        """
+        The idempotency claim, in the shape eToro actually answers it. Sending
+        an order whose derived key has been used returns:
+
+            400 Validation failed: ReferenceID <key> may already exists
+                for CID <account> and OrderID <the original>
+
+        so the retry is refused rather than duplicated, and nothing must be
+        published - a second acknowledgement would have the money manager
+        record a second order and the poller wait on it.
+        """
+        self.api.queue('create_order', 400, {
+            'message': 'Validation failed: \n -- : ReferenceID '
+                       '59054f3b-876f-5416-8ad4-2324d7d3817b may already '
+                       'exists for CID 8441083 and OrderID 380566920 '
+                       'Severity: Error'})
+        self.handler.execute_event(order_event())
+        self.assertEqual(self.sink.events, [])
+
     def test_a_200_without_an_order_id_is_treated_as_a_rejection(self):
         """
         Acknowledging it would leave the poller watching an order id of None

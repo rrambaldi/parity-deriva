@@ -20,13 +20,16 @@ median.
 A model set to the median under-prices half the fills by construction; the
 difference is what trading/parity.py then measures as slippage.
 
-And read what comes out as a floor rather than as the answer. This feed is a
-quote, not the tradable price: a fill's openingData reports marketSpread and
-markup as separate fields, so execution adds a cost this route never shows.
-Measured on EUR_USD it gave a tenth of a pip, an order of magnitude tighter
-than eToro's published forex spread - consistent across the v1 and v2 routes,
-so a real quote, and still not what an order pays. The figure that settles it
-is marketSpread + markup on a fill.
+One demo round trip was used to check whether this feed bears any relation to
+what an order pays, because a tenth of a pip on EUR_USD looks too tight to be
+one. It does: 900 units in and out at market cost 0.04 USD in realised P&L,
+about 0.4 pips over the whole trip, which the feed's 0.00001 accounts for and
+a spread of pips would not. A fill also reports marketSpread and markup, but
+in a unit the API never states and which cannot be price - 0.01 on a 1.16
+instrument would be a hundred pips - so do not compute a level from those.
+
+Still, the real account may price differently from the demo one, and the
+figure to trust there is the P&L of a round trip you actually did.
 """
 
 import argparse

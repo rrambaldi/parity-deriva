@@ -144,9 +144,27 @@ def requestId(*parts):
 	idempotency key on the order routes, echoing it back as referenceId. A
 	uuid4 would satisfy the format and throw away everything useful: a
 	deterministic id means the same order cannot be placed twice by a retry,
-	the fill can be looked up by referenceId without remembering the broker's
-	orderId, and a replay of the same candles produces the same ids as the
-	live run - which is what makes the two comparable at all.
+	and a replay of the same candles produces the same ids as the live run,
+	which is what makes the two comparable at all.
+
+	The first of those is enforced by eToro rather than merely intended.
+	Re-sending an order with the same derived key was answered:
+
+	    400 Validation failed: ReferenceID <key> may already exists
+	        for CID <account> and OrderID <the original>
+
+	so a retry is refused, not duplicated, and execution/etoro.py treats that
+	400 as a rejection and publishes no second acknowledgement.
+
+	What does NOT work, though the OpenAPI offers it, is finding the order
+	again by that key: GET .../orders:lookup?referenceId=<key> answered 404
+	"No external operation was found" on the demo account, minutes after the
+	order was accepted, while the same route answered 200 for the same order
+	by orderId. Note also that the 400 above named a different order id than
+	the create call returned, so eToro appears to key its external-operation
+	record on something other than the public order id. Nothing here relies
+	on it - data/etoro.EToroTransactions polls by orderId, which it keeps
+	from the acknowledgement.
 
 	Called with no parts it does return a uuid4, for the reads where there is
 	nothing to be idempotent about.

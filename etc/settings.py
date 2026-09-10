@@ -201,25 +201,35 @@ ETORO_INSTRUMENTS = {
 # off, not filled in with something plausible.
 #
 # Set it to a spread in the instrument's own units, or per instrument:
-#     ETORO_SPREAD = 0.0001
-#     ETORO_SPREAD = {'EUR_USD': 0.0001, 'DE30_EUR': 2.2}
+#     ETORO_SPREAD = 0.00001
+#     ETORO_SPREAD = {'EUR_USD': 0.00001, 'DE30_EUR': 2.2}
 # Half of it is applied either side of the served price.
 #
-# scripts/etoro_spread.py samples the rates route, and one thing it found is
-# worth knowing before trusting it. On 2026-09-10, quiet market, twelve
-# samples, it reported a spread constant to the last digit: 0.00001 on
-# EUR_USD and 2.20 on GER40. The index figure is credible - eToro charges a
-# fixed spread on indices. The EUR_USD one is a tenth of a pip, an order of
-# magnitude tighter than eToro's published forex spread, and the v1 rates
-# route agrees with it, so the feed is consistent rather than wrong: it is
-# simply not the tradable price. A fill's openingData carries marketSpread
-# and markup as SEPARATE fields, which is the API saying that execution
-# applies its own cost on top of this quote.
+# What one demo round trip actually measured, on 2026-09-10 in a quiet market
+# (EUR_USD, 900 units, market in and market out about thirty seconds apart):
 #
-# So the rates route gives a floor, not the spread an order meets. The figure
-# that settles it is marketSpread + markup on a real fill - one demo trade
-# reports both. Until then, a value taken from the feed alone will have the
-# strategies computing levels as if entering cost nothing.
+#   the rates route, twelve samples, constant to the last digit
+#                                        0.00001 on EUR_USD, 2.20 on GER40
+#   the fill's openingData               marketSpread 0.01, markup 0.02
+#   the realised result                  netProfit -0.04 USD, fees 0.00,
+#                                        open 1.16124, close 1.16120
+#
+# The last line is the only one in units anybody can check: 0.4 pips of
+# adverse movement over the whole round trip on a 900-unit position. That is
+# consistent with the feed's 0.00001 and rules out a spread of pips being
+# charged on top of it.
+#
+# marketSpread and markup are therefore NOT price differences - 0.01 on a
+# 1.16 instrument would be a hundred pips, which the P&L flatly contradicts.
+# Read as percentages they come to roughly one and two pips, the right order
+# of magnitude for eToro's published forex spread, but the API does not state
+# their unit and this has not been established. Do not compute a level from
+# them.
+#
+# So the feed is a defensible starting point after all, at least on the demo
+# account. The real account may price differently, and the figure to trust
+# there is the one this table's last line is made of: the P&L of a round trip
+# you actually did.
 ETORO_SPREAD = None
 
 # Leverage on every order. Anything above 1 makes eToro require a stopLossRate,
