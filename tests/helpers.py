@@ -1,12 +1,15 @@
 """
-Shared fixtures for the parity_deriva characterisation suite.
+Shared fixtures for the parity_deriva test suite.
 
-The suite is deliberately a *characterisation* suite: it pins down what the
-code does today, quirks included, so the behaviour of the simulated side can
-be trusted as a reference when it runs in parallel with live execution.
-Where a test documents something that looks wrong, the docstring says so
-explicitly and the assertion still describes current behaviour - changing the
-code should make that test fail on purpose.
+Was: a characterisation suite. It pinned down what the code did, quirks
+     included, so the defects could be found and then fixed without guessing
+     at the original intent. A failing test was the intended signal that a
+     quirk had been addressed.
+Now: those defects are fixed and the assertions describe the intended
+     behaviour, so a failing test is a regression. Tests that used to pin a
+     defect carry a Was/Now note, which is why a few of them are oddly
+     specific - about filling on touch, say, or about which bar a child order
+     becomes live on.
 """
 
 import datetime

@@ -1,5 +1,5 @@
 """
-Characterisation tests for the tick-CSV backtest path inherited from upstream
+Tests for the tick-CSV backtest path inherited from upstream
 parity-deriva: HistoricCSVPriceHandler, the example strategies, Portfolio/Position
 accounting, the drawdown maths and the Backtest driver.
 
@@ -80,6 +80,12 @@ class TestPriceHandlerHelpers(unittest.TestCase):
         self.assertEqual(ask, Decimal("0.66521"))
 
     def test_the_inverted_quote_keeps_the_spread_the_right_way_round(self):
+        """
+        Was: bid and ask were reciprocated in place and returned unswapped, so
+             the inverted quote had its spread inside out - the inverted bid
+             came out above the inverted ask.
+        Now: 1/ask is the lower of the two and is returned as the bid.
+        """
         _, bid, ask = handler_invert()
         self.assertLess(bid, ask)
 
@@ -335,8 +341,10 @@ class TestPortfolioBookkeeping(PortfolioCase):
 
     def test_the_header_is_on_disk_straight_away(self):
         """
-        create_equity_file() flushes, so a crash before the first tick still
-        leaves a readable file rather than an empty one.
+        Was: create_equity_file() wrote the header and returned without
+             flushing, so a crash before the first tick left an empty
+             backtest.csv behind.
+        Now: it flushes, and the file is readable immediately.
         """
         self.portfolio()
         with open(self.path("backtest.csv")) as fh:
@@ -482,7 +490,11 @@ class TestCreateDrawdowns(unittest.TestCase):
         self.assertTrue(drawdown.index.equals(curve.index))
 
     def test_the_first_point_is_a_zero_drawdown(self):
-        """Position 0 is filled in rather than left NaN."""
+        """
+        Was: the loop started at index 1, so position 0 of both the drawdown
+             and the duration series stayed NaN.
+        Now: position 0 is filled in as a zero drawdown of zero duration.
+        """
         drawdown, max_dd, duration = create_drawdowns(self.curve([1.0, 1.2, 1.1]))
         self.assertEqual(drawdown.iloc[0], 0.0)
         self.assertFalse(np.isnan(max_dd))
@@ -490,9 +502,11 @@ class TestCreateDrawdowns(unittest.TestCase):
 
     def test_an_opening_fall_is_measured(self):
         """
-        The high water mark is seeded with the first observation, so a curve
-        that drops from the very first bar shows the fall. Seeding with 0 used
-        to make drawdown[1] exactly 0 whatever happened.
+        Was: the high water mark was seeded with 0 instead of with the first
+             observation, which made hwm[1] equal pnl[1] whatever happened -
+             so drawdown[1] was always exactly 0 and a fall from the very
+             first bar was invisible.
+        Now: the seed is the first observation and the fall is measured.
         """
         drawdown, max_dd, duration = create_drawdowns(self.curve([1.0, 0.5, 0.4]))
         self.assertAlmostEqual(drawdown.iloc[1], 0.5)

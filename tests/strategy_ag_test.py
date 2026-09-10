@@ -1,5 +1,5 @@
 """
-Characterisation tests for the AG strategies, the only ones that trade.
+Tests for the AG strategies, the only ones that trade.
 
 Both react to a change of candle direction ("engulfing") by bracketing the
 two-bar range with a pair of opposite pending orders. AG01 brackets it with
@@ -153,7 +153,12 @@ class TestAG01Breakout(AGCase):
         self.assertEqual(sell.time, second.time)
 
     def test_the_expiry_matches_the_configured_time(self):
-        """replace() used to be handed the hour where the seconds belong."""
+        """
+        Was: replace() was handed second=int(gtdTime[0]) - the hour - where
+             the seconds belong, so with the default "23:59:59" every order
+             expired at 23:59:23.
+        Now: the seconds come from gtdTime[2].
+        """
         s = self.make()
         self.reversal(s)
         gtd = self.sink.events[0].gtdTime

@@ -1,5 +1,5 @@
 """
-Characterisation tests for parity_deriva.event.event.
+Tests for parity_deriva.event.event.
 
 This module is the data contract shared by the live and the simulated side,
 so its coercion rules matter more than anywhere else: if a field silently
@@ -243,9 +243,12 @@ class TestCandleEvent(unittest.TestCase):
     def test_shape_helpers_ignore_their_price_argument(self):
         """
         direction/isBear/isBull/vola/ratio all call self.price() with no
-        argument, so passing 'A' or 'B' still measures mid. Every strategy
-        calls event.direction() bare, so this has never mattered - but a
-        real-vs-simulated check on ask/bid would be silently wrong.
+        argument, so passing 'A' or 'B' still measures mid.
+
+        Was and still is: unchanged, because every caller in the codebase uses
+        the bare form and the fix would silently change what existing research
+        measured. It is pinned so the limit is visible: a real-vs-simulated
+        check that reads ask or bid through these helpers would be wrong.
         """
         ev = CandleEvent({"mid": {"o": 2, "h": 3, "l": 0, "c": 1},
                           "ask": {"o": 1, "h": 3, "l": 0, "c": 2},
@@ -370,10 +373,15 @@ class TestSignalAndOrderEvents(unittest.TestCase):
 
 class TestStatusEventDispatchTrap(unittest.TestCase):
     """
-    The strategies gate their final report on `str(event) == 'DONE'`, but
-    str() of a StatusEvent is 'STATUS' - the payload lives in .status. So the
-    end-of-run statistics never print. Pinned here because it is the single
-    most consequential quirk for the research workflow.
+    str() of a StatusEvent is 'STATUS' whatever it carries; the payload lives
+    in .status. That is correct and deliberate - handlers dispatch on the
+    event kind - but it is a trap for anyone comparing str(event) against a
+    payload value.
+
+    Was: every strategy gated its end-of-run report on `str(event) == 'DONE'`,
+         which is never true, so the research tables never printed at all.
+    Now: the strategies test event.status. This test guards the Event side of
+         that contract, so the trap cannot be reintroduced silently.
     """
 
     def test_status_event_stringifies_to_status_not_to_its_payload(self):

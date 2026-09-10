@@ -1,4 +1,4 @@
-"""Characterisation tests for parity_deriva.lib (utils, ohlc, candle, oanda)."""
+"""Tests for parity_deriva.lib (utils, ohlc, candle, oanda)."""
 
 import datetime
 import os
@@ -195,7 +195,13 @@ class TestOhlc(unittest.TestCase):
                          "2017-02-01 10:00:00 O:1.0 H:3.0 L:0.5 C:2.0 V:9")
 
     def test_from_oanda_reads_the_requested_price_type(self):
-        """It used to index the literal key 'type' instead of the argument."""
+        """
+        Was: the method indexed the literal key 'type' instead of the price
+             type it was passed, so it raised KeyError however it was called.
+             Nothing in the codebase reached it, which is why that went
+             unnoticed.
+        Now: it reads dct[typ].
+        """
         raw = {"time": oanda_time(T0), "volume": 3,
                "mid": {"o": 1, "h": 2, "l": 0, "c": 1.5},
                "ask": {"o": 1.2, "h": 2.2, "l": 0.2, "c": 1.7}}
@@ -231,8 +237,13 @@ class TestCandle(unittest.TestCase):
         self.assertEqual(str(c), "O: 1.000000 H: 2.000000 L: 0.000000 C: 1.500000")
 
     def test_the_constructor_accepts_ohlc(self):
-        """The initialiser used to be misspelled `__init`, so the class had
-        no __init__ at all and only the no-arg form worked."""
+        """
+        Was: the initialiser was spelled `__init`, which Python mangles to
+             _Candle__init, leaving the class with no __init__ at all -
+             Candle(1,2,3,4) raised TypeError and only the no-argument form
+             worked.
+        Now: the constructor takes o/h/l/c, or a dict.
+        """
         c = Candle(1, 2, 0, 1.5)
         self.assertEqual((c.o, c.h, c.l, c.c), (1.0, 2.0, 0, 1.5))
 

@@ -1,5 +1,5 @@
 """
-Characterisation tests for the OANDA-facing data sources.
+Tests for the OANDA-facing data sources.
 
 Nothing here touches the network: `requests` is replaced by a fake that
 records the prepared request and hands back canned bodies. What is pinned is
@@ -141,10 +141,11 @@ class TestForexCandlesStreaming(CandlesCase):
 
     def test_a_block_ending_exactly_on_dtto_terminates(self):
         """
-        The stop condition is `last[pair] >= dtto`. With a strict > a block
-        whose final complete candle sat exactly on the requested end date left
-        the historic loop spinning, re-requesting and re-publishing the same
-        block forever with sleep == 0.
+        Was: the stop condition was a strict `last[pair] > dtto`, so a block
+             whose final complete candle sat exactly on the requested end date
+             left the historic loop spinning - with sleep == 0, a busy loop
+             re-requesting and re-publishing the same block forever.
+        Now: the comparison is >=, and the run ends on that block.
         """
         src = self.build(FakeResponse(candles_response(4)), dtfrom=T0,
                          dtto=T0 + datetime.timedelta(minutes=3))
@@ -255,9 +256,12 @@ class TestResampler(CandlesCase):
 
     def test_historic_mode_terminates_on_its_own(self):
         """
-        stream_to_queue now advances self.last, so the historic stop condition
-        can actually fire. The line doing so used to sit inside a commented-out
-        block, which left the loop spinning forever.
+        Was: the line advancing self.last sat inside a commented-out block, so
+             the historic stop condition could never fire and the loop span
+             forever.
+        Now: the clock advances and the run ends. Only that one line was
+             restored; the rest of the commented block would double-publish,
+             since the aggregated candle is emitted further down.
         """
         src = self.build(self.canned(25), granularity="M1", dtfrom=T0,
                          dtto=T0 + datetime.timedelta(minutes=1))
@@ -389,6 +393,11 @@ class TestPriceStream(TempDirCase):
         self.assertIsInstance(src.prices["EURUSD"]["ask"], Decimal)
 
     def test_the_inverse_pair_is_filled_in(self):
+        """
+        Was: bid and ask were reciprocated in place, which leaves the inverted
+             spread inside out - the inverted bid came out above the ask.
+        Now: 1/ask is the lower of the two and becomes the inverted bid.
+        """
         src = self.build(self.price())
         src.stream_to_queue()
         # the inverted bid is the reciprocal of the ask
@@ -397,7 +406,11 @@ class TestPriceStream(TempDirCase):
         self.assertLess(src.prices["USDEUR"]["bid"], src.prices["USDEUR"]["ask"])
 
     def test_both_the_pair_and_its_inverse_are_timestamped(self):
-        """The direct pair's "time" slot used to be left at None forever."""
+        """
+        Was: only the inverted pair was timestamped, so anything reading
+             prices[pair]["time"] for the traded pair saw None forever.
+        Now: both slots carry the quote time.
+        """
         src = self.build(self.price())
         src.stream_to_queue()
         self.assertIsNotNone(src.prices["EURUSD"]["time"])

@@ -1,5 +1,5 @@
 """
-Characterisation tests for parity_deriva.portfolio.moneymanager.
+Tests for parity_deriva.portfolio.moneymanager.
 
 MoneyManager is the bookkeeper: it turns signals into sized orders, keeps the
 signalNumber -> [orders] index, emulates OCO by cancelling the losing leg of a
@@ -236,9 +236,12 @@ class TestTradeClose(MoneyManagerCase):
 
     def test_a_close_leaves_other_signal_groups_alone(self):
         """
-        Only the group holding the closed order is retired. `found` used to be
-        initialised outside the loop and never reset, so every group visited
-        after the match disappeared too.
+        Only the group holding the closed order is retired.
+
+        Was: `found` was initialised outside the loop over signal groups and
+             never reset, so once one group matched, every group visited after
+             it was moved to processed and deleted with its orders untouched.
+        Now: the flag is reset per group.
         """
         self.mm.execute_event(self.signal(units=1, price=11710.0, number="S1"))
         self.mm.execute_event(self.acknowledge(11, price=11710.0, number="S1"))

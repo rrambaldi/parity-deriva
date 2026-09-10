@@ -1,5 +1,5 @@
 """
-Characterisation tests for the persistence layer: the HDF5 candle warehouse
+Tests for the persistence layer: the HDF5 candle warehouse
 (BulkSaver, CandleSaver), the offline replay that reads it back, and the JSONL
 event log (EventSaver / EventReplay).
 
@@ -243,10 +243,15 @@ class TestCandleSaver(TempDirCase):
 
     def test_re_saving_an_existing_bar_does_not_duplicate_it(self):
         """
-        A re-delivered candle - what a reconnecting live feed produces - has
-        to land on the row already stored. The old update path assigned into
-        the DataFrame that HDFStore hands back, which is a copy, so the write
-        was lost; the row is now removed and re-appended.
+        A re-delivered candle is what a reconnecting live feed produces, so it
+        has to land on the row already stored.
+
+        Was: the update path assigned into the DataFrame that
+             HDFStore.__getitem__ returns, which is a copy, then returned as
+             if it had saved - the bar was neither updated nor appended, it
+             simply vanished. pandas 3 flags that code itself, with
+             ChainedAssignmentError.
+        Now: the row is removed from the table and re-appended.
         """
         saver = self.build()
         saver.execute_event(self.candle())

@@ -1,5 +1,5 @@
 """
-Characterisation tests for parity_deriva.execution.execution.
+Tests for parity_deriva.execution.execution.
 
 Everything here runs against a fake HTTPSConnection: no request ever leaves
 the machine. The point is to pin the exact wire format of an OANDA v3 order,

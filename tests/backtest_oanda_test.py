@@ -1,11 +1,18 @@
 """
-Characterisation tests for parity_deriva.backtest.oanda.OANDABacktester.
+Tests for parity_deriva.backtest.oanda.OANDABacktester.
 
 This is the local broker simulator. In scripts/t01.py and t02.py it is
 registered on the Engine alongside the real OANDAExecutionHandler, so the
 same ORDER events are executed twice - once for real, once in simulation.
-Anything this class gets wrong shows up as a false divergence (or hides a
-real one), which is why the fidelity gaps below are pinned explicitly.
+Anything this class gets wrong shows up as a false divergence, or hides a
+real one, so its fidelity to a live account is what these tests are about.
+
+Was: six of those tests described fidelity gaps that the simulator had, and
+     asserted the wrong behaviour on purpose so it could not drift further.
+Now: the gaps are fixed and the assertions describe a real account. Each such
+     test keeps a Was/Now note, because that history is why some of them look
+     oddly specific about touching an extreme or about which bar a child order
+     becomes live on.
 """
 
 import datetime
@@ -328,8 +335,15 @@ class TestCancel(BacktesterCase):
 
     def test_cancel_matches_on_price_and_ignores_the_order_id(self):
         """
-        Two resting orders at the same price cannot be told apart: the first
-        one in the book is cancelled whatever orderID the event names.
+        Two orders resting at the same price on the same instrument still
+        cannot be told apart: the first in the book is cancelled whatever
+        orderID the event names.
+
+        Was: price was the only field compared, so a cancel could hit an order
+             on a different instrument.
+        Now: instrument and price are both compared. The broker's orderID
+             remains unusable - the simulator numbers its own orders - so this
+             residual ambiguity is by construction, not an oversight.
         """
         self.bt.execute_event(self.order(price=11700.0, sl=None, tp=None))
         self.bt.execute_event(self.order(price=11700.0, sl=None, tp=None))

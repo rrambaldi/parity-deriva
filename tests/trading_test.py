@@ -1,5 +1,5 @@
 """
-Characterisation tests for parity_deriva.trading (handler contract + Engine).
+Tests for parity_deriva.trading (handler contract + Engine).
 
 The Engine is where a live execution handler and the local simulator run side
 by side on the same event stream, so its dispatch order, its shared state and
@@ -271,10 +271,13 @@ class TestEngineRunLoop(unittest.TestCase):
 
     def test_a_finished_stream_thread_stops_the_process_cleanly(self):
         """
-        A producer that returns ends the run. The engine no longer aborts with
-        status 1: it drains what is still queued, gives every handler its
-        quit() hook and exits 0, so "the feed ended" is distinguishable from a
-        crash and the closing events are not lost.
+        A producer that returns ends the run.
+
+        Was: os._exit(1) fired the moment a producer returned - no drain, no
+             shutdown hook, and a supervisor could not tell "the feed ended"
+             from "it crashed".
+        Now: the queue is drained, quit() runs on every handler, and the exit
+             status is 0.
         """
         code, seen = self._run(4, "shutdown.txt")
         self.assertEqual(code, 0)
@@ -283,8 +286,12 @@ class TestEngineRunLoop(unittest.TestCase):
     def test_the_queue_is_drained_when_the_producer_returns_immediately(self):
         """
         The producer enqueues everything and returns without waiting, so the
-        events are still queued when the liveness check fires. They used to go
-        down with the process; drain() now delivers them.
+        events are still queued when the liveness check fires.
+
+        Was: they went down with the process, and whether any of them arrived
+             first was a race - so a closing StatusEvent('DONE') could not be
+             relied on.
+        Now: drain() delivers them before the exit.
         """
         code, seen = self._run(30, "drained.txt", mode="nowait")
         self.assertEqual(code, 0)

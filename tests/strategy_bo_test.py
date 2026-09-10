@@ -1,11 +1,11 @@
 """
-Characterisation tests for the BO family - the pattern research engines.
+Tests for the BO family - the pattern research engines.
 
 These classes emit no orders. They answer one question: after a given run of
 consecutive candle directions, how many bars pass before the direction flips?
 The answer is accumulated three ways (overall, per hour, per weekday) and
 printed as percentage tables. Since those tables are the research output, the
-counting semantics and the reporting quirks are both pinned here.
+counting semantics and the shape of that report are both covered here.
 """
 
 import datetime
@@ -103,9 +103,11 @@ class TestCommonSetUp(unittest.TestCase):
 
     def test_the_done_status_triggers_the_final_report(self):
         """
-        The gate reads the StatusEvent payload rather than str(event), which
-        is 'STATUS' for every status. Before that fix the end-of-run tables
-        were never printed at all.
+        Was: the gate compared `str(event)` against 'DONE' (or 'QUI'), but
+             str() of any StatusEvent is 'STATUS', so the end-of-run tables
+             were never printed at all - only the periodic dump produced
+             output.
+        Now: the gate reads event.status.
         """
         s = make(BO)
         with self.assertLogs('parity_deriva.trading.trading', level='INFO') as log:
@@ -157,9 +159,14 @@ class TestBO01Pattern(unittest.TestCase):
 
     def test_a_window_that_never_flips_lands_in_bucket_zero(self):
         """
-        Bucket 0 means "the run did not resolve inside the window". It is
-        distinct from a genuine resolution on the last bar, which the
-        saturating counter used to conflate with it.
+        Bucket 0 means "the run did not resolve inside the window".
+
+        Was: the counter saturated at depth-3, so an unresolved run was
+             indistinguishable from a genuine resolution on the last bar and
+             the tail of the distribution was inflated. Bucket 0 was
+             initialised and never used, and the "DEAD" log line below it
+             could not fire.
+        Now: an unresolved run lands in bucket 0 and that line does fire.
         """
         s = make(BO01, depth=5)
         feed(s, [True, False, False, True, True, True])
@@ -204,9 +211,10 @@ class TestBO01Pattern(unittest.TestCase):
 
     def test_a_sunday_candle_is_counted(self):
         """
-        OANDA publishes Sunday-evening bars, so the weekday buckets run
-        Monday..Sunday. This used to raise KeyError, which under the Engine
-        became os._exit(1) and lost the whole research run.
+        Was: the weekday buckets ran Monday..Saturday, so a Sunday bar - which
+             OANDA does publish - raised KeyError. Under the Engine that
+             became os._exit(1) and lost the whole research run.
+        Now: the buckets run Monday..Sunday.
         """
         sunday = datetime.datetime(2017, 2, 5, 22, 0, 0)
         self.assertEqual(sunday.weekday(), 6)
@@ -325,9 +333,13 @@ class TestPrintStats(unittest.TestCase):
     def test_the_weekday_section_is_printed_once_per_day_with_data(self):
         """
         One table per weekday that has data, each bucket normalised by that
-        day's own total. The report used to reuse the loop variable, printing
-        the whole table once per populated day and dividing every percentage
-        by the last total computed.
+        day's own total.
+
+        Was: the inner loop reused the outer loop variable, so the whole table
+             was printed once for every populated day and every percentage was
+             divided by the last total computed rather than by that day's own.
+             Any conclusion drawn from the DAY block was wrong.
+        Now: one table per populated day, correctly normalised.
         """
         s = make(BO01, depth=5)
         feed(s, [True, False, False, False, True, True])

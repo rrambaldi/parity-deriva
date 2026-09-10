@@ -1,5 +1,5 @@
 """
-Characterisation tests for parity_deriva.performance.analyze.
+Tests for parity_deriva.performance.analyze.
 
 Analyzer pulls closed trades from the account and reports win/loss statistics
 plus three flavours of optimal f. It is the natural place to hang a
@@ -144,7 +144,13 @@ class TestAggregation(AnalyzerCase):
 class TestConsecutiveRuns(AnalyzerCase):
 
     def test_consecutive_winners_are_counted_and_summed(self):
-        """The streak length is the number of trades in the run."""
+        """
+        Was: the counter only incremented when the previous trade was already
+             on the same side, so a run of three winners was reported as 2 -
+             the streak was always one short.
+        Now: the streak length is the number of trades in the run, and the
+             amount accumulated over it starts with the trade that opens it.
+        """
         report = self.report([trade(1, 100.0), trade(2, 100.0),
                               trade(3, 100.0), trade(4, -50.0)])
         line = self.field(report, "WN MAX.CONS")
@@ -193,7 +199,13 @@ class TestDegenerateInputs(AnalyzerCase):
     """
     A one-sided day - all winners, all losers, or no trades at all - is exactly
     what a monitoring job meets on a quiet session, or on a day the safety net
-    blocked trading. It has to produce a report, not a ZeroDivisionError.
+    stopped trading.
+
+    Was: the averages and the win share divided by the trade counts with no
+         guard, so precisely those days raised ZeroDivisionError instead of
+         producing the report they most needed.
+    Now: the ratios are guarded, optimal f reports "n/a (one-sided day)" where
+         it is undefined, and a day with no closed trades says so.
     """
 
     def test_a_day_with_no_losers_reports(self):
