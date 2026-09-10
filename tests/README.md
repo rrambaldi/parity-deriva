@@ -52,6 +52,7 @@ writes gets its own temporary directory.
 | `offline_test.py` | the offline half of the parallel design: the simulator's own events, `backtest/offline.py`, `backtest/driver.py` |
 | `resolution_test.py` | `backtest/resolution.py`, reading a trade's outcome off candles |
 | `divergence_band_test.py` | `scripts/divergence_band.py`, the threshold calibration |
+| `parity_test.py` | `trading/parity.py`, the configurable alarm, and MoneyManager honouring it |
 
 ## Class-level mutable state
 

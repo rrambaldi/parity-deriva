@@ -17,6 +17,10 @@ class MoneyManager(ExecutionHandler):
 		self.logger = logging.getLogger('parity_deriva.trading.trading')
 		self._set(args,'setup', settings)
 		self._set(args,'units', 1)
+		# set by StatusEvent('HALT') from the parity monitor, cleared by
+		# StatusEvent('RESUME'). Nothing else stopped this component before:
+		# an alarm could be raised and orders kept going out.
+		self.halted = False
 		self.logger.debug("initialized...")
 
 	def addOrder(self, oe):
@@ -28,6 +32,9 @@ class MoneyManager(ExecutionHandler):
 
 
 	def handleSignal(self, se):
+		if self.halted:
+			self.logger.warning("SIGNAL IGNORED: halted by the parity alarm")
+			return
 		if self.onTrade or (self.orderIssued and se.signalNumber not in self.signals):
 			self.logger.info("SIGNAL IGNORED: onTrade")
 			return
@@ -117,6 +124,18 @@ class MoneyManager(ExecutionHandler):
 				self.logger.info("saved id %d batch: %d" % (o.orderID, o.batchID))
 
 	def execute_event(self, event):
+		if str(event) == 'STATUS':
+			status = getattr(event, 'status', None)
+			if status == 'HALT':
+				if not self.halted:
+					self.logger.critical("HALTED by the parity alarm")
+				self.halted = True
+			elif status == 'RESUME':
+				if self.halted:
+					self.logger.warning("RESUMED")
+				self.halted = False
+			return
+
 		if str(event) not in ['SIGNAL','TRANSACTION','CLIENTORDER']:
 			return
 		

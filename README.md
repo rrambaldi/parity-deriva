@@ -43,7 +43,7 @@ candles and the OANDA v3 API, then migrated from Python 2 to Python 3.
 * **Performance** - `performance/analyze.py` reports win/loss statistics,
   consecutive runs and three flavours of optimal *f* over the closed trades
   pulled from the account.
-* **Tests** - 508 tests, no network access required.
+* **Tests** - 656 tests, no network access required.
 
 # Installation and Usage
 
@@ -158,6 +158,33 @@ And that's it! At this stage you are ready to begin creating your own backtests 
 If you have any questions about the installation then please feel free to email me at mike@quantstart.com.
 
 If you have any bugs or other issues that you think may be due to the codebase specifically, they may well be inherited from upstream: https://github.com/mhallsmoore/qsforex/issues
+
+## The parity alarm
+
+`trading/parity.py` joins each live fill to its simulated counterpart on the
+signal key and counts the disagreements. **Every threshold is yours to set**,
+in `PARITY_ALARM` in ```etc/settings.py```: the window the rate is measured
+over, the minimum sample below which it declines to judge, the tolerated
+outcome-mismatch rate, the per-trade slippage, how many one-sided trades are
+acceptable, and whether an alarm merely warns or publishes a
+```StatusEvent('HALT')``` - which the money manager honours by refusing
+further signals until a ```RESUME```. A check left unset is off, not
+defaulted. `PARITY_ALARM_BY_INSTRUMENT` overrides any of it per instrument.
+
+What is *not* a matter of taste is the floor. A simulator reads bars while an
+account trades ticks, so when one bar holds both the stop and the target of an
+open trade it cannot say which came first and has to guess. Size that guess on
+your own data before choosing a threshold:
+
+```
+python scripts/divergence_band.py --instrument EUR_USD --granularity H1
+```
+
+On EUR_USD with AG01 on H1 over two months it reported a 1.23% coin-flip floor
+when the simulator is fed H1 bars, and 0.09% when it is fed M1 - the concrete
+reason to keep minute history for a strategy that signals on hours. A
+threshold below the figure that applies to you will fire on the width of the
+bars rather than on the market.
 
 ## Migrating a store written under Python 2
 
