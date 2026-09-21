@@ -25,15 +25,16 @@ instrument id. Both must be configured, and an omission is a refusal to
 start rather than a guess - the same rule the parity thresholds follow.
 """
 
-import collections
 import json
 import logging
-import time
 import uuid
 
 import requests
 
 from parity_deriva.etc import settings
+from parity_deriva.lib.ratelimit import RateLimiter as _RateLimiter
+from parity_deriva.lib.spread import SpreadModel as _SpreadModel
+from parity_deriva.lib.spread import spreadModel as _spreadModel
 
 
 class EToroError(Exception):
@@ -234,122 +235,23 @@ def pricePrecision(instrument_name, setup=None):
 	return shared(instrument_name, cfg)
 
 
-class SpreadModel(object):
-	"""
-	Bid and ask for a broker that only serves one price per candle.
-
-	OANDA serves three OHLC series per candle and the strategies read them:
-	AG01 buys the high of the ask and stops out at the low of the bid. eToro
-	serves one series, so those two prices do not exist in its data and
-	there is no measurement that recovers them - one number cannot be told
-	how far apart two others were.
-
-	So this is a *model*, and it is off unless configured. ETORO_SPREAD is
-	None by default, which leaves candles carrying mid only and makes the
-	provider decline bid_ask_candles, so a wiring that needs them refuses to
-	start and says why. Set it and the same wiring runs on a stated
-	assumption instead of a silent one.
-
-	Configure it as a number in the instrument's own units, applied as half
-	either side of the served price, or as a dict per instrument:
-
-	    ETORO_SPREAD = 0.0001
-	    ETORO_SPREAD = {'EUR_USD': 0.00008, 'DE30_EUR': 1.2}
-
-	Whatever you set, it is a constant standing in for something that varies
-	by the hour, so a real spread wider than the one configured shows up as
-	the strategy filling at prices it did not expect. That is precisely what
-	trading/parity.py measures - the model belongs under the alarm, not
-	above it.
-	"""
-
-	def __init__(self, spread=None):
-		self.spread = spread
-
-	def enabled(self):
-		return self.spread is not None
-
-	def width(self, instrument_name):
-		if self.spread is None:
-			return None
-		if isinstance(self.spread, dict):
-			if instrument_name in self.spread:
-				return float(self.spread[instrument_name])
-			return None
-		return float(self.spread)
-
-	def apply(self, instrument_name, ohlc):
-		"""
-		(bid, ask) for one served OHLC, or (None, None) when off.
-
-		The served price is treated as the mid, so half the configured spread
-		goes each way. Every field moves by the same amount: a model that
-		widened the high and not the low would be asserting something about
-		where in the bar the spread moved, which is not knowable from one
-		series.
-		"""
-		width = self.width(instrument_name)
-		if width is None:
-			return None, None
-		half = width / 2.0
-		bid = dict((k, float(v) - half) for k, v in ohlc.items())
-		ask = dict((k, float(v) + half) for k, v in ohlc.items())
-		return bid, ask
+#: Bid and ask for a broker that serves one price per candle. The model
+#: itself is shared - IB's history endpoint has the same gap - and lives in
+#: lib/spread.py; it is re-exported here because that is where the eToro code
+#: and its tests have always looked for it.
+SpreadModel = _SpreadModel
 
 
 def spreadModel(setup=None):
 	cfg = setup if setup is not None else settings
-	return SpreadModel(getattr(cfg, 'ETORO_SPREAD', None))
+	return _spreadModel(cfg, 'ETORO_SPREAD')
 
 
-class RateLimiter(object):
-	"""
-	Keeps a pool's request rate under its published limit.
-
-	Counts what it has spent in the trailing window and sleeps before the
-	call that would exceed it, rather than discovering the limit by being
-	refused: on the write pool a 429 is a lost order, and on the market pool
-	it is a missing candle that a strategy will never see.
-
-	Retry-After from a 429 is honoured through penalise(), so a limit
-	enforced ahead of the API - where no RateLimit headers reach us - still
-	slows the client down.
-	"""
-
-	def __init__(self, limit, window, sleep=time.sleep, clock=time.time):
-		self.limit = limit
-		self.window = window
-		self.calls = collections.deque()
-		self.until = 0.0
-		self._sleep = sleep
-		self._clock = clock
-
-	def _prune(self, now):
-		while self.calls and now - self.calls[0] >= self.window:
-			self.calls.popleft()
-
-	def take(self):
-		now = self._clock()
-		if self.until > now:
-			self._sleep(self.until - now)
-			now = self._clock()
-		self._prune(now)
-		if len(self.calls) >= self.limit:
-			wait = self.window - (now - self.calls[0])
-			if wait > 0:
-				self._sleep(wait)
-				now = self._clock()
-				self._prune(now)
-		self.calls.append(now)
-
-	def penalise(self, seconds):
-		"""Refuse to spend anything for this many seconds (a 429's Retry-After)."""
-		try:
-			seconds = float(seconds)
-		except (TypeError, ValueError):
-			return
-		if seconds > 0:
-			self.until = self._clock() + seconds
+#: Keeps a pool's request rate under its published limit. Shared with the IG
+#: and IB clients, which have limits of their own, and re-exported here: on
+#: the write pool a 429 is a lost order, and on the market pool it is a
+#: missing candle that a strategy will never see.
+RateLimiter = _RateLimiter
 
 
 class EToroAPI(object):

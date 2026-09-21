@@ -1,5 +1,5 @@
 """
-One wiring, either broker, with the shadow and the alarm attached.
+One wiring, any broker, with the shadow and the alarm attached.
 
 The scripts/t0*.py files each hard-code a stack against OANDA, and none of
 them registers the parity monitor - so the alarm added in trading/parity.py
@@ -9,6 +9,8 @@ that loop, and it takes the broker as an argument rather than by import:
     python scripts/live.py --dry-run
     python scripts/live.py --provider oanda --instrument DE30_EUR --granularity M5
     python scripts/live.py --provider etoro --instrument EUR_USD --granularity H1
+    python scripts/live.py --provider ig    --instrument EUR_USD --granularity H1
+    python scripts/live.py --provider ib    --instrument EUR_USD --granularity H1
 
 What gets registered, in this order: the strategy, the money manager, the
 real execution handler, the simulator shadowing it on the same candles, the
@@ -19,10 +21,11 @@ replaying the other's output.
 
 Capabilities are checked before anything is registered, so an unsupported
 combination is a startup error naming what is missing. AG01 and AG02 read a
-candle's ask and bid; eToro serves one price series, so on eToro they refuse
-to start until ETORO_SPREAD says what the spread is. That refusal is the
-feature: the alternative is a strategy buying the high of a series it
-believes is the ask.
+candle's ask and bid; eToro and Interactive Brokers each serve one price
+series, so there they refuse to start until ETORO_SPREAD or IB_SPREAD says
+what the spread is. That refusal is the feature: the alternative is a strategy
+buying the high of a series it believes is the ask. OANDA and IG both serve a
+real bid and ask, so there is nothing to configure on either.
 
 --dry-run prints the plan and the chosen provider's declared capabilities
 and exits without touching the network, which is the sane way to read this
@@ -165,12 +168,17 @@ def main(argv=None):
         providers.require(provider, *needs)
     except providers.CapabilityError as exc:
         print("\n%s" % exc)
-        if provider.name == 'etoro' and 'bid_ask_candles' in needs:
+        if 'bid_ask_candles' in needs and provider.name == 'etoro':
             print("eToro serves one price series per candle. Measure the "
                   "spread with\n"
                   "    python scripts/etoro_spread.py --instrument %s\n"
                   "and set ETORO_SPREAD in etc/settings.py, or run a strategy "
                   "that does\nnot read a candle's ask and bid." % pairs[0])
+        if 'bid_ask_candles' in needs and provider.name == 'ib':
+            print("IB's history route serves one price series per bar. Its "
+                  "snapshot route\ndoes quote both sides, so measure the "
+                  "spread there and set IB_SPREAD in\netc/settings.py, or run "
+                  "a strategy that does not read a candle's ask\nand bid.")
         return 2
 
     logger = getLogger()

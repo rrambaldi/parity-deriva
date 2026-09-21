@@ -8,11 +8,12 @@ the divergence itself is the signal, and it can raise an alarm or stop trading.
 That is where the name comes from: *parity* is the invariant you want between
 the simulated and the real side, *deriva* is what you measure when it breaks.
 
-There are two brokers behind it, OANDA and eToro, chosen with one setting.
-Instruments are whatever the chosen one offers - the work so far has been on
-DE30_EUR and EUR_USD, so not only forex. Historical candles are warehoused
-locally in HDF5 so research runs offline, which on eToro is a shallower
-warehouse than on OANDA for reasons set out below.
+There are four brokers behind it - OANDA, eToro, IG and Interactive Brokers -
+chosen with one setting. Instruments are whatever the chosen one offers; the
+work so far has been on DE30_EUR and EUR_USD, so not only forex. Historical
+candles are warehoused locally in HDF5 so research runs offline, which on
+eToro is a shallower warehouse than on the other three for reasons set out
+below.
 
 Started as a fork of [QSForex](https://github.com/mhallsmoore/qsforex) by
 Michael Halls-Moore, and still MIT licensed (see below). Little of the
@@ -41,16 +42,18 @@ candles and the OANDA v3 API, then migrated from Python 2 to Python 3.
 * **Data warehouse** - `data/bulksaver.py` downloads years of candles into
   per-instrument HDF5 stores, one process per instrument, resuming where it
   left off; `scripts/check.py` audits those stores for missing bars.
-* **Two brokers** - `trading/providers.py` names the handlers each broker
+* **Four brokers** - `trading/providers.py` names the handlers each broker
   needs and, more to the point, declares what each broker *cannot* do. A
   wiring asks for the capabilities it needs and fails at startup when they
   are missing, so an unsupported combination is a refusal rather than a run
-  that looks fine and is not. `scripts/live.py` is one wiring for either.
+  that looks fine and is not. `scripts/live.py` is one wiring for all of
+  them. None of the four is a subset of another, which is why they are
+  declared rather than ranked.
 * **Audit trail** - every event is written to a JSONL log and can be replayed.
 * **Performance** - `performance/analyze.py` reports win/loss statistics,
   consecutive runs and three flavours of optimal *f* over the closed trades
   pulled from the account.
-* **Tests** - 865 tests, no network access required.
+* **Tests** - 1007 tests, no network access required.
 
 # Installation and Usage
 
@@ -174,7 +177,7 @@ If you have any questions about the installation then please feel free to email 
 
 If you have any bugs or other issues that you think may be due to the codebase specifically, they may well be inherited from upstream: https://github.com/mhallsmoore/qsforex/issues
 
-## Choosing the broker: OANDA or eToro
+## Choosing the broker: OANDA, eToro, IG or Interactive Brokers
 
 One setting, and the whole stack follows:
 
@@ -182,11 +185,18 @@ One setting, and the whole stack follows:
 PROVIDER = os.environ.get('PARITY_DERIVA_PROVIDER', 'oanda')   # etc/settings.py
 ```
 
-`DOMAIN` still decides practice against real, for both. On eToro that is not
-a different host but a different set of routes (`/trading/execution/demo/orders`
-against `/trading/execution/orders`), and `/demo` goes in a different place
-per route family, so `lib/etoro.py` spells out both variants of every route
-rather than transforming one into the other.
+`PROVIDER` is `oanda`, `etoro`, `ig` or `ib`.
+
+`DOMAIN` still decides practice against real - but each broker means something
+different by it. OANDA has two hosts. eToro has one host and two sets of
+routes (`/trading/execution/demo/orders` against `/trading/execution/orders`),
+with `/demo` in a different place per route family, so `lib/etoro.py` spells
+out both variants rather than transforming one into the other. IG has two
+hosts *and* two API keys, one per host, so a key that does not match `DOMAIN`
+fails to authenticate rather than quietly reaching the other account. IB has
+neither: its paper account is simply a different account id, `IB_ACCOUNT_ID`
+is what chooses, and `--live` is therefore the only thing standing between you
+and whichever account the gateway happens to be logged into.
 
 The event bus does not change. Strategies, the money manager, the simulator
 and the parity monitor see the same events either way. What changes is what
@@ -201,6 +211,37 @@ prints the declaration. `trading/providers.py` holds it, a wiring asks for
 what it needs with `providers.require()`, and a missing capability is a
 startup error naming it. The alternative is worse than a crash: a strategy
 buying the high of a price series it believes is the ask.
+
+### What each broker can do
+
+| | OANDA | eToro | IG | IB |
+| --- | --- | --- | --- | --- |
+| bid/ask candles | yes | **no** (one series) | yes | **no** (one series) |
+| candles by date range | yes | **no**, last N ≤ 1000 | yes | yes |
+| price stream | pushed | polled | polled¹ | polled¹ |
+| transaction stream | pushed | polled | polled¹ | polled¹ |
+| STOP against LIMIT | different | **both `mit`** | different | different |
+| which leg closed a trade | stated | **inferred** | **inferred** | stated² |
+| order expiry | `gtdTime` | **none** | `GOOD_TILL_DATE` | **none** |
+| order result | in the reply | poll after | poll `/confirms` | poll after |
+| a bracket is | one order | one order | one order | **three orders** |
+
+¹ Both brokers do push - IG over Lightstreamer, IB over a WebSocket on its
+gateway - and neither protocol is one this project carries. A capability says
+what *this stack* can do, not what the broker's documentation mentions, so
+both are declared polled and the handlers poll.
+
+² Not because IB's API is richer, but because of the row above it. Its
+bracket is three orders, so the stop and the target have ids of their own and
+the child that filled *names* the leg. See below.
+
+Read the table by columns and no broker is a subset of another. IG is the
+closest to OANDA and still cannot say which leg closed a trade; IB can say it
+and cannot serve a bid and an ask; eToro is the poorest and is the only one
+that cannot even tell a breakout order from a fade. That is why capabilities
+are declared rather than ranked, and why `providers_test.py` has a test whose
+only job is to fail if a future edit quietly makes one of them a subset of
+another.
 
 ### What eToro does not have
 
@@ -266,7 +307,10 @@ reported `UNKNOWN` rather than claimed as a target.
 
 `trading/parity.py` therefore treats an `UNKNOWN` on either side as
 **undecidable** rather than as a divergence, and keeps it out of the window
-the mismatch rate is measured over. Counting our own ignorance as the market
+the mismatch rate is measured over. The same applies on IG, which reports a
+closing level and no leg either. On OANDA and on IB it does not arise: both
+name the leg, IB because its bracket is three orders and the child that filled
+is the leg. Counting our own ignorance as the market
 disagreeing with the simulator would have the alarm fire loudest on the
 broker that explains itself least, and counting it as agreement would dilute
 the rate - nineteen unjudgeable trades would hide one real mismatch under a
@@ -365,6 +409,235 @@ those. An order nobody acknowledged is invisible to it - a position opened
 from eToro's own app, say. The parity monitor counts unpaired trades
 separately for exactly this sort of reason, so such a position surfaces
 there rather than silently.
+
+## IG
+
+IG is the closest of the three non-OANDA brokers to OANDA, and where it
+differs it differs in ways that needed a decision rather than a translation.
+
+**It serves a real bid and a real ask.** Every one of open, high, low and
+close comes as `{bid, ask, lastTraded}`, so AG01 buys the high of an ask that
+IG quoted rather than of a modelled one. Nothing has to be configured for
+this and there is no `IG_SPREAD`. `data/ig.py` computes mid as the average of
+the two, because IG serves no mid - a strategy reading `candle.mid` on OANDA
+is reading OANDA's own, and the two are not quite the same number.
+
+**It logs in.** There is no long-lived token to paste. `POST /session` issues
+tokens and every later request carries them, so `lib/ig.py` opens a session on
+its first call and again when the tokens are refused - once, because a token
+refused twice is a credential problem and hammering a login endpoint is how an
+account gets locked. Two schemes exist and both are implemented: version 2
+returns `CST` and `X-SECURITY-TOKEN` as *headers* and they last hours; version
+3 returns an OAuth pair whose access token is measured in seconds, and the
+reply says how many, so the figure is read rather than assumed. Version 2 is
+the default, because a refresh that fails mid-session costs an order.
+
+**The version belongs to the route.** `/prices` is version 3, `/confirms` is
+version 1 and `/positions/otc` is version 2. `ROUTES` in `lib/ig.py` carries
+the number next to the path so the two cannot drift apart and parse a schema
+from another era into the same fields.
+
+**Two endpoints for what this project calls one kind of order.** A market
+order opens a position through `/positions/otc`; a resting order is a
+*working order* through `/workingorders/otc`, typed `STOP` or `LIMIT`. So
+unlike eToro, IG really does tell a breakout from a fade, and the provider
+says so.
+
+**It expires an order.** `GOOD_TILL_DATE` with a `goodTillDate`, so the
+strategies' end-of-day expiry is the broker's to enforce and
+`IG_ENFORCE_EXPIRY` is off by default. This is the one gap in the eToro path
+that does not exist here.
+
+**It does not say which leg closed a trade.** The transaction history reports
+an open level and a close level and no leg, so `lib/closereason.py` reads the
+leg off the closing level with exactly the rule the eToro path uses - the stop
+and the target bound the interval the trade lived in - and says `UNKNOWN`
+where the level belongs to neither clearly. The close event says it was
+inferred, and `trading/parity.py` treats an `UNKNOWN` as undecidable.
+
+**The reply to an order is a reference.** `POST` answers with a
+`dealReference` and nothing else; what happened is read from
+`GET /confirms/{reference}` afterwards. That confirmation is available only
+briefly, which is why `IG_POLL_SECONDS` defaults low and why a deal that is
+never confirmed is given up on with an error rather than in silence - it may
+well still be live on the account, and the parity monitor will then count it
+unpaired, which is the correct reading of what happened.
+
+**History is metered by the week.** The per-minute request limits are the
+usual kind and `lib/ig.py` paces against them. The historical price allowance
+is not: it counts *data points*, 10,000 a week, shared by everything using the
+same API key - including a browser session somebody left open. No local
+counter can track that, so what is tracked instead is the figure IG returns in
+the metadata of every price response, and a warning is logged when it runs
+low. The failure it precedes is silent: the route starts refusing and a
+backfill simply stops, hours before anyone looks at why.
+
+### Configuring IG
+
+```
+export IG_API_KEY=...          # from My IG > Settings > API keys
+export IG_IDENTIFIER=...       # your IG username
+export IG_PASSWORD=...
+export IG_ACCOUNT_ID=...       # optional; the session's own account if unset
+```
+
+A key belongs to **one** host. The demo key works against `demo-api.ig.com`
+and the live key against `api.ig.com`, and `DOMAIN` picks the host - so a key
+that does not match it fails to authenticate rather than reaching the other
+account.
+
+Then the epics, which are not derivable and not pre-filled:
+
+```
+python scripts/ig_instruments.py --details EURUSD
+```
+
+`--details` also reads each epic's dealing rules, which is where the minimum
+stop distance lives. That number is worth having before the first order: IG
+refuses a stop closer to the market than its instrument allows, and nothing in
+this project moves a level to fit. A strategy's stop adjusted to satisfy a
+broker rule is no longer that strategy's stop, so the order goes as asked and
+the refusal is published as a rejection.
+
+Paste the result into `IG_INSTRUMENTS`. A search for `EURUSD` returns the
+mini, the standard contract and the spread bet, each with its own epic,
+minimum size and currency - so which one you deal is a decision, not a lookup,
+and that is why nothing resolves an epic at runtime.
+
+## Interactive Brokers
+
+IB offers three ways in and only one of them fits this stack. The TWS socket
+API is an event-driven protocol needing a client library and a running desktop
+application; FIX is institutional. The **Client Portal Web API** is JSON over
+HTTP, which is what every other broker here speaks. The price of that choice
+has to be stated plainly, because it is unlike the other three in one
+important way:
+
+> **There is no host to point at.** The Web API is served by a gateway you run
+> yourself, normally on localhost, and a human being authenticates it in a
+> browser. Nothing in this project can log in. It can only ask whether somebody
+> already did, and say so clearly when they did not.
+
+```
+1. start the Client Portal Gateway
+2. open https://localhost:5000 and log in
+3. export IB_ACCOUNT_ID=... and run
+```
+
+The session times out on inactivity, so `lib/ib.py` keeps it alive on a timer
+of its own rather than only when a poll happens to come round. It will still
+need logging into again roughly daily, which is IB's rule and not one this
+project can work around. A run that starts against a logged-out gateway raises
+`IBNotAuthenticated` with the address in the message, rather than filling the
+log with 401s.
+
+Four more things are IB's own shape:
+
+**A bracket is three orders.** IB has no stop-and-limit attached to an entry:
+the stop and the target are separate child orders naming the entry as their
+`parentId`, in one OCA group so that filling either cancels the other. Without
+the group a closed trade leaves its other leg resting, and the next fill opens
+a position nobody signalled.
+
+That costs a more involved submission and buys the one thing the other two
+polled brokers cannot give. When a child fills, **the broker has named the leg
+that closed the trade** - this project placed that particular order as the
+stop or as the target and IB is reporting that it filled. So `close_reason` is
+true, the close event carries a reason nothing inferred, and it does not claim
+otherwise. On IB, unlike eToro and IG, the parity monitor's `max_undecided`
+should stay at zero.
+
+**An order can be answered with a question.** `POST .../orders` may reply with
+a message and an id instead of an order id, and the order exists only once
+that id has been confirmed at `/iserver/reply/{id}`. This is not an error
+path - it is the ordinary one, and most orders draw at least one question.
+`lib/ib.IBAPI.place` runs that exchange, logs **every** question at warning
+level whether or not it answers it, and refuses to answer any question
+matching `IB_REFUSE_QUESTIONS` - which defaults to the ones about size and
+about exceeding a limit, since those are the questions that precede an order
+much larger than intended. A question that keeps coming back after five
+confirmations is given up on: confirming forever is how an order gets placed
+by accident.
+
+**One price series per bar.** The history route serves a single OHLC, the way
+eToro's does, so `IB_SPREAD` is the same model under the same rule - unset it
+stays off, bars carry mid only, the provider declines `bid_ask_candles`, and
+AG01 refuses to start and says why. Measure it before setting it: `IBRates`
+polls the snapshot route, which is where IB *does* quote both sides.
+
+**No expiry instant.** Time in force is `DAY`, `GTC` or an immediate variety,
+so the strategies' end-of-day `gtdTime` is enforced on our side exactly as on
+eToro: `data/ib.py` publishes an `OrderCancelEvent` when it passes, the
+execution handler turns it into a delete, and the simulator drops the order
+too. That is our action, not the broker's, and it is logged each time.
+
+### Configuring IB
+
+```
+export IB_GATEWAY=localhost:5000    # where your gateway listens
+export IB_ACCOUNT_ID=...            # no default: one login can hold several
+```
+
+`IB_ACCOUNT_ID` has no default and `lib/ib.py` refuses to be built without it.
+One login can hold a paper account and a live one, they are not
+interchangeable, and this is also checked against what the gateway's session
+actually holds - discovering a mismatch from a rejection would mean
+discovering it after an order went somewhere.
+
+TLS verification is **off** by default, which is only defensible because of
+where the client is talking: the gateway serves a certificate it generated for
+itself, on a loopback address on your own machine. Point `IB_GATEWAY` at
+another host and you are trusting whatever answers, so turn `IB_VERIFY_TLS`
+back on with a certificate you installed.
+
+Then the conids:
+
+```
+python scripts/ib_instruments.py EUR --sec-type CASH
+```
+
+`--sec-type` is worth using. Without it a currency symbol returns the futures
+and the funds named after it too, and a search returns the most heavily traded
+match first, which is not the same as the right one.
+
+## What has been checked on IG and IB, and what has not
+
+Nothing here has been run against a live IG or Interactive Brokers account.
+The eToro section above says what a demo account taught that no fixture could
+have - a completeness check comparing a UTC timestamp against a local clock,
+found only because a real market kept moving - and the honest thing is to say
+that neither of these two paths has had that yet.
+
+So the difference in what backs them is worth spelling out:
+
+* **the routes, fields, versions, order types, limits and enumerations** are
+  taken from each broker's published REST documentation. Every one of them is
+  in the code next to a comment saying what it is for.
+* **the translations** - an order's fields, a candle's sides, a bracket's
+  children, a timestamp's format - are pinned test by test, because the
+  failure mode there is not a crash but a trade at a price nobody chose.
+* **the behaviour under a real account** is not evidence yet. Where a
+  document and an account might disagree, the code is written to fail rather
+  than to assume: a price row missing one side is skipped rather than
+  half-filled, an IB history window is filtered locally so a misread
+  `startTime` yields fewer bars and never bars from the wrong window, and an
+  unconfirmed IG deal is given up on loudly because it may still be live.
+
+Two specific things to check first on an account, before letting either path
+size a real position:
+
+1. **IG's `dealReference` is not treated as an idempotency key.** eToro's
+   `x-request-id` is one - re-sending under the same derived key was refused
+   with a 400 naming the original order - and whether IG refuses a repeated
+   reference has not been established. `execution/ig.py` therefore treats a
+   resend as a resend.
+2. **IB's `priceFactor` is applied as documented** and is 1 for the
+   instruments here. If your bars come back off by a power of ten, that is the
+   first thing to look at, and it is logged whenever it is not 1.
+
+And the path that matters most cannot be rehearsed on either broker: a bracket
+left resting until one leg triggers and the other is cancelled, and the parity
+monitor judging the pair. That needs a market, not a test.
 
 ## The parity alarm
 

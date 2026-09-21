@@ -55,6 +55,27 @@ writes gets its own temporary directory.
 | `parity_test.py` | `trading/parity.py`, the configurable alarm, MoneyManager honouring it, and the outcomes neither side can judge |
 | `providers_test.py` | `trading/providers.py`: the broker registry, and the capability refusals |
 | `etoro_test.py` | the eToro provider: `lib/etoro.py`, `data/etoro.py`, `execution/etoro.py` |
+| `ig_test.py` | the IG provider: `lib/ig.py`, `data/ig.py`, `execution/ig.py` |
+| `ib_test.py` | the Interactive Brokers provider: `lib/ib.py`, `data/ib.py`, `execution/ib.py` |
+
+## The broker modules' shape
+
+Three of the four providers have a test module of their own, and each is
+shaped by what its broker makes hard.
+
+`ig_test.py` is about a broker that is nearly OANDA and is not: a session
+rather than a token, a Version header that belongs to the route and not to the
+API, two endpoints for what this project calls one kind of order, a reply that
+is a reference rather than an outcome, and a close whose leg is inferred and
+says so.
+
+`ib_test.py` is about the two things that make Interactive Brokers the odd one
+out. There is nothing to log into - the gateway is authenticated by a human in
+a browser, so the interesting behaviour is a named refusal that says what to
+go and do - and a bracket is three orders, which is more to get wrong on the
+way out and, on the way back, the one thing eToro and IG cannot do: the child
+that filled *is* the leg. Several tests exist only to pin that such a close
+carries a reason the broker stated and does not claim to have inferred it.
 
 ## The eToro module's shape
 

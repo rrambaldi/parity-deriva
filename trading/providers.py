@@ -8,14 +8,20 @@ every script imported the OANDA classes by name - and, more importantly,
 nothing anywhere said what a broker cannot do.
 
 That second part is why this module holds a Capabilities record rather than
-just a table of classes. OANDA and eToro are not the same shape: one streams
-transactions and the other has to be polled, one distinguishes a STOP from a
-LIMIT and the other collapses both onto market-if-touched, one serves candles
-with separate bid and ask and the other serves one OHLC. A wiring that needs
-a capability asks for it with require() and fails at startup, which is the
-only honest place to fail: the alternative is a strategy quietly signalling
-on mid prices it believes are asks, or resting orders that never expire
-because nobody noticed the broker has no expiry.
+just a table of classes. The four brokers here are not the same shape: one
+streams transactions and three have to be polled, one collapses a STOP and a
+LIMIT onto market-if-touched where the others tell them apart, two serve
+candles with separate bid and ask and two serve one OHLC, and exactly one of
+the polled three can say which leg closed a trade. A wiring that needs a
+capability asks for it with require() and fails at startup, which is the only
+honest place to fail: the alternative is a strategy quietly signalling on mid
+prices it believes are asks, or resting orders that never expire because
+nobody noticed the broker has no expiry.
+
+No broker here is a subset of another, which is the point of declaring rather
+than ranking. IG is the closest to OANDA and still cannot say which leg
+closed a trade; Interactive Brokers can say it - because its bracket is three
+separate orders - and cannot serve a bid and an ask on a bar.
 
 Nothing here is discovered at runtime. Each provider declares what it
 supports, and a declaration that turns out to be wrong is a bug to fix in the
@@ -126,8 +132,8 @@ class Provider(object):
 		"""
 		The shadow broker for this provider.
 
-		Both providers get the same bar-driven simulator: it reads candles and
-		orders off the bus and knows nothing about either API. Where the
+		Every provider gets the same bar-driven simulator: it reads candles and
+		orders off the bus and knows nothing about any of the APIs. Where the
 		simulator is *finer* than the real broker - it tells a STOP from a
 		LIMIT, which eToro does not - the difference shows up as divergence,
 		which is the point of running the two side by side.
@@ -262,10 +268,162 @@ class EToroProvider(Provider):
 		return interval(granularity)
 
 
+class IGProvider(Provider):
+
+	name = 'ig'
+	capabilities = Capabilities(
+		# Every one of open, high, low and close comes as {bid, ask,
+		# lastTraded}, so this is real rather than modelled - the one broker
+		# here besides OANDA where AG01 can read the prices it thinks it is
+		# reading. data/ig.py computes mid as their average, since IG serves
+		# none.
+		bid_ask_candles=True,
+		# from/to on GET /prices, so a backfill is possible. The real ceiling
+		# is not a per-request one: IG meters history by *data points*, 10,000
+		# a week across everything using the key, and lib/ig.py watches what it
+		# reports back rather than counting locally.
+		dated_history=True,
+		max_history_candles=None,
+		# IG does push, over Lightstreamer - a protocol and a dependency this
+		# project does not carry. A capability says what this stack can do, not
+		# what the broker's documentation mentions, so both streams are false
+		# and data/ig.py polls.
+		price_stream=False,
+		transaction_stream=False,
+		order_types=frozenset(['MARKET', 'STOP', 'LIMIT']),
+		# A working order is typed LIMIT or STOP and IG treats them as
+		# different orders, which eToro does not.
+		distinct_stop_limit=True,
+		# The transaction history reports an open level and a close level and
+		# no leg, so the leg is inferred from the closing level exactly as on
+		# eToro. See lib/closereason.py.
+		close_reason=False,
+		# GOOD_TILL_DATE with a goodTillDate, so the strategies' end-of-day
+		# expiry is the broker's to enforce rather than ours.
+		order_expiry=True,
+		# POST answers with a dealReference. What happened has to be read from
+		# GET /confirms afterwards.
+		synchronous_orders=False,
+	)
+
+	def candles(self, **args):
+		from parity_deriva.data.ig import IGCandles
+		args.setdefault('setup', self.setup)
+		return IGCandles(**args)
+
+	def prices(self, **args):
+		from parity_deriva.data.ig import IGRates
+		args.setdefault('setup', self.setup)
+		return IGRates(**args)
+
+	def transactions(self, **args):
+		from parity_deriva.data.ig import IGTransactions
+		args.setdefault('setup', self.setup)
+		return IGTransactions(**args)
+
+	def execution(self, **args):
+		from parity_deriva.execution.ig import IGExecutionHandler
+		args.setdefault('setup', self.setup)
+		return IGExecutionHandler(**args)
+
+	def precision(self, instrument):
+		from parity_deriva.lib.ig import pricePrecision
+		return pricePrecision(instrument, self.setup)
+
+	def granularity(self, granularity):
+		from parity_deriva.lib.ig import resolution
+		return resolution(granularity)
+
+
+class IBProvider(Provider):
+	"""
+	Interactive Brokers through the Client Portal Web API.
+
+	The one provider here that cannot authenticate itself: the Web API is
+	served by a gateway you run, and a human logs into it in a browser. So a
+	stack pointed here starts by asking the gateway whether anybody did, and
+	says so plainly when nobody has. See lib/ib.py.
+	"""
+
+	name = 'ib'
+	capabilities = Capabilities(
+		# The history route serves one OHLC, the way eToro does. Setting
+		# IB_SPREAD turns this True - see lib/spread.py for what that then
+		# means.
+		bid_ask_candles=False,
+		# A start time and a duration, so a window can be walked back.
+		dated_history=True,
+		max_history_candles=None,
+		# IB does push, over a WebSocket on the same gateway, which is a second
+		# protocol this module does not speak. Polled, therefore.
+		price_stream=False,
+		transaction_stream=False,
+		order_types=frozenset(['MARKET', 'STOP', 'LIMIT']),
+		# MKT, STP and LMT are three different orders, and a stop's level goes
+		# in a different field than a limit's.
+		distinct_stop_limit=True,
+		# The one thing IB does better than the other two polled brokers, and
+		# it falls out of the bracket being three orders: the stop and the
+		# target are child orders with ids of their own, so the child that
+		# filled names the leg. No inference, no UNKNOWN.
+		close_reason=True,
+		# Time in force is DAY, GTC or an immediate variety - no expiry
+		# instant - so data/ib.py cancels a resting order once the gtdTime it
+		# was issued with has passed.
+		order_expiry=False,
+		# An order id comes back, but the order is PreSubmitted: what it did
+		# has to be polled for. And the submission itself may answer with a
+		# question before there is an order at all.
+		synchronous_orders=False,
+	)
+
+	def __init__(self, setup=None):
+		Provider.__init__(self, setup)
+		if getattr(self.setup, 'IB_SPREAD', None) is not None:
+			# Copied before being changed, for the reason the eToro provider
+			# copies its own: mutating the class attribute would have one
+			# configured session grant bid/ask to every other provider object
+			# in the process.
+			declared = dict((name, getattr(IBProvider.capabilities, name))
+							for name in IBProvider.capabilities.names())
+			declared['bid_ask_candles'] = True
+			self.capabilities = Capabilities(**declared)
+
+	def candles(self, **args):
+		from parity_deriva.data.ib import IBCandles
+		args.setdefault('setup', self.setup)
+		return IBCandles(**args)
+
+	def prices(self, **args):
+		from parity_deriva.data.ib import IBRates
+		args.setdefault('setup', self.setup)
+		return IBRates(**args)
+
+	def transactions(self, **args):
+		from parity_deriva.data.ib import IBTransactions
+		args.setdefault('setup', self.setup)
+		return IBTransactions(**args)
+
+	def execution(self, **args):
+		from parity_deriva.execution.ib import IBExecutionHandler
+		args.setdefault('setup', self.setup)
+		return IBExecutionHandler(**args)
+
+	def precision(self, instrument):
+		from parity_deriva.lib.ib import pricePrecision
+		return pricePrecision(instrument, self.setup)
+
+	def granularity(self, granularity):
+		from parity_deriva.lib.ib import bar
+		return bar(granularity)
+
+
 #: every provider that can be named in settings.PROVIDER
 PROVIDERS = {
 	OANDAProvider.name: OANDAProvider,
 	EToroProvider.name: EToroProvider,
+	IGProvider.name: IGProvider,
+	IBProvider.name: IBProvider,
 }
 
 

@@ -40,6 +40,10 @@ from parity_deriva.event.event import StatusEvent
 from parity_deriva.event.event import TickEvent
 from parity_deriva.event.event import TransactionEvent
 from parity_deriva.event.event import OrderCancelEvent
+from parity_deriva.lib.closereason import STOP_LOSS as _STOP_LOSS
+from parity_deriva.lib.closereason import TAKE_PROFIT as _TAKE_PROFIT
+from parity_deriva.lib.closereason import UNKNOWN as _UNKNOWN
+from parity_deriva.lib.closereason import closeReason as _closeReason
 from parity_deriva.lib.etoro import (EToroAPI, EToroError, candleTime,
 									 instrumentId, instrumentName, interval,
 									 spreadModel, utcnow)
@@ -77,52 +81,16 @@ STATUS_GONE = frozenset([STATUS_CANCELED, STATUS_EXPIRED,
 STATUS_RESTING = frozenset([STATUS_PLACED, STATUS_WAITING_FOR_MARKET,
 							STATUS_PENDING_TRIGGERED_RATE])
 
-#: what _outcome() compares in trading/parity.py, in OANDA's vocabulary so
-#: that both sides of the comparison speak the same one
-TAKE_PROFIT = 'TAKE_PROFIT_ORDER'
-STOP_LOSS = 'STOP_LOSS_ORDER'
-UNKNOWN = 'UNKNOWN'
-
-
-def closeReason(closeRate, stopLoss, takeProfit):
-	"""
-	Which leg closed a trade, inferred from the rate it closed at.
-
-	eToro reports closeRate, stopLossRate and takeProfitRate but never says
-	which of the two the trade ran into, so the leg has to be read off the
-	rate. The two levels are the boundaries of the interval the trade lived
-	in, and that is the whole rule: a trade that closed at or beyond a level
-	reached it, and a trade that closed strictly between them reached neither
-	and was closed some other way - by hand, by a margin call, at a gap.
-
-	The appeal of stating it that way is that it needs no tolerance. Any rule
-	of the form "near enough to the level" has to say how near, and there is
-	no number in the data to answer with; the interval is already there.
-
-	Where it errs, it errs towards declining to judge. A stop always fills at
-	or through its level, so that side is exact. A target can fill slightly
-	inside its level on a fast market, and such a close is reported UNKNOWN
-	rather than as a target - which costs a comparison the parity monitor
-	would have counted, and never reports an outcome the account did not have.
-	"""
-	try:
-		rate = float(closeRate)
-		sl = float(stopLoss)
-		tp = float(takeProfit)
-	except (TypeError, ValueError):
-		return UNKNOWN
-
-	if abs(tp - sl) <= 0:
-		return UNKNOWN
-
-	# min/max rather than a long/short flag: for a long the stop is the lower
-	# boundary and for a short it is the upper one, and neither needs naming
-	low, high = min(sl, tp), max(sl, tp)
-	if rate <= low:
-		return STOP_LOSS if sl == low else TAKE_PROFIT
-	if rate >= high:
-		return STOP_LOSS if sl == high else TAKE_PROFIT
-	return UNKNOWN
+#: What trading/parity.py compares, and the inference that produces it. Both
+#: are shared with the IG path, which has the same gap for the same reason -
+#: the broker reports a closing level and not which leg took the trade - and
+#: are re-exported here because this is where they were first written and
+#: where the eToro code and its tests look for them. See lib/closereason.py
+#: for the rule and for why it declines to judge rather than guessing.
+TAKE_PROFIT = _TAKE_PROFIT
+STOP_LOSS = _STOP_LOSS
+UNKNOWN = _UNKNOWN
+closeReason = _closeReason
 
 
 class EToroCandles(StreamHandler):

@@ -18,14 +18,18 @@ ENVIRONMENTS = {
 # --------------------------------------------------------------------------
 # Which broker the stack talks to
 #
-# 'oanda' or 'etoro'. The event bus is the same either way - strategies, the
-# money manager, the simulator and the parity monitor do not know which is
-# behind them - but the two brokers are not the same shape, and what each can
-# do is declared in trading/providers.py rather than discovered. A wiring
-# asks for what it needs with providers.require() and fails at startup if the
-# chosen provider does not have it.
+# 'oanda', 'etoro', 'ig' or 'ib'. The event bus is the same whichever it is -
+# strategies, the money manager, the simulator and the parity monitor do not
+# know which is behind them - but the four brokers are not the same shape, and
+# what each can do is declared in trading/providers.py rather than discovered.
+# A wiring asks for what it needs with providers.require() and fails at
+# startup if the chosen provider does not have it.
 #
-# DOMAIN below still decides practice against real, for both.
+# DOMAIN below decides practice against real for OANDA, eToro and IG. It does
+# not for IB, where the paper account is simply a different account id and
+# IB_ACCOUNT_ID is what chooses - so scripts/live.py still refuses a 'real'
+# DOMAIN without --live, and on IB that flag is the only thing standing
+# between you and whichever account the gateway is logged into.
 PROVIDER = os.environ.get('PARITY_DERIVA_PROVIDER', 'oanda')
 
 CSV_DATA_DIR = os.environ.get('PARITY_DERIVA_CSV_DATA_DIR', ".")
@@ -111,11 +115,13 @@ PARITY_ALARM = {
     'max_unpaired': 5,
 
     # trades the two sides closed but whose outcome could not be judged at
-    # all. On OANDA this stays zero: the broker states which leg closed a
-    # trade. On eToro it does not, so data/etoro.closeReason() infers the leg
-    # from the closing rate and reports UNKNOWN where the rate belongs to
-    # neither leg clearly - and a monitor that is blind to the outcome is
-    # worth knowing about even though it is not itself a divergence.
+    # all. On OANDA this stays zero, and on IB too: both state which leg
+    # closed a trade, IB because its bracket is three separate orders and the
+    # child that filled names the leg. On eToro and IG it does not stay zero -
+    # neither reports the leg, so lib/closereason.py infers it from the
+    # closing level and says UNKNOWN where that level belongs to neither leg
+    # clearly. A monitor blind to the outcome is worth knowing about even
+    # though it is not itself a divergence.
     # None disables the check rather than defaulting to something invented
     'max_undecided': None,
 
@@ -257,3 +263,201 @@ ETORO_ENFORCE_EXPIRY = True
 # and lib/etoro.RateLimiter paces against those, but a poll interval short
 # enough to fight the limiter just adds latency.
 ETORO_POLL_SECONDS = 5
+
+# --------------------------------------------------------------------------
+# IG
+#
+# IG issues session tokens from a login rather than accepting a long-lived
+# token, so it needs three things from the environment and not one:
+#
+#   export IG_API_KEY=...          # the application key, from My IG > API keys
+#   export IG_IDENTIFIER=...       # your IG username
+#   export IG_PASSWORD=...
+#   export IG_ACCOUNT_ID=...       # optional; the session's own account if unset
+#
+# A key belongs to ONE of the two hosts. The demo key works against
+# demo-api.ig.com and nowhere else, the live key against api.ig.com, and
+# DOMAIN above picks the host - so a key that does not match DOMAIN fails to
+# authenticate rather than quietly reaching the other account. IG_API_DOMAIN
+# overrides the host, and is there for the case where IG gives a partner
+# application one of its own.
+IG_API_DOMAIN = os.environ.get('IG_API_DOMAIN', '')
+IG_API_KEY = os.environ.get('IG_API_KEY', '')
+IG_IDENTIFIER = os.environ.get('IG_IDENTIFIER', '')
+IG_PASSWORD = os.environ.get('IG_PASSWORD', '')
+IG_ACCOUNT_ID = os.environ.get('IG_ACCOUNT_ID', '')
+
+# 2 or 3. Version 2 returns CST and X-SECURITY-TOKEN headers that last hours;
+# version 3 returns an OAuth pair whose access token is measured in seconds
+# and has to be refreshed. Two is the default because a refresh that fails
+# mid-session costs an order, and the only thing version 3 buys this project
+# is a token format it does not need.
+IG_SESSION_VERSION = 2
+
+# This project names instruments the way OANDA does. IG names them with an
+# epic - CS.D.EURUSD.MINI.IP and the like - and the mapping is not derivable:
+# the same pair is a different epic on a CFD account, a spread-bet account and
+# a demo account, and the difference is a product rather than a spelling. So
+# it is configuration, and an unmapped instrument raises rather than being
+# resolved at runtime to whatever a search returns first.
+#
+# Fill it in with:
+#     python scripts/ig_instruments.py EURUSD "Germany 40"
+# which prints what the API answers, for you to check and paste here.
+#
+# Per entry:
+#   epic           required, and the only field with no sensible default
+#   expiry         '-' for a cash CFD or daily funded bet, a contract month
+#                  for a dated future. Dealing the wrong month is dealing a
+#                  different instrument, so it is explicit
+#   currency       what the deal is denominated in; falls back to IG_CURRENCY
+#                  and then to BASE_CURRENCY. Not guessed from the pair's
+#                  name: 'EUR_USD' can be dealt in either of them
+#   precision      overrides INSTRUMENT_PRECISION for IG only
+#   scalingFactor  only for a market IG quotes scaled. Leave it out unless
+#                  you have checked GET /markets/{epic} against a price you
+#                  can read on the platform - a wrong factor moves every
+#                  level by a power of ten
+#
+# Nothing is pre-filled here, unlike ETORO_INSTRUMENTS, because no epic in
+# this table would be evidence of anything: they differ per account and the
+# ones below could not have been checked against yours.
+IG_INSTRUMENTS = {
+    # 'EUR_USD': {'epic': 'CS.D.EURUSD.MINI.IP', 'expiry': '-',
+    #             'currency': 'USD', 'precision': 5},
+    # 'DE30_EUR': {'epic': 'IX.D.DAX.IFMM.IP', 'expiry': '-',
+    #              'currency': 'EUR', 'precision': 1},
+}
+
+# The currency a deal is denominated in, where the instrument entry does not
+# say. Unset falls through to BASE_CURRENCY.
+IG_CURRENCY = None
+
+# A guaranteed stop is honoured at the level asked for even through a gap,
+# and IG charges a premium for it. Off by default: it changes what a trade
+# costs, which is not something to turn on without meaning to. With it on,
+# an order without a stopLoss is refused rather than sent - a guaranteed stop
+# is a stop that has to exist.
+IG_GUARANTEED_STOP = False
+
+# IG really does expire an order - GOOD_TILL_DATE with a goodTillDate - and
+# execution/ig.py sends the strategies' gtdTime as one. So unlike eToro,
+# nothing has to be cancelled on our side, and this is off. Turn it on only
+# if you place orders without an expiry and want them dropped anyway.
+IG_ENFORCE_EXPIRY = False
+
+# Seconds between polls. IG pushes over Lightstreamer, which this project
+# does not speak, so this is the resolution at which candles, quotes, fills
+# and closes arrive. It matters more here than it looks: a deal confirmation
+# is available only briefly after the deal, and a poll slower than that window
+# loses the fill. The per-minute limits are 100 trading requests and 30
+# non-trading ones per account, and lib/ig.py paces against those.
+IG_POLL_SECONDS = 5
+
+# How many times a deal is asked after before it is given up on. A deal whose
+# confirmation was never read may still be live on the account, which is why
+# giving up is logged as an error rather than passed over - the parity
+# monitor will then see it as unpaired, which is the correct reading.
+IG_CONFIRM_ATTEMPTS = 20
+
+# TLS verification. On, and there is no reason to turn it off against IG's
+# own hosts; it is here for a proxy with a private certificate authority.
+IG_VERIFY_TLS = True
+
+# --------------------------------------------------------------------------
+# Interactive Brokers
+#
+# IB is not reached over the internet. The Client Portal Web API is served by
+# a gateway you run yourself - normally on this machine - and a human
+# authenticates it in a browser. Nothing in this project can log in; it can
+# only ask the gateway whether somebody already did, and refuse to trade when
+# nobody has. That is the whole shape of the IB integration, and it is why
+# there is no password here.
+#
+#   1. start the Client Portal Gateway
+#   2. open https://localhost:5000 and log in
+#   3. export IB_ACCOUNT_ID=... and run
+#
+# The session times out on inactivity, so lib/ib.py keeps it alive; it will
+# still need logging in again roughly daily, which is IB's rule and not one
+# this project can work around.
+IB_GATEWAY = os.environ.get('IB_GATEWAY', 'localhost:5000')
+
+# Which account to deal on. No default: one login can hold a paper account
+# and a live one, they are not interchangeable, and picking one for you is
+# not something this file is going to do. lib/ib.py refuses to be built
+# without it, and refuses again if the gateway's session does not hold it.
+IB_ACCOUNT_ID = os.environ.get('IB_ACCOUNT_ID', '')
+
+# The gateway serves HTTPS with a certificate it generated for itself, so
+# verification is off. That is only defensible because of where it is
+# talking - a loopback address on this machine. Point IB_GATEWAY somewhere
+# else and you are trusting whatever answers, so turn this back on with a
+# certificate you installed.
+IB_VERIFY_TLS = False
+
+# This project names instruments the way OANDA does. IB keys everything by a
+# numeric conid, and the mapping is less derivable here than anywhere else:
+# 'EUR' names a cash pair, several futures and a fund or two, on a dozen
+# exchanges. An unmapped instrument raises rather than being resolved at
+# runtime to whatever a search returned first.
+#
+# Fill it in with:
+#     python scripts/ib_instruments.py EUR --sec-type CASH
+# which prints what the gateway answers, for you to check and paste here.
+# 'precision' is optional and overrides INSTRUMENT_PRECISION for IB only.
+IB_INSTRUMENTS = {
+    # 'EUR_USD': {'conid': 0, 'symbol': 'EUR', 'secType': 'CASH',
+    #             'exchange': 'IDEALPRO', 'precision': 5},
+}
+
+# IB's history route serves ONE OHLC per bar, the way eToro's does, so bid and
+# ask are a model or they are nothing. Unset (the default), bars carry mid
+# only, the provider declines bid_ask_candles, and a wiring that needs them
+# refuses to start and says why.
+#
+# Set it to a spread in the instrument's own units, or per instrument:
+#     IB_SPREAD = 0.00002
+#     IB_SPREAD = {'EUR_USD': 0.00002, 'DE30_EUR': 1.0}
+# Half of it is applied either side of the served price. Measure it first -
+# IBRates polls the snapshot route, which is where IB does quote both sides.
+IB_SPREAD = None
+
+# Whether orders and bars include trading outside regular hours. True is the
+# right default for FX, which barely has regular hours; on an equity index it
+# decides whether the gaps in the bars are real.
+IB_OUTSIDE_RTH = True
+
+# An order submission can be answered with a question - a message and an id -
+# and the order exists only once that id is confirmed. Most orders draw at
+# least one, so answering them is the ordinary path and this is on. Every
+# question is logged at warning level whether or not it is answered, because
+# a question answered silently is a warning IB raised that nobody read.
+IB_CONFIRM_ORDER_QUESTIONS = True
+
+# Questions that must never be answered automatically. Any question whose
+# text contains one of these fragments stops the submission with the question
+# in the log, and no order is placed. Put here whatever you want a person to
+# decide - the defaults are the ones about size and about exceeding a limit,
+# since those are the questions that precede an order much larger than
+# intended.
+IB_REFUSE_QUESTIONS = (
+    'exceeds',
+    'size limit',
+)
+
+# Seconds between polls, and seconds between keep-alives. IB pushes over a
+# WebSocket on the same gateway, which this project does not speak, so the
+# first is the resolution at which bars, quotes and fills arrive. The second
+# is what keeps the gateway's session from timing out on inactivity, and is
+# separate because a slow poll would otherwise lose the session between two
+# candles. The published budget is ten requests a second across the whole Web
+# API, and lib/ib.py paces against it.
+IB_POLL_SECONDS = 5
+IB_TICKLE_SECONDS = 60
+
+# The Web API's time in force is DAY, GTC or an immediate variety - there is
+# no expiry instant - so the strategies' end-of-day gtdTime is enforced on our
+# side, exactly as on eToro. That is our action, not the broker's, and it is
+# logged each time. Set False and a resting order rests until it triggers.
+IB_ENFORCE_EXPIRY = True
