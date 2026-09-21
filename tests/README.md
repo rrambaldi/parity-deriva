@@ -57,6 +57,29 @@ writes gets its own temporary directory.
 | `etoro_test.py` | the eToro provider: `lib/etoro.py`, `data/etoro.py`, `execution/etoro.py` |
 | `ig_test.py` | the IG provider: `lib/ig.py`, `data/ig.py`, `execution/ig.py` |
 | `ib_test.py` | the Interactive Brokers provider: `lib/ib.py`, `data/ib.py`, `execution/ib.py` |
+| `web_test.py` | the backtest viewer: `backtest/ledger.py`, `performance/report.py`, `web/service.py` |
+
+## The viewer's three layers
+
+`web_test.py` tests them as three, because they fail in three different ways.
+
+The **ledger** turns a stream of events into a list of trades, and what is
+pinned is the join: which fill belongs to which signal, and which of the
+simulator's fills is an entry rather than the stop doing its job. That join is
+the one thing no single event carries, and a wrong answer to it produces a
+plausible table of nonsense rather than an error. One test there is about a
+trap AG01 walks into - its long leg's stop sits at exactly its short leg's
+entry price, so an acknowledgement matched on price alone files a child order's
+id against a leg that never filled.
+
+The **report** is arithmetic and is tested as arithmetic, one-sided runs
+included. A run of nothing but winners is exactly the run somebody wants a
+report for, and a profit factor printed as 0.00 there reads as the worst
+possible result rather than the best.
+
+The **service** is mostly refusals, and one of them is not a style question:
+the instrument name reaches a file path, and the static handler sits next to
+the source it must not serve.
 
 ## The broker modules' shape
 

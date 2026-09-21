@@ -67,7 +67,15 @@ class OANDABacktester(ExecutionHandler):
 		return
 
 	def createOrder(self, event):
-#		self.logger.debug("== createOrder %s" % event.dump())
+		"""
+		Put an order on the book and acknowledge it.
+
+		Returns the OANDAOrder that was added. That return value is not
+		decoration: the book holds this object, and the Event handed in is a
+		different one, so anything that means to act on a resting order later
+		- cancelling the sibling of a leg that just closed a trade, say - has
+		to hold on to what comes back here.
+		"""
 		self.logger.debug("== createOrder price %s" % event.price)
 		self.lastOrderID = self.lastOrderID + 1
 		o = OANDAOrder(self.lastOrderID, event.to_dict())
@@ -83,6 +91,32 @@ class OANDABacktester(ExecutionHandler):
 			'units': o.units,
 			'signalNumber': getattr(o, 'signalNumber', None),
 		}))
+		return o
+
+	def retire(self, order):
+		"""
+		Take a resting order off the book.
+
+		Was: nothing did this for the sibling of a leg that closed a trade.
+		     handleSLTP() assigned the string 'CANCELED' over o.orig.SLOrder,
+		     which replaced a reference nothing consults - the book holds the
+		     OANDAOrder that createOrder() built, not the Event that was
+		     handed to it - so the other half of every bracket stayed PENDING
+		     for the rest of the run. When price later reached it, it filled
+		     and published a second close for a trade that had already closed:
+		     over two months of EUR_USD H1, 73 of 103 trades closed twice, the
+		     balance moved twice, and the second outcome was usually the
+		     opposite of the first.
+		Now: the sibling is cancelled the way cancelOrder() cancels, which is
+		     what OCO means and what the account would have done.
+		"""
+		if order is None or getattr(order, 'state', None) != 'PENDING':
+			return False
+		order.state = 'CANCELED'
+		if order in self.orders:
+			self.orders.remove(order)
+			self.closed_orders.append(order)
+		return True
 
 
 	def handleSLTP(self, o, e):
@@ -90,13 +124,15 @@ class OANDABacktester(ExecutionHandler):
 			gain = abs((o.price - o.orig.price) * o.units)
 			o.state = 'CLOSED'
 			o.orig.state = 'CLOSED'
+			# one of the two took the trade, so the other is off the book:
+			# a bracket is one-cancels-the-other, and leaving the loser
+			# resting closes the same trade a second time when price reaches
+			# it later. See retire().
 			if o.type=='TAKE_PROFIT_ORDER':
-				if o.orig.SLOrder is not None:
-					o.orig.SLOrder = 'CANCELED'
+				self.retire(o.orig.SLOrder)
 			if o.type=='STOP_LOSS_ORDER':
-				gain = -gain	
-				if o.orig.TPOrder is not None:
-					o.orig.TPOrder = 'CANCELED'
+				gain = -gain
+				self.retire(o.orig.TPOrder)
 			self.balance += gain
 			self.logger.info("******** CLOSED TRADE TYPE: %s PL: %d OPEN:%6.2f CLOSED:%6.2f BALANCE:%6.2f"
 				% (o.type, gain, o.orig.price, o.price, self.balance))
@@ -126,9 +162,9 @@ class OANDABacktester(ExecutionHandler):
 			new.price = o.stopLoss
 			new.type = 'STOP_LOSS_ORDER'
 			new.state = 'PENDING'
-			o.SLOrder = new
 			new.orig = o
-			self.createOrder(new)
+			# the order the book holds, not the event it was built from
+			o.SLOrder = self.createOrder(new)
 			self.logger.debug("== ADDED STOP LOSS @%f" % new.price)
 
 		if o.takeProfit is not None:
@@ -137,10 +173,8 @@ class OANDABacktester(ExecutionHandler):
 			new.price = o.takeProfit
 			new.type = 'TAKE_PROFIT_ORDER'
 			new.state = 'PENDING'
-			o.TPOrder = new
 			new.orig = o
-			new.orig = o
-			self.createOrder(new)
+			o.TPOrder = self.createOrder(new)
 			self.logger.debug("== ADDED TAKE PROFIT @%f" % new.price)
 
 

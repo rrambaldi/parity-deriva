@@ -1,0 +1,169 @@
+/*
+ * Two panels: the chart on top, the trades under it. Everything else is
+ * chrome around those two.
+ *
+ * The colours are a small fixed set with one job each - long is blue, short
+ * is amber, a target is green, a stop is red, and nothing else uses those
+ * four. A trade's row and its markers on the chart are deliberately the same
+ * colour, because the whole interaction is "this row is that thing up there".
+ */
+
+:root {
+  --bg: #12151a;
+  --panel: #181c23;
+  --line: #2a303a;
+  --text: #dfe4ec;
+  --dim: #8b95a6;
+  --up: #3fb68b;
+  --down: #e2555a;
+  --entry: #58a6ff;
+  --exit: #c8a2ff;
+  --tp: #3fb68b;
+  --sl: #e2555a;
+  --long: #58a6ff;
+  --short: #e8a33d;
+  --font: 13px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--font);
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+h1 {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  margin: 0;
+  color: var(--dim);
+}
+
+form { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--dim);
+}
+
+select, input, button {
+  font: var(--font);
+  background: #10131a;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 5px 8px;
+}
+
+button { cursor: pointer; }
+button:hover { border-color: var(--entry); }
+button:disabled { opacity: .5; cursor: default; }
+
+#message {
+  margin: 0;
+  padding: 10px 16px;
+  background: #3a1d20;
+  border-bottom: 1px solid var(--sl);
+  color: #ffd7d9;
+  white-space: pre-wrap;
+}
+#message.info { background: #17252f; border-bottom-color: var(--entry); color: #cfe6ff; }
+
+section { padding: 12px 16px; }
+
+#chart-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+  color: var(--dim);
+}
+#chart-title { color: var(--text); }
+#chart-zoom { color: var(--entry); }
+#chart-head button { margin-left: auto; }
+
+canvas {
+  width: 100%;
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: crosshair;
+}
+
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 6px 0 0; color: var(--dim); }
+.k::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 0;
+  margin-right: 6px;
+  vertical-align: middle;
+  border-top: 2px solid currentColor;
+}
+.k.entry { color: var(--entry); }
+.k.exit { color: var(--exit); }
+.k.tp { color: var(--tp); }
+.k.sl { color: var(--sl); }
+.k.tp::before, .k.sl::before { border-top-style: dashed; }
+.note { color: var(--dim); }
+
+#report-panel { display: flex; flex-wrap: wrap; gap: 24px; padding-top: 0; }
+#report, #counts { display: flex; flex-wrap: wrap; gap: 18px; }
+
+.stat { display: flex; flex-direction: column; gap: 2px; }
+.stat .label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+.stat .value { font-size: 15px; }
+.stat .value.good { color: var(--up); }
+.stat .value.bad { color: var(--down); }
+
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--dim);
+  font-weight: 600;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+th.num, td.num { text-align: right; }
+tbody td { padding: 5px 8px; border-bottom: 1px solid #1f242c; white-space: nowrap; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: #1d222b; }
+tbody tr.selected { background: #22303f; }
+tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--entry); }
+tbody tr.empty td, tbody tr.empty { cursor: default; color: var(--dim); }
+tbody tr.empty:hover { background: none; }
+
+.side.long { color: var(--long); }
+.side.short { color: var(--short); }
+.outcome { font-size: 11px; padding: 1px 6px; border-radius: 3px; border: 1px solid currentColor; }
+.outcome.tp { color: var(--tp); }
+.outcome.sl { color: var(--sl); }
+.outcome.open { color: var(--dim); }
+.pl.good { color: var(--up); }
+.pl.bad { color: var(--down); }

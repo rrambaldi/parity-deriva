@@ -49,11 +49,15 @@ candles and the OANDA v3 API, then migrated from Python 2 to Python 3.
   that looks fine and is not. `scripts/live.py` is one wiring for all of
   them. None of the four is a subset of another, which is why they are
   declared rather than ranked.
+* **Backtest viewer** - `scripts/web.py` serves a local page: the candles on
+  top, the trades under them in the order they opened, and clicking a trade
+  zooms the chart onto it with its entry, exit, stop and target drawn in. It
+  runs the offline stack on the local warehouse and contacts no broker.
 * **Audit trail** - every event is written to a JSONL log and can be replayed.
 * **Performance** - `performance/analyze.py` reports win/loss statistics,
   consecutive runs and three flavours of optimal *f* over the closed trades
   pulled from the account.
-* **Tests** - 1007 tests, no network access required.
+* **Tests** - 1060 tests, no network access required.
 
 # Installation and Usage
 
@@ -638,6 +642,124 @@ size a real position:
 And the path that matters most cannot be rehearsed on either broker: a bracket
 left resting until one leg triggers and the other is cancelled, and the parity
 monitor judging the pair. That needs a market, not a test.
+
+## Reading a backtest: the viewer
+
+```
+python scripts/web.py
+```
+
+and open <http://127.0.0.1:8731>. Pick an instrument and a granularity - the
+dates default to what that store actually holds - and press run.
+
+The chart is on top with the whole range on it. The trades are under it in the
+order they opened, with the signal that produced each one, where it went in,
+where it came out, its stop, its target, and what it made. Click a row and the
+chart zooms onto that trade:
+
+* a solid line at the **entry** and another at the **exit**, each with a
+  marker on the bar it happened in
+* a dashed line at the **stop** and at the **target**, the levels the strategy
+  asked for, labelled on the opposite side so that a trade which closed at its
+  target does not draw two labels on top of each other
+* the bars the trade was open for, shaded
+* thin whiskers on each bar at the **ask high and the bid low** - the two
+  series the fill rule actually reads, since a long entry is touched on the
+  ask and its stop and target on the bid
+
+That last one is the reason the zoom exists at all. It is where you can see
+that the bar really did reach the level, and - more interestingly - whether
+the same bar also reached the other one, which is the case
+`backtest/resolution.py` says a bar cannot settle and which
+`scripts/divergence_band.py` counts.
+
+The address bar holds the backtest, so a reload runs the same one and a link
+opens on the same trade:
+
+```
+http://127.0.0.1:8731/?instrument=EUR_USD&granularity=H1&strategy=AG01&from=2018-01-01&to=2018-03-03&trade=21
+```
+
+Arrow keys (or `j` and `k`) walk through the trades, and `escape` goes back to
+the whole range.
+
+### What it runs, and what it will not
+
+It runs the offline stack in `backtest/ledger.py`: the strategy, the money
+manager, the simulator, and the adapter that says "the simulator is the broker
+here", driven by the causally ordered replay engine. No broker is contacted,
+no order is ever sent, and nothing is written.
+
+It refuses four things rather than doing something nobody asked for:
+
+| asked for | answer |
+| --- | --- |
+| an instrument with no store in `DATA_DIR` | refused, listing the ones there are |
+| a granularity the store does not hold | refused, naming the ones it holds |
+| a window wider than `--max-candles` | refused, with the bar count and the limit |
+| a `BO` research engine | refused: they place no orders, so there is nothing to write down |
+
+The instrument name reaches a file path, so it is checked against the files
+that actually exist rather than sanitised - a rule about what a name may
+contain is a rule somebody has to get exactly right, and a list of real files
+cannot be talked around.
+
+**There is no authentication of any kind.** It binds to `127.0.0.1`, where
+that is fine. `--host` will bind it elsewhere and prints a warning when you
+use it, because the difference between `127.0.0.1` and `0.0.0.0` is the whole
+of the security model here.
+
+### Two things the numbers are not
+
+**P&L is price times units, not money.** The simulator closes a trade as
+(exit - entry) x units, so a one-unit EUR_USD trade that ran 29 pips reports
+`0.00292`. Turning that into a currency needs a contract size and a conversion
+this project does not model, so the column is labelled `price x units` and the
+payload carries the same string - a euro sign on a number that is not euros is
+exactly the sort of quiet wrongness the rest of this code is written to avoid.
+
+**A trade still open when the data runs out is not a result.** It is listed,
+because it happened, with its outcome as `STILL_OPEN` and no P&L at all rather
+than a zero: a trade that has not closed has not made nothing. The report
+counts it under `openTrades` and leaves it out of every ratio.
+
+### No framework, no charting library
+
+`http.server` and a canvas the page draws on itself. The requirements file
+lists what the code imports with a note per line saying why, and neither a web
+framework for three JSON routes nor a CDN script for a page that reads a local
+file earns a line in it. A vendored minified library would be worse: code
+nobody here can review, sitting next to code that is commented line by line.
+
+What it costs is the chart drawing in `web/static/app.js`, which is about a
+hundred lines of turning prices into pixels.
+
+### What the viewer found on its first run
+
+Worth recording, because it changes every backtest number this project
+produced before it and because it is exactly the kind of thing a list of
+trades makes obvious and a log does not.
+
+The first ledger of EUR_USD H1 over January and February 2018 had trades that
+closed twice - a target taken in the morning and a stop taken days later, on
+the same entry, with the balance moved both times. 73 of 103 trades were like
+that.
+
+The cause was in `backtest/oanda.py`. When a trade closed, the simulator meant
+to cancel the other half of its bracket and did it by assigning the string
+`'CANCELED'` over `o.orig.SLOrder` - a reference to the `Event` the child was
+built from, not to the `OANDAOrder` the book actually holds. Nothing consults
+that attribute, so the loser stayed `PENDING` for the rest of the run and
+filled whenever price later reached it.
+
+It is fixed: the sibling is now retired the way a cancel retires an order, one
+close per trade, and the balance moves once. `backtest_oanda_test.py` pins the
+simulator's side of it and `web_test.py` pins it again where it was noticed.
+Two tests that had pinned the old behaviour were rewritten with a Was/Now note
+rather than deleted, which is this suite's convention.
+
+If you have backtest results from before this, they are wrong by however many
+of their trades ran into their other leg afterwards.
 
 ## The parity alarm
 

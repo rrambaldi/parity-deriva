@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>parity-deriva backtest</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<header>
+  <h1>parity-deriva</h1>
+  <form id="controls" autocomplete="off">
+    <label>instrument
+      <select name="instrument" id="instrument"></select>
+    </label>
+    <label>granularity
+      <select name="granularity" id="granularity"></select>
+    </label>
+    <label>strategy
+      <select name="strategy" id="strategy">
+        <option value="AG01">AG01</option>
+        <option value="AG02">AG02</option>
+      </select>
+    </label>
+    <label>from <input type="date" name="from" id="from"></label>
+    <label>to <input type="date" name="to" id="to"></label>
+    <label>units <input type="number" name="units" id="units" value="1" min="1" step="1"></label>
+    <button type="submit" id="run">run</button>
+  </form>
+</header>
+
+<p id="message" hidden></p>
+
+<section id="chart-panel">
+  <div id="chart-head">
+    <span id="chart-title">no backtest yet</span>
+    <span id="chart-zoom"></span>
+    <button type="button" id="reset" hidden>show the whole range</button>
+  </div>
+  <canvas id="chart" height="420"></canvas>
+  <p class="legend">
+    <span class="k entry">entry</span>
+    <span class="k exit">exit</span>
+    <span class="k tp">take profit</span>
+    <span class="k sl">stop loss</span>
+    <span class="note">times are UTC &middot; the thin whiskers on a zoomed
+      chart are the ask high and the bid low, which are the prices the fill
+      rule reads</span>
+  </p>
+</section>
+
+<section id="report-panel" hidden>
+  <div id="report"></div>
+  <div id="counts"></div>
+</section>
+
+<section id="trades-panel">
+  <table id="trades">
+    <thead>
+      <tr>
+        <th>#</th><th>signal</th><th>side</th>
+        <th>entry</th><th class="num">at</th>
+        <th>exit</th><th class="num">at</th>
+        <th class="num">stop</th><th class="num">target</th>
+        <th>outcome</th><th class="num">P&amp;L</th><th class="num">cumulative</th>
+      </tr>
+    </thead>
+    <tbody id="trade-rows">
+      <tr class="empty"><td colspan="12">run a backtest to see its trades</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

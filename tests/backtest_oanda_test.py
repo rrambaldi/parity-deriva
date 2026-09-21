@@ -311,11 +311,12 @@ class TestStopLossTakeProfitChildren(BacktesterCase):
         self.bt.execute_event(self.order(units=-1, price=11700.0,
                                          sl=11720.0, tp=11680.0))
         self.bt.execute_event(self.candle(l=11699.0, h=11701.0))
+        parent, stop, take = self.bt.orders
         self.bt.execute_event(self.candle(T0 + datetime.timedelta(minutes=1),
                                           l=11719.0, h=11721.0))
-        parent, stop, take = self.bt.orders
         self.assertEqual(stop.state, 'CLOSED')
         self.assertEqual(parent.state, 'CLOSED')
+        self.assertEqual(take.state, 'CANCELED')
 
     def test_children_are_not_matched_against_the_opening_bar(self):
         """
@@ -335,46 +336,78 @@ class TestStopLossTakeProfitChildren(BacktesterCase):
         self.bt.execute_event(self.order(units=1, price=11700.0,
                                          sl=11695.0, tp=11705.0))
         self.bt.execute_event(self.candle(l=11690.0, h=11710.0))
+        parent, stop, take = self.bt.orders
         self.bt.execute_event(self.candle(T0 + datetime.timedelta(minutes=1),
                                           l=11690.0, h=11710.0))
-        parent, stop, take = self.bt.orders
         self.assertEqual(parent.state, 'CLOSED')
         self.assertEqual(stop.state, 'CLOSED')
 
     def test_hitting_the_take_profit_closes_both_legs(self):
-        self.fill_a_long()
+        parent, stop, take = self.fill_a_long()
         self.bt.execute_event(self.candle(T0 + datetime.timedelta(minutes=1),
                                           l=11719.0, h=11721.0))
-        parent, stop, take = self.bt.orders
         self.assertEqual(take.state, 'CLOSED')
         self.assertEqual(parent.state, 'CLOSED')
 
     def test_hitting_the_take_profit_cancels_the_stop(self):
-        self.fill_a_long()
+        """
+        Was: the parent's SLOrder attribute was overwritten with the string
+             'CANCELED', and this test pinned that. The attribute held the
+             Event the child was built from, not the OANDAOrder the book
+             holds, so the order itself stayed PENDING and nothing about the
+             book changed.
+        Now: the stop is cancelled - the order the book holds - which is what
+             one-cancels-the-other means.
+        """
+        parent, stop, take = self.fill_a_long()
         self.bt.execute_event(self.candle(T0 + datetime.timedelta(minutes=1),
                                           l=11719.0, h=11721.0))
-        parent = self.bt.orders[0]
-        self.assertEqual(parent.SLOrder, 'CANCELED')
+        self.assertEqual(stop.state, 'CANCELED')
+        self.assertIs(parent.SLOrder, stop)
 
     def test_hitting_the_stop_loss_closes_and_cancels_the_target(self):
-        self.fill_a_long()
+        parent, stop, take = self.fill_a_long()
         self.bt.execute_event(self.candle(T0 + datetime.timedelta(minutes=1),
                                           l=11689.0, h=11691.0))
-        parent, stop, take = self.bt.orders
         self.assertEqual(stop.state, 'CLOSED')
-        self.assertEqual(parent.TPOrder, 'CANCELED')
+        self.assertEqual(take.state, 'CANCELED')
 
-    def test_closing_does_not_remove_the_orders_from_the_book(self):
+    def test_the_trade_is_not_closed_a_second_time(self):
         """
-        Closed legs stay in self.orders with state CLOSED; closed_orders is
-        only ever appended to by cancelOrder. Any reconciliation has to filter
-        on state, not on list membership.
+        Was: the loser of a bracket stayed PENDING for the rest of the run, so
+             when price later reached it, it filled and published a second
+             close for a trade that had already closed - with the opposite
+             outcome, and the balance moved again. Over two months of EUR_USD
+             H1, 73 of 103 trades closed twice.
+        Now: one close, and the balance moves once.
+        """
+        self.fill_a_long()
+        self.sink.events = []
+        self.bt.execute_event(self.candle(T0 + datetime.timedelta(minutes=1),
+                                          l=11719.0, h=11721.0))
+        self.bt.execute_event(self.candle(T0 + datetime.timedelta(minutes=2),
+                                          l=11689.0, h=11691.0))
+        closes = [e for e in self.sink.of('SIMULATEDFILL')
+                  if e.has_attr('tradesClosed')]
+        self.assertEqual(len(closes), 1)
+        self.assertEqual(closes[0].reason, 'TAKE_PROFIT_ORDER')
+        self.assertAlmostEqual(self.bt.balance, 100020.0)
+
+    def test_the_cancelled_leg_leaves_the_book_and_the_closed_ones_stay(self):
+        """
+        Was: closing removed nothing, because nothing was cancelled.
+        Now: the loser is retired the way cancelOrder retires an order - off
+             self.orders and onto closed_orders - while the parent and the leg
+             that closed the trade stay on the book with state CLOSED. Any
+             reconciliation still has to filter on state rather than on list
+             membership.
         """
         self.fill_a_long()
         self.bt.execute_event(self.candle(T0 + datetime.timedelta(minutes=1),
                                           l=11719.0, h=11721.0))
-        self.assertEqual(len(self.bt.orders), 3)
-        self.assertEqual(self.bt.closed_orders, [])
+        self.assertEqual([o.state for o in self.bt.orders],
+                         ['CLOSED', 'CLOSED'])
+        self.assertEqual([o.state for o in self.bt.closed_orders], ['CANCELED'])
         self.assertEqual(self.bt.closed_trades, [])
 
     def test_a_winning_trade_is_realised_into_the_balance(self):
