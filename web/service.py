@@ -55,7 +55,30 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from parity_deriva.backtest import ledger
 from parity_deriva.etc import settings
 from parity_deriva.performance import report as report_module
+from parity_deriva.strategy import plugins
 
+
+def strategies():
+	"""
+	Every strategy the page may offer, which is every one check() accepts.
+
+	Two kinds, and they are not interchangeable. backtest/ledger.py's are
+	handlers the live stack runs, replayed here through the same simulator the
+	account trades against. A viewer plugin (strategy/plugins.py) is a package
+	with its own bar loop, and it is here because a backtest of one is the same
+	thing to look at: candles, trades, a report. A plugin may have free
+	parameters, which ride in the query string; everything else on this page
+	works the same for both.
+	"""
+	return sorted(ledger.STRATEGIES) + sorted(plugins.viewers())
+
+
+#: The service's own logger, separate from the trading one every other
+#: component here uses. A backtest logs a few lines per fill at INFO, which is
+#: right for a run somebody is watching and wrong for a server: one request
+#: would put several hundred lines in the journal. Keeping the two apart lets
+#: scripts/web.py quiet the loud one and still report what it served.
+LOGGER = 'parity_deriva.web'
 
 #: where the page and its two assets live
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
@@ -128,7 +151,7 @@ class Service(object):
 	"""
 
 	def __init__(self, setup=None, max_candles=MAX_CANDLES, cache_size=8):
-		self.logger = logging.getLogger('parity_deriva.trading.trading')
+		self.logger = logging.getLogger(LOGGER)
 		self.setup = setup if setup is not None else settings
 		self.max_candles = int(max_candles)
 		self.cache_size = int(cache_size)
@@ -214,10 +237,10 @@ class Service(object):
 			raise ServiceError(
 				"%s has no %s candles; it holds %s"
 				% (instrument, granularity, ", ".join(names)))
-		if strategy not in ledger.STRATEGIES:
+		if strategy not in strategies():
 			raise ServiceError(
 				"no strategy %r; this runs %s"
-				% (strategy, ", ".join(sorted(ledger.STRATEGIES))))
+				% (strategy, ", ".join(strategies())))
 		return known[instrument]
 
 	def span(self, known, granularity, dtfrom, dtto):
@@ -254,8 +277,13 @@ class Service(object):
 
 	# -------------------------------------------------------------- the work
 
-	def key(self, instrument, granularity, strategy, dtfrom, dtto, units):
-		return (instrument, granularity, strategy, dtfrom, dtto, units)
+	def key(self, instrument, granularity, strategy, dtfrom, dtto, units,
+			params=None):
+		# a plugin's parameters are part of the question, so they are part of
+		# the key. Leaving them out would serve the first combination asked
+		# for to every later request for a different one
+		return (instrument, granularity, strategy, dtfrom, dtto, units,
+				params.label() if params is not None else None)
 
 	def window(self, known, granularity):
 		for row in known['granularities']:
@@ -265,7 +293,7 @@ class Service(object):
 													  granularity))
 
 	def backtest(self, instrument, granularity, strategy='AG01', dtfrom=None,
-				 dtto=None, units=1):
+				 dtto=None, units=1, params=None):
 		"""Run one backtest and return the payload the page reads."""
 		known = self.check(instrument, granularity, strategy)
 
@@ -282,7 +310,8 @@ class Service(object):
 
 		self.span(known, granularity, dtfrom, dtto)
 
-		key = self.key(instrument, granularity, strategy, dtfrom, dtto, units)
+		key = self.key(instrument, granularity, strategy, dtfrom, dtto, units,
+					   params)
 		if key in self._cache:
 			return self._cache[key]
 
@@ -290,9 +319,16 @@ class Service(object):
 			if key in self._cache:
 				return self._cache[key]
 			started = time.time()
-			result = ledger.run(instrument, granularity, strategy,
-								dtfrom=dtfrom, dtto=dtto, units=units,
-								setup=self.setup)
+			plugin = plugins.viewers().get(strategy)
+			if plugin is not None:
+				result = plugin['run'](
+					instrument, granularity,
+					params if params is not None else plugin['params'](_none),
+					dtfrom=dtfrom, dtto=dtto, setup=self.setup)
+			else:
+				result = ledger.run(instrument, granularity, strategy,
+									dtfrom=dtfrom, dtto=dtto, units=units,
+									setup=self.setup)
 			payload = self.payload(result, time.time() - started)
 			self.remember(key, payload)
 			return payload
@@ -408,6 +444,25 @@ def parseInt(text, name, default):
 		raise ServiceError("%s: %r is not a number" % (name, text))
 
 
+def _none(name):
+	"""A query string that says nothing, so a plugin builds its defaults."""
+	return None
+
+
+def _forms():
+	"""strategy -> the parameter form it wants, for the page to build."""
+	return dict((name, plugin['fields']())
+				for name, plugin in plugins.viewers().items())
+
+
+def _pluginErrors():
+	"""Every refusal a plugin can raise, which is a 400 and not a crash."""
+	out = ()
+	for plugin in plugins.viewers().values():
+		out = out + tuple(plugin['errors'])
+	return out
+
+
 class Handler(BaseHTTPRequestHandler):
 	"""
 	The routes. Four of them, written out rather than decorated.
@@ -423,9 +478,8 @@ class Handler(BaseHTTPRequestHandler):
 	sys_version = ''
 
 	def log_message(self, fmt, *args):
-		# the project's logger, not stderr, so a run looks like every other
-		logging.getLogger('parity_deriva.trading.trading').info(
-			"web %s" % (fmt % args))
+		# the project's logging, not stderr, so a run looks like every other
+		logging.getLogger(LOGGER).info(fmt % args)
 
 	# ------------------------------------------------------------- replying
 
@@ -480,7 +534,17 @@ class Handler(BaseHTTPRequestHandler):
 			if route in ('/', '/index.html'):
 				return self.sendFile('index.html')
 			if route == '/api/stores':
-				return self.sendJSON({'instruments': self.service.instruments()})
+				# the strategies come from the same place check() refuses
+				# against, so the page cannot offer one the service would
+				# then reject
+				return self.sendJSON({
+					'instruments': self.service.instruments(),
+					'strategies': strategies(),
+					# the parameter form of every strategy that has one. The
+					# page builds the controls from this rather than holding a
+					# copy in the JavaScript that would drift from the
+					# strategy's own defaults
+					'params': _forms()})
 			if route == '/api/backtest':
 				return self.sendJSON(self.runBacktest(query))
 			if route.startswith('/static/'):
@@ -490,9 +554,10 @@ class Handler(BaseHTTPRequestHandler):
 			return self.sendError(str(exc))
 		except ledger.LedgerError as exc:
 			return self.sendError(str(exc))
+		except _pluginErrors() as exc:
+			return self.sendError(str(exc))
 		except Exception as exc:
-			logging.getLogger('parity_deriva.trading.trading').exception(
-				"web request failed")
+			logging.getLogger(LOGGER).exception("web request failed")
 			return self.sendError("%s: %s" % (type(exc).__name__, exc), 500)
 
 	def one(self, query, name, default=None):
@@ -510,7 +575,25 @@ class Handler(BaseHTTPRequestHandler):
 			strategy=self.one(query, 'strategy', 'AG01'),
 			dtfrom=parseDate(self.one(query, 'from'), 'from'),
 			dtto=parseDate(self.one(query, 'to'), 'to', end=True),
-			units=parseInt(self.one(query, 'units'), 'units', 1))
+			units=parseInt(self.one(query, 'units'), 'units', 1),
+			params=self.pluginParams(query))
+
+	def pluginParams(self, query):
+		"""
+		A plugin's free parameters, or None for a strategy that has none.
+
+		The plugin builds them, so a value outside its range is the same
+		refusal here as on the command line - a page cannot ask for a lookback
+		of 7 and get a run that quietly did something else - and the service
+		does not learn what any of them mean.
+		"""
+		plugin = plugins.viewers().get(self.one(query, 'strategy'))
+		if plugin is None:
+			return None
+		try:
+			return plugin['params'](lambda name: self.one(query, name))
+		except plugin['errors'] as exc:
+			raise ServiceError(str(exc))
 
 
 def serve(host='127.0.0.1', port=8731, setup=None, max_candles=MAX_CANDLES):

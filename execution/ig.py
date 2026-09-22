@@ -40,7 +40,8 @@ from parity_deriva.etc import settings
 from parity_deriva.event.event import ClientOrderEvent
 from parity_deriva.event.event import TransactionEvent
 from parity_deriva.lib.ig import (IGAPI, IGError, currency, dealReference,
-								  epic, expiry, goodTillDate, scale)
+								  epic, expiry, goodTillDate, pricePrecision,
+								  scale)
 from parity_deriva.trading.handler import ExecutionHandler
 
 
@@ -187,6 +188,10 @@ class IGExecutionHandler(ExecutionHandler):
 			self.logger.error("ORDER REJECTED: status %s %s" % (status, code))
 			rejection = TransactionEvent({
 				'type': 'ORDER_REJECT',
+				# named the way the money manager reads it; without an
+				# orderID the rejection frees nothing and the strategy stays
+				# blocked behind an order that does not exist
+				'orderID': reference,
 				'instrument': event.instrument,
 				'price': event.price,
 				'units': event.units,
@@ -227,22 +232,76 @@ class IGExecutionHandler(ExecutionHandler):
 		self.queue_event(coe)
 		return coe
 
+	def resolveOrder(self, event):
+		"""
+		The dealId of the working order an event names, or None.
+
+		The money manager cancels the losing leg by the id it was given, and
+		for IG that id is the deal *reference*: the acknowledgement had
+		nothing else to offer, since the dealId only exists once IG has
+		processed the deal. GET /workingorders then publishes the dealId and
+		**not** the reference - measured, not assumed - so the two names for
+		one order never appear together and the order has to be found some
+		other way.
+
+		It is found on the epic and the level, which is the same pair the
+		simulator matches a cancel on and for the same reason: they are the
+		fields both sides agree on. Two orders at one level on one market
+		resolve to neither. That is AG01's straddle seen from the wrong side -
+		its two legs sit at different levels, so it does not arise there - but
+		cancelling the wrong leg would leave the account holding the position
+		the strategy meant to abandon, which is worse than cancelling nothing.
+		"""
+		instrument = getattr(event, 'instrument', None)
+		price = getattr(event, 'price', None)
+		if instrument is None or price is None:
+			return None
+
+		status, payload = self.api.get('workingorders')
+		if status != 200 or not payload:
+			self.logger.error("CANCEL: working orders came back %s" % status)
+			return None
+
+		wanted = epic(instrument, self.setup)
+		digits = pricePrecision(instrument, self.setup)
+		level = round(self.level(instrument, price), digits)
+		found = []
+		for row in payload.get('workingOrders') or []:
+			data = row.get('workingOrderData') or {}
+			if data.get('epic') != wanted or data.get('orderLevel') is None:
+				continue
+			if round(float(data['orderLevel']), digits) == level:
+				found.append(data.get('dealId'))
+
+		if len(found) == 1:
+			return found[0]
+		if not found:
+			self.logger.warning("CANCEL: no working order on %s at %s"
+								% (wanted, level))
+		else:
+			self.logger.error(
+				"CANCEL: %d working orders on %s at %s; cancelling none of "
+				"them rather than the wrong one" % (len(found), wanted, level))
+		return None
+
 	def cancelOrder(self, event):
 		"""
 		Delete a working order.
 
 		IG keys the delete by dealId, which is not what the acknowledgement
-		carried - that was the deal *reference*. The dealId arrives with the
-		confirmation, so a cancel that has only a reference cannot be sent,
-		and saying so is better than sending a delete for a resource named by
-		the wrong identifier.
+		carried - that was the deal *reference*. Where the event names the
+		dealId, it is used; otherwise the order is looked up, and a cancel
+		that cannot be resolved is refused rather than sent against a
+		resource named by the wrong identifier.
 		"""
 		deal_id = getattr(event, 'dealId', None)
 		if deal_id is None:
+			deal_id = self.resolveOrder(event)
+		if deal_id is None:
 			self.logger.warning(
-				"CANCEL without a dealId (reference %s); IG deletes a working "
-				"order by dealId, which arrives with the confirmation"
-				% getattr(event, 'dealReference', None))
+				"CANCEL NOT SENT for order %s at %s: no dealId, and the "
+				"working orders did not identify one"
+				% (getattr(event, 'orderID', None), getattr(event, 'price', None)))
 			return None
 		status, payload = self.api.delete('cancel_order', parts=(deal_id,))
 		self.logger.debug("CANCEL RESPONSE: status %s %s" % (status, payload))

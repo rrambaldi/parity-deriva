@@ -38,3 +38,8 @@ equity.csv
 # Local settings overrides
 etc/settings_local.py
 .env
+
+# Strategies that are not published with the engine. Their own git repository
+# lives here; strategy/plugins.py is the only thing that looks for it, and
+# everything works with it absent.
+strategy/private/

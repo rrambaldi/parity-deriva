@@ -54,6 +54,8 @@ from parity_deriva.backtest.offline import SimulatedBroker
 from parity_deriva.data.replay import ForexCandles
 from parity_deriva.etc import settings
 from parity_deriva.portfolio.moneymanager import MoneyManager
+from parity_deriva.portfolio.trailer import Trailer
+from parity_deriva.strategy import plugins
 from parity_deriva.trading.handler import ExecutionHandler
 
 
@@ -62,10 +64,15 @@ from parity_deriva.trading.handler import ExecutionHandler
 #: how long a run of candle directions persists and place nothing, so a
 #: backtest of one produces no trades at all rather than an empty result worth
 #: looking at.
+#:
+#: A strategy that is not published with this repository adds itself through
+#: strategy/plugins.py, so this list is longer on a checkout that has one
+#: installed and complete on one that does not.
 STRATEGIES = {
 	'AG01': ('parity_deriva.strategy.AG01', 'AG01'),
 	'AG02': ('parity_deriva.strategy.AG02', 'AG02'),
 }
+STRATEGIES.update(plugins.backtest())
 
 #: outcomes, in the vocabulary trading/parity.py and the simulator share
 TAKE_PROFIT = 'TAKE_PROFIT_ORDER'
@@ -382,6 +389,13 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 	engine = ReplayEngine()
 	for handler in (strategy_class(pairs=[instrument], granularity=granularity),
 					moneyManager(units=units, setup=cfg),
+					# Before the simulator, so that a stop moved on this bar
+					# applies from the next one: the ladder is read off a bar
+					# that has closed, and a stop that could be moved and
+					# then taken within the same bar would be reading the
+					# future. Inert unless an order carries a ladder, so AG01
+					# and AG02 are unaffected by its being here.
+					Trailer(granularity=granularity),
 					# named: with two granularities of one instrument on the
 					# bus the simulator has no way to tell which stream it
 					# should fill against

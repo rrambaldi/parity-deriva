@@ -312,21 +312,48 @@ IG_SESSION_VERSION = 2
 #                  different instrument, so it is explicit
 #   currency       what the deal is denominated in; falls back to IG_CURRENCY
 #                  and then to BASE_CURRENCY. Not guessed from the pair's
-#                  name: 'EUR_USD' can be dealt in either of them
+#                  name, and the fallback is wrong more often than it looks:
+#                  EUR/USD here is denominated in USD while the account is in
+#                  EUR, which GET /markets/{epic} states and the pair's name
+#                  does not
 #   precision      overrides INSTRUMENT_PRECISION for IG only
-#   scalingFactor  only for a market IG quotes scaled. Leave it out unless
-#                  you have checked GET /markets/{epic} against a price you
-#                  can read on the platform - a wrong factor moves every
-#                  level by a power of ten
+#   priceDivisor   almost never. See lib/ig.scale() - it is NOT IG's
+#                  scalingFactor, and pasting that field here would move every
+#                  level by four decimal places
 #
-# Nothing is pre-filled here, unlike ETORO_INSTRUMENTS, because no epic in
-# this table would be evidence of anything: they differ per account and the
-# ones below could not have been checked against yours.
+# The two below were resolved against the demo account on 2026-09-22 and are
+# evidenced, not guessed. What the search and the dealing rules said:
+#
+#   EUR_USD   CS.D.EURUSD.CEB.IP  "EUR/USD", lotSize 10
+#             CS.D.EURUSD.CEBM.IP "EUR/USD Mini", lotSize 1     <- chosen
+#             Both quote in USD, both take a minimum stop of 2.0 points
+#             (0.0002) and a minimum size of 0.1. The Mini is a tenth of the
+#             value per point, which is the right size for the one-unit
+#             trades this project places on a demo account.
+#
+#   DE30_EUR  "Germany 40" returns seven markets: cash at 25, 5 and 1 euro a
+#             point, two dated futures, another 1-euro cash market, and a
+#             weekend one that is EDITS_ONLY. Of the two at 1 euro a point,
+#             IX.D.DAX.IFMM.IP takes a minimum stop of 8.0 points against
+#             IX.D.DAX.IBE.IP's 12.0, and AG01's stop is the low of a bar -
+#             so the tighter minimum is the one that refuses fewer orders.
+#
+#             Note what this pair is NOT: OANDA's DE30_EUR tracks 30
+#             constituents and IG's Germany 40 tracks 40. Same market under
+#             two names is the eToro GER40 situation again - they are not the
+#             same basket, and a strategy calibrated on one is not calibrated
+#             on the other.
+#
+# Resolve others with:
+#     python scripts/ig_instruments.py --details EURUSD
+# which also prints the dealing rules. The minimum stop distance is the one
+# to read: IG refuses a stop closer than that and nothing here moves a level
+# to fit, so the order is sent as asked and the refusal is published.
 IG_INSTRUMENTS = {
-    # 'EUR_USD': {'epic': 'CS.D.EURUSD.MINI.IP', 'expiry': '-',
-    #             'currency': 'USD', 'precision': 5},
-    # 'DE30_EUR': {'epic': 'IX.D.DAX.IFMM.IP', 'expiry': '-',
-    #              'currency': 'EUR', 'precision': 1},
+    'EUR_USD': {'epic': 'CS.D.EURUSD.CEBM.IP', 'expiry': '-',
+                'currency': 'USD', 'precision': 5},
+    'DE30_EUR': {'epic': 'IX.D.DAX.IFMM.IP', 'expiry': '-',
+                 'currency': 'EUR', 'precision': 1},
 }
 
 # The currency a deal is denominated in, where the instrument entry does not

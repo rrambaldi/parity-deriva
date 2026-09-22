@@ -477,6 +477,92 @@ class TestCancel(BacktesterCase):
         self.assertEqual([o.state for o in self.bt.orders], ['FILLED'])
 
 
+class TestStopModify(BacktesterCase):
+    """
+    Moving the stop of a trade that is already open.
+
+    The fill logic is untouched by this: only the child's price changes, so a
+    moved stop is taken exactly as a stop placed there in the first place.
+    """
+
+    def setUp(self):
+        super(TestStopModify, self).setUp()
+        from parity_deriva.event.event import StopModifyEvent
+        self.StopModifyEvent = StopModifyEvent
+        self.bt.execute_event(self.order(price=11700.0, sl=11690.0, tp=None))
+        self.bt.execute_event(self.candle())          # fills, creating the stop
+
+    def stop(self):
+        return self.bt.orders[0].SLOrder.price
+
+    def test_the_stop_of_the_named_order_moves(self):
+        self.assertTrue(self.bt.execute_event(self.StopModifyEvent(
+            {"orderID": 1, "price": 11695.0})))
+        self.assertEqual(self.stop(), 11695.0)
+
+    def test_an_unknown_order_moves_nothing(self):
+        self.assertFalse(self.bt.execute_event(self.StopModifyEvent(
+            {"orderID": 99, "price": 11695.0})))
+        self.assertEqual(self.stop(), 11690.0)
+
+    def test_the_signal_names_the_trade_when_the_id_is_the_brokers(self):
+        """
+        Shadowing a live account, the id on the event is OANDA's and this book
+        has never heard of it - the simulator numbers its own orders. The
+        signal is on both sides' orders, so it is the name that crosses.
+        """
+        self.assertTrue(self.bt.execute_event(self.StopModifyEvent(
+            {"orderID": "7291", "price": 11695.0, "signalNumber": "S1"})))
+        self.assertEqual(self.stop(), 11695.0)
+
+    def test_an_unknown_signal_moves_nothing(self):
+        self.assertFalse(self.bt.execute_event(self.StopModifyEvent(
+            {"orderID": "7291", "price": 11695.0, "signalNumber": "OTHER"})))
+        self.assertEqual(self.stop(), 11690.0)
+
+    def test_a_moved_stop_is_taken_like_any_other(self):
+        self.bt.execute_event(self.StopModifyEvent(
+            {"orderID": 1, "price": 11702.0}))
+        self.bt.execute_event(self.candle(dt=T0 + datetime.timedelta(minutes=1),
+                                          o=11705.0, h=11706.0, l=11701.0,
+                                          c=11703.0))
+        closed = [e for e in self.sink.events if e.has_attr('tradesClosed')]
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(closed[0].reason, 'STOP_LOSS_ORDER')
+
+    def test_a_stop_above_a_long_entry_is_booked_as_a_gain(self):
+        """
+        The whole point of moving it. A stop taken at 11702 off an entry of
+        11700 is two points made, not two lost - which is what the sign of
+        (exit - entry) * units says and what abs() used to get backwards.
+        """
+        self.bt.execute_event(self.StopModifyEvent(
+            {"orderID": 1, "price": 11702.0}))
+        self.bt.execute_event(self.candle(dt=T0 + datetime.timedelta(minutes=1),
+                                          o=11705.0, h=11706.0, l=11701.0,
+                                          c=11703.0))
+        closed = [e for e in self.sink.events if e.has_attr('tradesClosed')][0]
+        self.assertEqual(closed.pl, 2.0)
+
+    def test_a_price_less_event_is_refused(self):
+        self.assertFalse(self.bt.execute_event(self.StopModifyEvent(
+            {"orderID": 1})))
+
+    def test_a_level_of_zero_is_not_a_level(self):
+        """Event.__set__ renders an unreadable price as "0.0"; it is refused."""
+        self.assertFalse(self.bt.execute_event(self.StopModifyEvent(
+            {"orderID": 1, "price": None})))
+        self.assertEqual(self.stop(), 11690.0)
+
+    def test_a_trade_without_a_stop_has_nothing_to_move(self):
+        bt = OANDABacktester(setup=self.settings)
+        bt.set_queue(Recorder())
+        bt.execute_event(self.order(price=11700.0, sl=None, tp=None))
+        bt.execute_event(self.candle())
+        self.assertFalse(bt.execute_event(self.StopModifyEvent(
+            {"orderID": 1, "price": 11695.0})))
+
+
 class TestDumps(BacktesterCase):
 
     def test_dump_orders_and_trades_do_not_raise_on_an_empty_book(self):

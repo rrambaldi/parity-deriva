@@ -4,7 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>parity-deriva backtest</title>
-<link rel="stylesheet" href="/static/app.css">
+<!--
+  Relative, not absolute. Served at the root this resolves to /static/app.css;
+  served behind a reverse proxy at /parity/ it resolves to /parity/static/app.css
+  and needs no configuration on either side. The one thing it does need is the
+  trailing slash on the prefix, which is why the nginx block redirects /parity
+  to /parity/ - without it the browser resolves these against / and asks the
+  wrong server for them.
+-->
+<link rel="stylesheet" href="static/app.css">
 </head>
 <body>
 
@@ -18,15 +26,19 @@
       <select name="granularity" id="granularity"></select>
     </label>
     <label>strategy
-      <select name="strategy" id="strategy">
-        <option value="AG01">AG01</option>
-        <option value="AG02">AG02</option>
-      </select>
+      <select name="strategy" id="strategy"></select>
     </label>
     <label>from <input type="date" name="from" id="from"></label>
     <label>to <input type="date" name="to" id="to"></label>
     <label>units <input type="number" name="units" id="units" value="1" min="1" step="1"></label>
     <button type="submit" id="run">run</button>
+    <!--
+      The free parameters of whichever strategy is selected, or nothing at all
+      for one that has none. Built by app.js from what /api/stores says, so
+      the ranges stay in the strategy that owns them instead of being typed
+      here where they would drift.
+    -->
+    <fieldset id="params" hidden></fieldset>
   </form>
 </header>
 
@@ -72,6 +84,6 @@
   </table>
 </section>
 
-<script src="/static/app.js"></script>
+<script src="static/app.js"></script>
 </body>
 </html>

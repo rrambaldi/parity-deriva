@@ -21,11 +21,12 @@ security model here.
 """
 
 import argparse
+import logging
 import sys
 
 from parity_deriva.etc import settings
 from parity_deriva.lib.utils import getLogger
-from parity_deriva.web.service import MAX_CANDLES, serve
+from parity_deriva.web.service import LOGGER, MAX_CANDLES, serve
 
 
 def parse(argv):
@@ -40,12 +41,27 @@ def parse(argv):
                         help="most candles one reply may carry (default %d). "
                              "A window wider than this is refused rather than "
                              "truncated" % MAX_CANDLES)
+    parser.add_argument('--verbose', action='store_true',
+                        help="let the backtest log what it is doing. Off by "
+                             "default: a run logs several lines per fill, "
+                             "which is right when somebody is watching it and "
+                             "is hundreds of journal lines per request when "
+                             "nobody is")
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse(argv if argv is not None else sys.argv[1:])
-    logger = getLogger()
+
+    # getLogger() reads logging.conf, which puts every logger at DEBUG - right
+    # for a script somebody is reading, wrong for a service. The backtest is
+    # quietened to warnings and the service keeps its own logger at info, so
+    # the journal holds one line per request instead of one per fill.
+    getLogger()
+    logger = logging.getLogger(LOGGER)
+    logger.setLevel(logging.INFO)
+    logging.getLogger('parity_deriva.trading.trading').setLevel(
+        logging.DEBUG if args.verbose else logging.WARNING)
 
     server = serve(host=args.host, port=args.port, setup=settings,
                    max_candles=args.max_candles)

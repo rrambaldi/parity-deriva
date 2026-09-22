@@ -251,17 +251,29 @@ def currency(name, setup=None):
 
 def scale(name, setup=None):
 	"""
-	What a served price has to be divided by to be a price.
+	What a served price has to be divided by to be a price. Normally nothing.
 
-	IG reports some markets scaled - the snapshot of such a market carries a
-	scalingFactor - and a level sent back has to be in the same units the
-	market quotes. Nothing is assumed here: unset means the served numbers
-	are used exactly as they come, which is right for the FX and index
-	markets this project deals. Set it per instrument only after checking
-	GET /markets/{epic} against a price you can read on the platform, since
-	a wrong factor moves every level by a power of ten.
+	This is deliberately NOT IG's ``scalingFactor``, and the difference was
+	measured rather than reasoned about. On the demo account, EUR/USD reports
+	scalingFactor 10000 while quoting a bid of 1.14625 and serving price rows
+	of 1.14632 - so the factor is not a divisor for prices, and dividing by it
+	would put every level four decimal places from where the market is. What
+	it relates is *distances in points* to price units: the same market's
+	minimum stop distance comes back as 2.0 POINTS, which is 0.0002. The DAX
+	reports scalingFactor 1 and quotes 25630.8, which is the same rule seen
+	from the other side.
+
+	Nothing here reads that field. This is a manual override, keyed
+	'priceDivisor' precisely so that pasting IG's own scalingFactor into an
+	instrument entry cannot switch it on, and it is unset for every market
+	this project deals. It exists for a market somebody measures a discrepancy
+	on, and until then it stays out of the way.
+
+	Orders are unaffected either way: execution/ig.py sends stopLevel and
+	limitLevel, which are absolute prices. Were it to send stopDistance, the
+	distance would be in points and the factor would matter.
 	"""
-	value = instrument(name, setup).get('scalingFactor')
+	value = instrument(name, setup).get('priceDivisor')
 	if value in (None, 0):
 		return 1.0
 	return float(value)
@@ -342,15 +354,35 @@ def priceTime(dt):
 
 def goodTillDate(dt):
 	"""
-	A datetime as ``goodTillDate`` wants it.
+	A datetime as ``goodTillDate`` wants it: IG's own format, in UTC.
 
-	IG documents this field in its own format - yyyy/MM/dd hh:mm:ss - rather
-	than as an ISO instant, and it is read in the account's timezone. The
-	strategies here build their gtdTime with datetime.today(), so it is
-	already a local wall-clock instant and is sent as one; converting it to
-	UTC would move a 23:59 expiry by the machine's offset.
+	IG documents the field as yyyy/MM/dd hh:mm:ss rather than as an ISO
+	instant, and says nothing that settles which clock reads it. It used to
+	be sent as a local wall clock here, on the belief that the account's
+	timezone applied. That was measured on the demo account, whose own clock
+	runs two hours ahead of UTC - its position list serves createdDate 00:44
+	beside createdDateUTC 22:44 - and it is wrong:
+
+	* ninety minutes ahead in UTC, which is half an hour in the *past* on the
+	  account's clock, was accepted and the order lived;
+	* thirty minutes ahead, which is in the past in London, was accepted too;
+	* ten minutes *behind* UTC was refused at once with
+	  GOOD_TILL_DATE_IN_THE_PAST - so the check is made on acceptance and the
+	  two survivals above mean what they look like.
+
+	So the instant is converted rather than its digits copied. The strategies
+	build gtdTime with datetime.today(), which is the machine's local time: on
+	a machine that is not on UTC, copying those digits moved AG01's
+	end-of-day expiry by the machine's offset, and an order that should have
+	rested until midnight died two hours early - or outlived the day it
+	belonged to.
 	"""
-	return dt.strftime('%Y/%m/%d %H:%M:%S')
+	import datetime as _dt
+	if dt.tzinfo is None:
+		# naive means the machine's own clock, which is what datetime.today()
+		# returns; astimezone() with no argument is what reads that offset
+		dt = dt.astimezone()
+	return dt.astimezone(_dt.timezone.utc).strftime('%Y/%m/%d %H:%M:%S')
 
 
 class IGAPI(object):

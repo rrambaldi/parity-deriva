@@ -12,6 +12,29 @@ import logging
 DEAD = ('CANCELED', 'REJECTED')
 
 
+def orderId(value):
+	"""
+	An order id, in a form two of them can be compared in.
+
+	Every id here used to go through int(), because OANDA and eToro number
+	their orders and their payloads spell the number sometimes as an integer
+	and sometimes as text. IG does not number a deal, it names it -
+	'PD6e1b03...' - and int() on that raises *inside the handler*: the
+	acknowledgement was lost, and with it every match, fill and cancel for
+	that signal.
+
+	So a number is still normalised to a number, and anything else is kept as
+	the text it is. Two ids that came from the same broker compare correctly
+	either way; two from different brokers never meet.
+	"""
+	if value is None:
+		return None
+	try:
+		return int(value)
+	except (TypeError, ValueError):
+		return str(value).strip()
+
+
 class MoneyManager(ExecutionHandler):
 	signals = {}
 	processed = []
@@ -68,10 +91,7 @@ class MoneyManager(ExecutionHandler):
 		orderID = getattr(event, 'orderID', None)
 		if orderID is None:
 			orderID = getattr(event, 'id', None)
-		try:
-			orderID = int(orderID) if orderID is not None else None
-		except (TypeError, ValueError):
-			orderID = None
+		orderID = orderId(orderID)
 
 		if orderID is not None:
 			for key in self.signals:
@@ -157,9 +177,15 @@ class MoneyManager(ExecutionHandler):
 		self.logger.debug("Trade closed...")
 		self.onTrade = False
 		self.orderIssued = False
-		orderID = int(event.orderID)
+		orderID = orderId(getattr(event, 'orderID', None))
+		# getattr, not attribute access: financing is an OANDA field and no
+		# other broker here sends one, so reading it directly raised - in a
+		# log line, on the close of a live trade, which trading/engine.py
+		# answers by killing the process
 		self.logger.debug("CLOSED: %s PRICE: %s PL: %s COSTS: %s BALANCE: %s"
-			% ( orderID, event.price, event.pl, event.financing, event.accountBalance))
+			% ( orderID, getattr(event, 'price', None), getattr(event, 'pl', None),
+				getattr(event, 'financing', None),
+				getattr(event, 'accountBalance', None)))
 #		self.logger.debug(event.dump())
 		for s in list(self.signals.keys()):
 			# reset per group: otherwise the first match closes out every
@@ -183,7 +209,7 @@ class MoneyManager(ExecutionHandler):
 #		self.logger.debug("GOT %s" % event.info())
 		self.onTrade = True
 		self.orderIssued = True
-		orderID = int(event.orderID)
+		orderID = orderId(getattr(event, 'orderID', None))
 		for s in self.signals.keys():
 			found = False
 			for o in self.signals[s]:
@@ -193,7 +219,7 @@ class MoneyManager(ExecutionHandler):
 
 			# cancelliamo gli altri ordini
 			if not found:
-				self.logger.info("OrderID %d not found in %s" % (orderID, s))
+				self.logger.info("OrderID %s not found in %s" % (orderID, s))
 				continue
 
 			for o in self.signals[s]:
@@ -209,7 +235,7 @@ class MoneyManager(ExecutionHandler):
 					, 'price': o.price
 					, 'instrument': o.instrument })
 				self.queue_event(oce)
-				self.logger.info("SENT %s orderID: %d" % (str(oce), o.orderID))
+				self.logger.info("SENT %s orderID: %s" % (str(oce), o.orderID))
 			return
 		self.logger.info("NOT FOUND OrderID %s" % (event.dump()))
 		for s in self.signals.keys():
@@ -224,9 +250,9 @@ class MoneyManager(ExecutionHandler):
 		for o in self.signals[event.signalNumber]:
 			if o.price == event.price:
 				#self.logger.error(event.dump())
-				o.batchID=int(event.batchID)
-				o.orderID=int(event.id)
-				self.logger.info("saved id %d batch: %d" % (o.orderID, o.batchID))
+				o.batchID=orderId(event.batchID)
+				o.orderID=orderId(event.id)
+				self.logger.info("saved id %s batch: %s" % (o.orderID, o.batchID))
 
 	def execute_event(self, event):
 		if str(event) == 'STATUS':

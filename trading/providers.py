@@ -83,6 +83,16 @@ class Capabilities(object):
 	order_expiry = False
 	#: the order call returns the outcome, rather than only an acknowledgement
 	synchronous_orders = False
+	#: the stop of an open trade can be moved after the fact. Needed by any
+	#: strategy whose exit is a rule rather than a level: one with no target
+	#: at all leaves entirely on a stop that climbs behind the price.
+	#: "Can be moved" covers replacing it as well as amending it:
+	#: OANDA has no amend and does not need one, since replacing a trade's
+	#: stop is a single call there. What the flag rules out is a provider
+	#: where the move cannot be made at all, because then the backtest would
+	#: trade a ladder and the account a fixed stop - the one failure this
+	#: project is built to make impossible.
+	stop_modify = False
 
 	def __init__(self, **declared):
 		for key, value in declared.items():
@@ -174,6 +184,12 @@ class OANDAProvider(Provider):
 		close_reason=True,
 		order_expiry=True,
 		synchronous_orders=True,
+		# not an amend: PUT /trades/{id}/orders cancels the stop the trade
+		# carries and attaches the new one, in one transaction batch. The
+		# difference that matters is that the trade is never left without a
+		# stop, which two calls of our own could not promise.
+		# See execution/execution.OANDAExecutionHandler.modifyStop.
+		stop_modify=True,
 	)
 
 	def candles(self, **args):

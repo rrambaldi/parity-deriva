@@ -120,7 +120,10 @@ def main(argv=None):
     if not entries:
         return 1
 
-    print("\nPaste into IG_INSTRUMENTS in etc/settings.py, after checking that")
+    print("\nNote: IG's scalingFactor above is NOT a price divisor. EUR/USD")
+    print("reports 10000 and quotes 1.14625; it relates distances in points to")
+    print("price units. Do not paste it into an instrument entry.\n")
+    print("Paste into IG_INSTRUMENTS in etc/settings.py, after checking that")
     print("each epic is the contract you meant - the first match is not")
     print("necessarily the one you want to deal:\n")
     for name in sorted(entries):

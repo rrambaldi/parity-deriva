@@ -46,6 +46,14 @@ def load_strategies():
     from parity_deriva.strategy.AG01 import AG01
     from parity_deriva.strategy.AG02 import AG02
     STRATEGIES.update({'AG01': AG01, 'AG02': AG02})
+    # Strategies that exit on a moving stop are deliberately not here, and
+    # that includes anything strategy/plugins.py may have installed. What this
+    # script measures is how often one bar reaches a trade's stop *and* its
+    # target, so the two granularities disagree about which came first; a
+    # strategy with no target has nothing to disagree about. measure() drops a
+    # signal whose takeProfit is None a few lines down, so adding one would
+    # buy an option that always reports nothing. What a coarse bar cannot say
+    # about a climbing stop is a different measurement from this one.
 
 
 class SignalTap(ExecutionHandler):

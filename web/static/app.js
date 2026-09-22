@@ -25,6 +25,7 @@ const state = {
   selected: null,    // index into data.trades
   hover: null,       // index into data.candles
   decimals: 5,
+  forms: {},         // strategy -> its parameter fields, from /api/stores
 };
 
 const $ = (id) => document.getElementById(id);
@@ -434,6 +435,9 @@ function message(text, kind) {
 /* ------------------------------------------------------------------ fetch */
 
 async function ask(url) {
+  // Relative for the same reason the asset tags are: the page has to work
+  // both at the root of a local server and under whatever prefix a reverse
+  // proxy puts it at, without either end being told which.
   const response = await fetch(url);
   const payload = await response.json();
   if (!response.ok || payload.error) {
@@ -442,8 +446,82 @@ async function ask(url) {
   return payload;
 }
 
+// The strategies the service will run, read from it rather than listed here:
+// a list in this file is a list that is wrong the day one is added.
+function fill(select, values) {
+  select.textContent = '';
+  for (const value of values) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    select.appendChild(option);
+  }
+}
+
+/*
+ * Some strategies have free parameters of their own. The controls for them
+ * are built from what the service sends rather than written out here: the
+ * ranges live in the strategy's own configuration, and a second copy in this
+ * file is a copy that is wrong the first time one of them changes. This page
+ * does not know which strategy has parameters, or what any of them mean.
+ */
+function buildForms(forms) {
+  state.forms = forms || {};
+  onStrategy();
+}
+
+function currentForm() {
+  return state.forms[$('strategy').value] || null;
+}
+
+function onStrategy() {
+  const form = currentForm();
+  const box = $('params');
+  box.textContent = '';
+  box.hidden = !form;
+  if (!form) return;
+  const legend = document.createElement('legend');
+  legend.textContent = 'parameters';
+  box.appendChild(legend);
+  for (const field of form) box.appendChild(control(field));
+}
+
+/*
+ * A menu when the strategy named the values it accepts, a number box when it
+ * gave a range instead - a bit field with thirty-one useful values is a range,
+ * and a menu of thirty-one entries is unreadable.
+ */
+function control(field) {
+  const label = document.createElement('label');
+  label.textContent = field.label + ' ';
+  let input;
+  if (field.choices) {
+    input = document.createElement('select');
+    fill(input, field.choices);
+  } else {
+    input = document.createElement('input');
+    input.type = 'number';
+    for (const bound of ['min', 'max', 'step']) {
+      if (field[bound] !== undefined) input[bound] = String(field[bound]);
+    }
+  }
+  input.id = field.name;
+  input.value = String(field.value);
+  label.appendChild(input);
+  return label;
+}
+
+function formParams(params) {
+  const form = currentForm();
+  if (!form) return params;
+  for (const field of form) params.set(field.name, $(field.name).value);
+  return params;
+}
+
 async function loadStores() {
-  const { instruments } = await ask('/api/stores');
+  const { instruments, strategies, params } = await ask('api/stores');
+  fill($('strategy'), strategies || []);
+  buildForms(params);
   const select = $('instrument');
   select.textContent = '';
   if (!instruments.length) {
@@ -492,18 +570,18 @@ function onGranularity() {
 
 async function run(event) {
   if (event) event.preventDefault();
-  const params = new URLSearchParams({
+  const params = formParams(new URLSearchParams({
     instrument: $('instrument').value,
     granularity: $('granularity').value,
     strategy: $('strategy').value,
     from: $('from').value,
     to: $('to').value,
     units: $('units').value,
-  });
+  }));
   $('run').disabled = true;
   message('running the backtest…', 'info');
   try {
-    const data = await ask('/api/backtest?' + params.toString());
+    const data = await ask('api/backtest?' + params.toString());
     state.data = data;
     state.decimals = decimalsOf(data.candles);
     state.view = null;
@@ -538,14 +616,16 @@ async function run(event) {
 
 function writeURL() {
   if (!state.data) return;
-  const params = new URLSearchParams({
+  const params = formParams(new URLSearchParams({
     instrument: state.data.instrument,
     granularity: state.data.granularity,
-    strategy: state.data.strategy,
+    // the payload's strategy carries a plugin's parameter label, which is
+    // what the chart title wants and not what the form holds
+    strategy: $('strategy').value,
     from: day(state.data.from),
     to: day(state.data.to),
     units: $('units').value,
-  });
+  }));
   if (state.selected !== null) {
     params.set('trade', String(state.data.trades[state.selected].n));
   }
@@ -567,6 +647,9 @@ function fieldsFromURL() {
   set('granularity', params.get('granularity'));
   onGranularity();
   set('strategy', params.get('strategy'));
+  onStrategy();
+  const form = currentForm();
+  if (form) for (const field of form) set(field.name, params.get(field.name));
   set('from', params.get('from'));
   set('to', params.get('to'));
   set('units', params.get('units'));
@@ -577,6 +660,7 @@ function fieldsFromURL() {
 /* -------------------------------------------------------------- listeners */
 
 $('controls').addEventListener('submit', run);
+$('strategy').addEventListener('change', onStrategy);
 $('reset').addEventListener('click', resetView);
 
 $('trade-rows').addEventListener('click', (event) => {

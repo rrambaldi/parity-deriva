@@ -44,6 +44,7 @@ from parity_deriva.event.event import (CandleEvent, ClientOrderEvent,
                                        SignalEvent, TransactionEvent)
 from parity_deriva.performance import report as report_module
 from parity_deriva.trading.handler import StreamHandler
+from parity_deriva.strategy import plugins as plugins_module
 from parity_deriva.web import service as service_module
 from parity_deriva.web.service import Service, ServiceError, millis
 from parity_deriva.tests.helpers import T0, candle_dict
@@ -670,6 +671,37 @@ class HTTPTest(StoreCase):
         status, payload = self.json('/api/stores')
         self.assertEqual(status, 200)
         self.assertEqual(payload['instruments'][0]['instrument'], 'EUR_USD')
+
+    def test_the_stores_route_names_every_strategy_it_will_run(self):
+        """
+        Was: the page listed AG01 and AG02 in its own markup, so the other
+        strategies the ledger runs could not be chosen at all.
+        Now: the list comes from the same place check() refuses against, which
+        is service.strategies() - the ledger's handlers plus whatever viewer
+        plugins strategy/plugins.py found installed, each bringing its own
+        engine.
+        """
+        status, payload = self.json('/api/stores')
+        self.assertEqual(sorted(payload['strategies']),
+                         sorted(service_module.strategies()))
+        for name in ledger_module.STRATEGIES:
+            self.assertIn(name, payload['strategies'])
+
+    def test_the_stores_route_carries_the_form_of_a_strategy_with_parameters(self):
+        """
+        The page builds its parameter controls from this, so a plugin that is
+        installed and sends no form gets no controls and is then run with its
+        defaults whatever the page shows. An empty mapping is correct on a
+        checkout with no plugins installed.
+        """
+        status, payload = self.json('/api/stores')
+        self.assertEqual(sorted(payload['params']),
+                         sorted(plugins_module.viewers()))
+        for name, form in payload['params'].items():
+            self.assertTrue(form, name)
+            for field in form:
+                self.assertIn('name', field)
+                self.assertIn('value', field)
 
     def test_the_backtest_route(self):
         status, payload = self.json('/api/backtest?instrument=EUR_USD&granularity=H1')

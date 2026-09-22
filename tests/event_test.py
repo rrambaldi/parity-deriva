@@ -317,6 +317,14 @@ class TestSignalAndOrderEvents(unittest.TestCase):
         self.assertIn("SELL", SignalEvent(self.payload(-3)).info())
         self.assertIn(" 3 ", SignalEvent(self.payload(-3)).info())
 
+    def test_a_fractional_size_is_not_rounded_away(self):
+        """
+        Was: the size went through %d, so an order for half a contract - a
+        normal size on IG and on eToro - was logged as an order for 0.
+        """
+        self.assertIn(" 0.5 ", SignalEvent(self.payload(0.5)).info())
+        self.assertIn(" 0.5 ", OrderEvent(self.payload(-0.5)).info())
+
     def test_zero_units_reads_as_sell(self):
         """`units > 0` means the flat case falls to SELL."""
         self.assertIn("SELL", SignalEvent(self.payload(0)).info())
@@ -345,9 +353,14 @@ class TestSignalAndOrderEvents(unittest.TestCase):
         self.assertEqual(OrderCancelEvent({"orderID": 1508}).info(),
                          "ORDER CANCEL orderID: 1508")
 
-    def test_order_cancel_info_needs_a_numeric_id(self):
-        with self.assertRaises(TypeError):
-            OrderCancelEvent({"orderID": "1508"}).info()
+    def test_order_cancel_info_renders_a_named_id(self):
+        """
+        Was: this pinned a TypeError, because the id went through %d. IG
+        names an order - 'PDed17dc...' - so rendering a cancel raised, inside
+        a handler, while the losing leg of a straddle was being cancelled.
+        """
+        self.assertEqual(OrderCancelEvent({"orderID": "PDed17dc"}).info(),
+                         "ORDER CANCEL orderID: PDed17dc")
 
     def test_tick_info(self):
         ev = TickEvent({"type": "TICK", "instrument": "EURUSD", "time": T0,

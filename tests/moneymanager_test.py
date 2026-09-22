@@ -139,6 +139,53 @@ class TestBrokerAcknowledgement(MoneyManagerCase):
         self.assertFalse(legs[0].has_attr('orderID'))
         self.assertEqual(legs[1].orderID, 1508)
 
+    def test_a_close_without_oandas_own_fields_is_still_handled(self):
+        """
+        Only OANDA sends financing, and only OANDA's close carries an account
+        balance. Reading them directly raised AttributeError on every IG
+        close - inside a handler, which trading/engine.py answers with
+        os._exit(1), so the process died on the first trade it completed.
+        """
+        self.mm.execute_event(self.signal(price=11700.0))
+        self.mm.execute_event(self.acknowledge('PDabc', price=11700.0))
+        self.mm.execute_event(self.fill('PDabc'))
+        close = TransactionEvent({'type': 'ORDER_FILL', 'orderID': 'PDabc',
+                                  'price': 11720.0, 'pl': 3.5,
+                                  'instrument': 'DE30_EUR',
+                                  'tradesClosed': [{'tradeID': 'D1'}]})
+        self.mm.execute_event(close)
+        self.assertFalse(self.mm.onTrade)
+        self.assertEqual(self.mm.signals, {})
+
+    def test_an_id_that_is_a_name_rather_than_a_number_is_kept(self):
+        """
+        IG names a deal - 'PD6e1b03...' - where OANDA and eToro number it.
+        Was: every id went through int(), so the first acknowledgement from
+        IG raised inside the handler and the order was never registered; the
+        fill that followed matched nothing and the losing leg was never
+        cancelled. Now the name is kept as a name.
+        """
+        reference = 'PD6e1b0397ad1c4f5a9c0d2e3f4a5b'
+        self.mm.execute_event(self.signal(price=11700.0))
+        self.mm.execute_event(self.acknowledge(reference, price=11700.0))
+        self.assertEqual(self.mm.signals["S1"][0].orderID, reference)
+
+    def test_a_named_id_still_cancels_the_other_leg(self):
+        """The whole point of keeping it: the straddle still closes down."""
+        self.mm.execute_event(self.signal(units=1, price=11710.0))
+        self.mm.execute_event(self.signal(units=-1, price=11690.0))
+        self.mm.execute_event(self.acknowledge('PDaaa', price=11710.0))
+        self.mm.execute_event(self.acknowledge('PDbbb', price=11690.0))
+        self.sink.events = []
+
+        self.mm.execute_event(self.fill('PDaaa'))
+
+        cancels = self.sink.of('ORDERCANCEL')
+        self.assertEqual(len(cancels), 1)
+        self.assertEqual(cancels[0].orderID, 'PDbbb')
+        self.assertEqual(self.mm.signals["S1"][0].orderStatus, 'FILLED')
+        self.assertEqual(self.mm.signals["S1"][1].orderStatus, 'CANCELED')
+
     def test_an_acknowledgement_for_an_unknown_signal_is_dropped(self):
         self.mm.execute_event(self.acknowledge(1508, number="NOPE"))
         self.assertEqual(self.mm.signals, {})

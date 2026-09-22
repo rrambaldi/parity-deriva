@@ -11,7 +11,8 @@ import json
 import unittest
 from unittest import mock
 
-from parity_deriva.event.event import OrderEvent, OrderCancelEvent, SignalEvent
+from parity_deriva.event.event import (OrderEvent, OrderCancelEvent, SignalEvent,
+                                       StopModifyEvent)
 from parity_deriva.execution import execution as ex
 from parity_deriva.execution.execution import OANDAExecutionHandler, SimulatedExecution
 from parity_deriva.tests.helpers import FakeHTTPSConnection, Recorder, TempDirCase
@@ -202,9 +203,98 @@ class TestOrderSubmission(ExecutionCase):
         self.assertEqual(self.sink.events[0].type, 'ORDER_REJECT')
 
 
+class TestStopModify(ExecutionCase):
+    """
+    Moving the stop of a trade that is already open.
+
+    OANDA has no amend call, and does not need one: PUT on the trade's orders
+    collection cancels the stop the trade carries and attaches the new one, as
+    a single transaction batch. These tests pin that wire format, because the
+    simulator moves its own stop unconditionally and a request the account
+    refuses is the two sides parting company.
+    """
+
+    def modify(self, **over):
+        payload = {"orderID": 1508, "tradeID": "7291", "price": 1.3005,
+                   "instrument": "EUR_USD", "signalNumber": "S1"}
+        payload.update(over)
+        self.handler.execute_event(StopModifyEvent(payload))
+
+    def test_puts_to_the_trades_orders_collection(self):
+        self.modify()
+        call = FakeHTTPSConnection.last()
+        self.assertEqual(call['host'], self.settings.API_DOMAIN)
+        self.assertEqual(call['method'], "PUT")
+        self.assertEqual(call['url'],
+                         "/v3/accounts/001-TEST-000/trades/7291/orders")
+
+    def test_the_body_is_the_new_stop_alone(self):
+        """
+        Only stopLoss. A body naming the take profit as well would cancel a
+        target that was never mentioned - and the strategies that move a
+        stop have none, so the omission would be silent until a strategy that
+        does have one runs here.
+        """
+        self.modify()
+        body = json.loads(FakeHTTPSConnection.last()['body'])
+        self.assertEqual(body, {"stopLoss": {"price": "1.3005",
+                                             "timeInForce": "GTC"}})
+
+    def test_the_stop_is_good_till_cancelled(self):
+        """A stop expiring with the session leaves the trade naked overnight."""
+        self.modify()
+        body = json.loads(FakeHTTPSConnection.last()['body'])
+        self.assertEqual(body['stopLoss']['timeInForce'], "GTC")
+
+    def test_the_trade_is_named_not_the_entry_order(self):
+        """
+        At OANDA the two are different numbers and the stop hangs off the
+        trade. Naming the order id would address someone else's trade.
+        """
+        self.modify(orderID=1508, tradeID="7291")
+        self.assertIn("/trades/7291/orders", FakeHTTPSConnection.last()['url'])
+        self.assertNotIn("1508", FakeHTTPSConnection.last()['url'])
+
+    def test_without_a_trade_id_nothing_is_sent(self):
+        """
+        The id comes off the opening fill's tradeOpened. Guessing one would
+        move the stop of a trade that is not this one.
+        """
+        self.modify(tradeID=None)
+        self.assertEqual(FakeHTTPSConnection.calls, [])
+
+    def test_without_a_price_nothing_is_sent(self):
+        self.modify(price=None)
+        self.assertEqual(FakeHTTPSConnection.calls, [])
+
+    def test_a_level_of_zero_is_not_a_level(self):
+        """
+        Event.__set__ renders a price it cannot read as the string "0.0". The
+        guard is on the value, not on None, or the account would be asked to
+        put the stop at zero.
+        """
+        self.modify(price=None)
+        self.assertEqual(FakeHTTPSConnection.calls, [])
+
+    def test_a_refusal_publishes_nothing(self):
+        """
+        Unlike a rejected order, which strands the money manager: nothing is
+        waiting on a stop modification, so a refusal is logged loudly and the
+        bus is left alone.
+        """
+        FakeHTTPSConnection.reset(json.dumps(
+            {"errorCode": "TRADE_DOESNT_EXIST"}).encode("utf-8"))
+        self.modify()
+        self.assertEqual(self.sink.events, [])
+
+    def test_a_success_publishes_nothing_either(self):
+        self.modify()
+        self.assertEqual(self.sink.events, [])
+
+
 class TestEventRouting(ExecutionCase):
 
-    def test_only_order_and_ordercancel_are_acted_on(self):
+    def test_only_orders_cancels_and_stop_moves_are_acted_on(self):
         for ignored in (SignalEvent({"units": 1}),):
             self.handler.execute_event(ignored)
         self.assertEqual(FakeHTTPSConnection.calls, [])

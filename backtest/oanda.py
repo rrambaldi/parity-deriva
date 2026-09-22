@@ -119,9 +119,80 @@ class OANDABacktester(ExecutionHandler):
 		return True
 
 
+	def modifyStop(self, event):
+		"""
+		Move the stop of an open trade to a new level.
+
+		Was: impossible. A bracket's stop was fixed when handleSLTP created it
+		     and nothing could speak to it again, so a strategy whose exit is a
+		     rule rather than a level had no way to be simulated at all.
+		Now: portfolio/trailer.py computes the level and says it here. Only the
+		     price moves - the order keeps its identity, its parent and its
+		     place on the book - which is what a broker's amend does and what
+		     keeps the fill logic in checkOrder untouched.
+
+		The id is the *entry* order's, because that is the one the opening fill
+		reported and therefore the only one the trailer ever saw. A stop that
+		has already been taken is not moved: it did its job, and repricing it
+		would reopen a closed trade.
+
+		Offline that id is this book's own. Shadowing a live account it is the
+		broker's, which this book has never heard of - the simulator numbers its
+		orders itself. So the signal is the fallback name: it is on both sides'
+		orders by construction, and the money manager keeps one trade at a time,
+		so a signal with a single filled order is unambiguous.
+		"""
+		# Event.__set__ renders a price it cannot read as the string "0.0", so
+		# a level of zero is the absence of one and not a level to move to.
+		try:
+			price = float(getattr(event, 'price', None))
+		except (TypeError, ValueError):
+			price = None
+		if not price:
+			return False
+		o = self.findTrade(event)
+		if o is None:
+			return False
+		sl = getattr(o, 'SLOrder', None)
+		if sl is None or getattr(sl, 'state', None) != 'PENDING':
+			return False
+		was, sl.price = sl.price, price
+		self.logger.info("===== MOVED STOP order# %s %s -> %s"
+			% (o.id, was, sl.price))
+		return True
+
+	def findTrade(self, event):
+		"""The filled order a stop modification is about: by id, else by signal."""
+		orderID = getattr(event, 'orderID', None)
+		if orderID is not None:
+			for o in self.orders:
+				if o.id == orderID:
+					return o
+
+		signal = getattr(event, 'signalNumber', None)
+		if signal is None:
+			return None
+		# the parent of a bracket, not its stop leg: only the parent holds an
+		# SLOrder, and both carry the signal they came from
+		found = [o for o in self.orders
+				 if getattr(o, 'signalNumber', None) == signal
+				 and getattr(o, 'SLOrder', None) is not None]
+		return found[0] if len(found) == 1 else None
+
 	def handleSLTP(self, o, e):
 		if o.type in ['TAKE_PROFIT_ORDER','STOP_LOSS_ORDER']:
-			gain = abs((o.price - o.orig.price) * o.units)
+			# Signed from the trade's own direction, not from which leg took
+			# it.
+			# Was: abs(), negated for a STOP_LOSS_ORDER - which reads "a stop
+			#      is a loss". That held while every stop sat the adverse side
+			#      of the entry, and stops being true the moment one is moved:
+			#      a trailing stop taken above a long's entry is a win, and
+			#      was being booked as a loss of the same size, so the balance
+			#      moved the wrong way twice over.
+			# Now: (exit - entry) * the units of the trade. Identical on every
+			#      bracket whose stop never moves, which is all of AG01 and
+			#      AG02.
+			gain = (o.price - o.orig.price) * o.orig.units
 			o.state = 'CLOSED'
 			o.orig.state = 'CLOSED'
 			# one of the two took the trade, so the other is off the book:
@@ -131,7 +202,6 @@ class OANDABacktester(ExecutionHandler):
 			if o.type=='TAKE_PROFIT_ORDER':
 				self.retire(o.orig.SLOrder)
 			if o.type=='STOP_LOSS_ORDER':
-				gain = -gain
 				self.retire(o.orig.TPOrder)
 			self.balance += gain
 			self.logger.info("******** CLOSED TRADE TYPE: %s PL: %d OPEN:%6.2f CLOSED:%6.2f BALANCE:%6.2f"
@@ -225,6 +295,9 @@ class OANDABacktester(ExecutionHandler):
 	def execute_event(self, event):
 		if str(event)=='ORDERCANCEL':
 			return self.cancelOrder(event)
+
+		if str(event)=='STOPMODIFY':
+			return self.modifyStop(event)
 	
 		if str(event)=='ORDER':
 			return self.createOrder(event)

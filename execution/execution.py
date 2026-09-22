@@ -29,7 +29,11 @@ class OANDAExecutionHandler(ExecutionHandler):
 		self.logger = logging.getLogger('parity_deriva.trading.trading')
 		self._set(args,'setup', settings)
 
-		self.api = "/v3/accounts/%s/orders" % str(self.setup.ACCOUNT_ID)
+		# the account, and the orders collection inside it. Two paths rather
+		# than one because a stop is moved through the *trade* it belongs to,
+		# which hangs off the account and not off the orders collection.
+		self.account = "/v3/accounts/%s" % str(self.setup.ACCOUNT_ID)
+		self.api = "%s/orders" % self.account
 		self.headers = {
 			"Content-Type": "application/json",
 			"Authorization": "Bearer " + self.setup.ACCESS_TOKEN
@@ -54,9 +58,75 @@ class OANDAExecutionHandler(ExecutionHandler):
 		return
 
 
+	def modifyStop(self, event):
+		"""
+		Move the stop of a trade that is already open.
+
+		There is no "move this stop" call at OANDA, and there does not need to
+		be one: PUT /v3/accounts/{id}/trades/{tradeID}/orders cancels the stop
+		the trade currently carries and attaches the new one, in a single
+		transaction batch. That is the cancel-then-create this needs, done by
+		the broker in one step - which matters, because between a cancel of
+		ours and a create of ours the trade would sit on the account with no
+		stop at all, and the ladder exists precisely for the bars where price
+		is running.
+
+		The trade is named by its tradeID, not by the entry order's id: at
+		OANDA those are two different numbers, and a stop hangs off the trade.
+		portfolio/trailer.py reads the id off the opening fill's `tradeOpened`
+		and puts it on the event. Without one there is nothing to address, so
+		the move is refused and logged rather than guessed at - a stop moved
+		onto the wrong trade is worse than a stop not moved.
+		"""
+		tradeID = getattr(event, 'tradeID', None)
+		# Event.__set__ turns a price it cannot read into the string "0.0"
+		# rather than leaving it None, so "is None" is not the test: a level of
+		# zero is the absence of one, and sending it would ask the account to
+		# move the stop to nothing.
+		try:
+			price = float(getattr(event, 'price', None))
+		except (TypeError, ValueError):
+			price = None
+		if tradeID is None or not price:
+			self.logger.error("STOP NOT MOVED: no trade to move it on (%s)"
+				% event.to_json())
+			return
+
+		# GTC, like the stop the order created on fill: a stop that expires
+		# with the session leaves the trade naked overnight.
+		params = json.dumps({"stopLoss": {
+			"price": str(price), "timeInForce": "GTC"}})
+		conn = httplib.HTTPSConnection(self.setup.API_DOMAIN)
+		conn.request(
+			"PUT"
+			, "%s/trades/%s/orders" % (self.account, tradeID)
+			, params
+			, self.headers
+		)
+		response = conn.getresponse().read()
+		if response is None:
+			self.logger.warning("STOP NOT SENT")
+			return
+
+		resp = json.loads(response)
+		if "errorCode" in resp:
+			# Loud, and on purpose. The simulator shadowing this handler moves
+			# its own stop whatever the account says, so a refusal here is the
+			# two sides parting company: the backtest is walking a ladder the
+			# account is not.
+			self.logger.error("STOP MODIFY REJECTED: %s (trade %s @%s)"
+				% (resp['errorCode'], tradeID, price))
+			return
+
+		self.logger.info("MOVED STOP trade %s -> %s" % (tradeID, price))
+		return resp
+
 	def execute_event(self, event):
 		if str(event)=='ORDERCANCEL':
 			return self.cancelOrder(event)
+
+		if str(event)=='STOPMODIFY':
+			return self.modifyStop(event)
 	
 		if str(event)!='ORDER':
 			return

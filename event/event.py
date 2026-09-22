@@ -196,10 +196,14 @@ class TickEvent(Event):
 
 class SignalEvent(Event):
 	def info(self):
-		return "SIGNAL %s %s %s %d @%f %s %s" % (
+		return "SIGNAL %s %s %s %s @%f %s %s" % (
 			self.instrument
 			, ( "BUY" if self.units > 0 else "SELL" )
 			, self.orderType
+			# %s rather than %d: a size of 0.5 - which IG and eToro both deal
+			# in, and which the money manager produces from units=0.5 - used
+			# to be rendered as 0, so the log said a live order was for
+			# nothing
 			, abs(self.units)
 			, self.price
 			, ( "SL@" + str(self.stopLoss) if self.stopLoss else "" )
@@ -215,14 +219,47 @@ class OrderFillEvent(Event):
 
 class OrderCancelEvent(Event):
 	def info(self):
-		return "ORDER CANCEL orderID: %d" % self.orderID
+		# %s rather than %d: IG names an order instead of numbering it, and
+		# rendering one used to raise TypeError - out of a log line, in a
+		# handler, in the middle of cancelling the losing leg
+		return "ORDER CANCEL orderID: %s" % self.orderID
+
+class StopModifyEvent(Event):
+	"""
+	Move the stop of a trade that is already open.
+
+	Nothing here could say this before. A bracket's stop was decided when the
+	order was created and never spoke again, which is fine for a strategy
+	whose exit is a level and useless for one whose exit is a rule - a
+	strategy with no target at all comes out entirely on a stop that climbs
+	behind the price, one step at a time.
+
+	The ladder itself is not in here. This event carries one number and the
+	trade it belongs to, so that the component computing the ladder -
+	portfolio/trailer.py - is the only place that knows the formula, and the
+	same computation drives the simulator offline and a broker's amend call
+	live. Two implementations of one rule is precisely the divergence
+	trading/parity.py exists to catch.
+
+	`orderID` is the *entry* order's id, not the stop's: that is the id the
+	opening fill reported, so it is the one the trailer has to hand.
+	"""
+
+	def info(self):
+		return "STOP MODIFY orderID: %s @%s" % (
+			self.orderID, self.price)
+
 
 class OrderEvent(Event):
 	def info(self):
-		return "ORDER %s %s %s %d @%f %s %s" % (
+		return "ORDER %s %s %s %s @%f %s %s" % (
 			self.instrument
 			, ( "BUY" if self.units > 0 else "SELL" )
 			, self.orderType
+			# %s rather than %d: a size of 0.5 - which IG and eToro both deal
+			# in, and which the money manager produces from units=0.5 - used
+			# to be rendered as 0, so the log said a live order was for
+			# nothing
 			, abs(self.units)
 			, self.price
 			, ( "SL@" + str(self.stopLoss) if self.stopLoss else "" )

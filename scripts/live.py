@@ -13,9 +13,9 @@ that loop, and it takes the broker as an argument rather than by import:
     python scripts/live.py --provider ib    --instrument EUR_USD --granularity H1
 
 What gets registered, in this order: the strategy, the money manager, the
-real execution handler, the simulator shadowing it on the same candles, the
-parity monitor comparing the two, the event log, then the candle and
-transaction sources. Both execution paths see the same orders, which is the
+real execution handler, the trailer if the strategy exits on a stop that
+moves, the simulator shadowing it on the same candles, the parity monitor
+comparing the two, the event log, then the candle and transaction sources. Both execution paths see the same orders, which is the
 whole point - the comparison is only meaningful because neither side is
 replaying the other's output.
 
@@ -39,6 +39,8 @@ from parity_deriva.etc import settings
 from parity_deriva.event.saver import EventSaver
 from parity_deriva.lib.utils import getLogger
 from parity_deriva.portfolio.moneymanager import MoneyManager
+from parity_deriva.portfolio.trailer import Trailer
+from parity_deriva.strategy import plugins
 from parity_deriva.trading import providers
 from parity_deriva.trading.engine import Engine
 from parity_deriva.trading.parity import ParityMonitor
@@ -64,6 +66,14 @@ STRATEGIES = {
     'BO04': ('parity_deriva.strategy.BO04', 'BO04', (), 'pair'),
     'BO05': ('parity_deriva.strategy.BO05', 'BO05', (), 'pair'),
 }
+# A strategy that is not published with this repository registers itself
+# here. Some of them exit on a stop that climbs rather than on a target, and
+# ask for 'stop_modify' to say so: on a provider that cannot replace a trade's
+# stop they refuse to start, which is deliberate - a run where the simulator
+# walks a ladder the account is not walking is worse than no run at all. The
+# ladder itself is portfolio/trailer.py, registered below whenever a strategy
+# asks for that capability.
+STRATEGIES.update(plugins.live())
 
 #: the BO engines measure how long a run of candle directions persists and
 #: place no orders at all, so there is nothing for the shadow to fill and
@@ -174,6 +184,12 @@ def main(argv=None):
                   "    python scripts/etoro_spread.py --instrument %s\n"
                   "and set ETORO_SPREAD in etc/settings.py, or run a strategy "
                   "that does\nnot read a candle's ask and bid." % pairs[0])
+        if 'stop_modify' in needs:
+            print("%s exits on a stop that moves while the trade is open, and "
+                  "%s\ncannot move one. Run it on a provider that can - "
+                  "oanda replaces a\ntrade's stop in one call - or offline "
+                  "through backtest/ledger.py."
+                  % (args.strategy, provider.name))
         if 'bid_ask_candles' in needs and provider.name == 'ib':
             print("IB's history route serves one price series per bar. Its "
                   "snapshot route\ndoes quote both sides, so measure the "
@@ -194,6 +210,14 @@ def main(argv=None):
     add_strategy(engine, strategy_class, style, pairs, granularity)
     engine.add_handler(MoneyManager(pairs=pairs, units=args.units))
     engine.add_handler(provider.execution())
+
+    if 'stop_modify' in needs:
+        # A climbing stop is a rule, not a level: an order states its stop once
+        # and never speaks again, so something has to read each closed candle
+        # and say where the stop belongs now. Registered before the shadow, so
+        # a stop moved on this bar applies from the next one - which is what
+        # backtest/ledger.py does offline, and the two have to agree.
+        engine.add_handler(Trailer(granularity=granularity))
 
     if not args.no_shadow:
         engine.add_handler(provider.simulator(granularity=granularity))

@@ -57,7 +57,7 @@ candles and the OANDA v3 API, then migrated from Python 2 to Python 3.
 * **Performance** - `performance/analyze.py` reports win/loss statistics,
   consecutive runs and three flavours of optimal *f* over the closed trades
   pulled from the account.
-* **Tests** - 1060 tests, no network access required.
+* **Tests** - 1081 tests, no network access required.
 
 # Installation and Usage
 
@@ -485,10 +485,23 @@ export IG_PASSWORD=...
 export IG_ACCOUNT_ID=...       # optional; the session's own account if unset
 ```
 
-A key belongs to **one** host. The demo key works against `demo-api.ig.com`
-and the live key against `api.ig.com`, and `DOMAIN` picks the host - so a key
-that does not match it fails to authenticate rather than reaching the other
-account.
+A key belongs to **one** host, and this is measured rather than assumed. The
+same demo key, on the same route, with nothing but the key on it:
+
+```
+demo-api.ig.com   401  {"errorCode":"error.security.client-token-missing"}
+api.ig.com        403  {"errorCode":"error.security.api-key-invalid"}
+```
+
+The first says the key is fine and only the session is missing; the second
+says the key does not exist here. `DOMAIN` picks the host, so a key that does
+not match it fails to authenticate rather than reaching the other account -
+and the two error codes are how to tell which of the two went wrong.
+
+Worth knowing while debugging that: the read above is **not** a login. IG locks
+an account after repeated failed logins, so a probe that answers "is this key
+any good" should be a request that needs a session, never a `POST /session`
+with a guess in it.
 
 Then the epics, which are not derivable and not pre-filled:
 
@@ -503,10 +516,46 @@ this project moves a level to fit. A strategy's stop adjusted to satisfy a
 broker rule is no longer that strategy's stop, so the order goes as asked and
 the refusal is published as a rejection.
 
-Paste the result into `IG_INSTRUMENTS`. A search for `EURUSD` returns the
-mini, the standard contract and the spread bet, each with its own epic,
-minimum size and currency - so which one you deal is a decision, not a lookup,
-and that is why nothing resolves an epic at runtime.
+Paste the result into `IG_INSTRUMENTS`. Which one you deal is a decision, not
+a lookup, and that is why nothing resolves an epic at runtime. On the demo
+account `EURUSD` returns two markets and `Germany 40` returns **seven** - cash
+at 25, 5 and 1 euro a point, two dated futures, a second 1-euro cash market
+and a weekend one that is `EDITS_ONLY`. Picking the first would be picking one
+of those at random.
+
+Two things the dealing rules said that the names do not:
+
+* **EUR/USD is denominated in USD** while the account is in EUR. The currency
+  is required on every deal, and falling back to `BASE_CURRENCY` would have
+  been wrong here - which is why nothing guesses it from the pair's name.
+* **the minimum stop distance** is 2.0 points on EUR/USD and 8.0 on the DAX
+  market this project uses, against 12.0 on the other one at the same value
+  per point. AG01's stop is the low of a bar, so the tighter minimum is the
+  one that refuses fewer orders, and that is why `IX.D.DAX.IFMM.IP` is the
+  entry rather than `IX.D.DAX.IBE.IP`.
+
+### `scalingFactor` is not a price divisor
+
+Worth its own heading, because the obvious reading of it is wrong and the
+cost of acting on it is four decimal places.
+
+EUR/USD on the demo account reports `scalingFactor: 10000` and quotes a bid of
+`1.14625`; its price rows come back as `1.14632`. So the prices are **not**
+scaled and dividing by the factor would put every level miles from the market.
+What the factor relates is *distances in points* to price units: the same
+market's minimum stop distance is `2.0 POINTS`, which is `0.0002`. The DAX
+reports `scalingFactor: 1` and quotes `25630.8`, which is the same rule seen
+from the other side.
+
+`lib/ig.py` therefore does not read that field at all. The manual override
+exists, for a market where somebody measures a real discrepancy, and it is
+keyed `priceDivisor` precisely so that pasting IG's own `scalingFactor` into
+an instrument entry does nothing. `scripts/ig_instruments.py` prints the
+factor and says the same thing next to it.
+
+Orders are unaffected either way: this project sends `stopLevel` and
+`limitLevel`, which are absolute prices. A version that sent `stopDistance`
+would be sending points, and then the factor would matter.
 
 ## Interactive Brokers
 
@@ -606,11 +655,152 @@ match first, which is not the same as the right one.
 
 ## What has been checked on IG and IB, and what has not
 
-Nothing here has been run against a live IG or Interactive Brokers account.
-The eToro section above says what a demo account taught that no fixture could
-have - a completeness check comparing a UTC timestamp against a local clock,
-found only because a real market kept moving - and the honest thing is to say
-that neither of these two paths has had that yet.
+**Interactive Brokers: nothing.** No gateway has been run, no session opened,
+no order sent. Everything on that path is read from the documentation and
+pinned by tests, and the behaviour under a real account is not evidence yet.
+
+**IG: the read path, on a demo account, on 2026-09-22.** What was exercised,
+and what it settled:
+
+* `POST /session` version 2 returns `CST` and `X-SECURITY-TOKEN` as headers,
+  and `lib/ig.py` keeps them and authenticates with them. The account id came
+  back in `currentAccountId`, which is the fallback the code already had.
+* the price route serves a real bid and a real ask on all four of open, high,
+  low and close, which is the one thing that lets AG01 run on IG unconfigured.
+* **the completeness check is right.** At 22:12 UTC the H1 source emitted the
+  19:00, 20:00 and 21:00 bars and withheld the 22:00 one that was still
+  forming; the M5 source on the DAX did the same with 22:05 against 22:10.
+  This is the exact check that was wrong on eToro until a demo account caught
+  it, and IG's rows carry both a local `snapshotTime` and a `snapshotTimeUTC`
+  for it to get wrong - `data/ig.py` reads the UTC one.
+* the weekly history allowance is reported and counted down: 10000, then
+  9993, then 9989. It is metered in data points, not requests.
+* `GET /positions`, `GET /workingorders` and `GET /history/transactions` all
+  answer 200 on an empty account, so the close-detection path is reachable
+  rather than merely written.
+* `GET /confirms/{reference}` for a reference that does not exist answers
+  **404** `error.service.execution.find`, which is what `data/ig.py` already
+  treats as "not yet, or aged out" while it counts attempts.
+
+**IG: the order path, on the same demo account, the same night.** Orders were
+sent - small ones, on the smallest contracts these markets deal in - and every
+one of them found something. Eleven defects, and not one was reachable
+from a test: each was code and test agreeing with each other about a payload
+the broker does not send, or about an id that is a number until it is a name.
+
+What the orders established:
+
+* `POST /positions/otc` and `POST /workingorders/otc` both answer with the
+  `dealReference` they were given, and a working order accepted at IG shows
+  up in `GET /workingorders` with `GOOD_TILL_DATE` and the expiry that was
+  sent. `DELETE /workingorders/otc/{dealId}` removes it.
+* **a rejection arrives at the confirmation, not at the POST.** A stop closer
+  than the instrument's minimum distance was accepted with a 200 and a deal
+  reference, and refused a moment later at `GET /confirms` with
+  `ATTACHED_ORDER_LEVEL_ERROR`. So the rejection path that matters is the one
+  in `data/ig.py`; the one in `execution/ig.py` catches only what IG refuses
+  before the deal exists at all.
+* **the confirmation carries two status vocabularies, and the code read the
+  wrong one.** The top-level `status` is the position's - `OPEN`, `CLOSED` -
+  while `affectedDeals[].status` is the deal's - `OPENED`, `FULLY_CLOSED`.
+  `data/ig.py` looked for `OPENED` at the top level, where it never appears,
+  so **every market entry was filed as a resting working order** and no
+  `ORDER_FILL` was ever published. The test that covered this passed, on an
+  invented payload.
+* **neither status tells a fill from a resting order.** A market deal that
+  filled and a working order sitting on the book both come back `OPEN` /
+  `OPENED`. Only the endpoint the order was sent to knows, so that is what
+  decides it now.
+* **a triggered working order was never reported at all.** Nothing promoted a
+  resting order to a filled one - the comment claimed `GET /positions` would
+  do it and no code did - so an entry that triggered was invisible, and
+  `pollCloses`, which skips a resting position, lost the close as well. Every
+  strategy here enters on a STOP, so this was the whole live path.
+  `pollFills` now joins on the dealId, which a triggered position keeps from
+  its working order, along with the `dealReference` this project chose. Both
+  were measured on a DAX stop order that took 85 seconds to trigger.
+* **the transaction history quotes levels as strings** - `"1.14646"` - where
+  every other route sends numbers, so a close was reaching the ledger with a
+  price nothing downstream could subtract.
+* **the money manager could not hold an IG order at all.** It put every order
+  id through `int()`, because OANDA and eToro number theirs. IG names a deal -
+  `PD6e1b03...` - so the first acknowledgement raised inside the handler, and
+  `trading/engine.py` answers an exception there with a critical log line and
+  `os._exit(1)`: the trading process would have died on its first IG order.
+  Ids are now compared as they arrive - a number stays a number, a name stays
+  a name.
+* **IG's transactions named no order.** The money manager reads `orderID`, the
+  name OANDA's transactions use, and `data/ig.py` published `dealId` and
+  `dealReference` and no `orderID` - so a fill or a close reached the manager
+  as an event about nothing. Every IG transaction now carries the reference
+  the acknowledgement established.
+* **the losing leg could not be cancelled.** The money manager cancels by the
+  id it was given, which here is the deal reference, and IG deletes a working
+  order by `dealId`; `GET /workingorders` publishes the dealId and not the
+  reference, so the two names for one order never appear together. The order
+  is now found on the epic and the level - the same pair the simulator matches
+  a cancel on - and a level that matches two orders cancels neither. Verified
+  against the account: an order placed and then cancelled by reference alone.
+* **rendering a cancel raised.** `OrderCancelEvent.info()` formatted the id
+  with `%d`, and a test pinned the TypeError as intended behaviour. The first
+  straddle sent to IG died on that line, mid-cancel, with one leg filled and
+  the other still live on the account - which is the exact state the cancel
+  exists to prevent.
+* **a half-size order was logged as an order for nothing.** `SignalEvent` and
+  `OrderEvent` rendered the size with `%d` too, so `units=0.5` - a normal size
+  on IG and on eToro, and what the money manager produces from `--units 0.5` -
+  printed as `0`.
+* **the transaction history lags, and the close was read from it.** A
+  position closed at 23:12:18 was still absent from `/history/transactions` at
+  23:13:25, while an earlier close had appeared there within five seconds. The
+  close is noticed within one poll, so the level came back missing and the
+  close was published at a price of **0.0** - an event coerces an absent price
+  to zero, and the ledger would have believed it. `/history/activity` is
+  current, names the `affectedDealId`, and carries the level; it is now the
+  source for the level, with the profit still taken from the transaction row
+  when that arrives. A close whose deal has not been recorded anywhere yet is
+  asked after again rather than published.
+* **closing a trade killed the money manager.** `closeTrade` read
+  `event.financing` and `event.accountBalance` directly. Those are OANDA's
+  fields; on an IG close the attribute is simply absent, so the log line
+  raised - again inside a handler, again `os._exit(1)`, this time on the first
+  trade the stack completed.
+* **`goodTillDate` is read in UTC, not in the account's timezone.** The code
+  assumed the account's and deliberately sent local wall-clock digits. Three
+  orders settled it, on an account whose own clock runs two hours ahead of
+  UTC: ninety minutes ahead in UTC - half an hour in the past for the account
+  - was accepted and rested; thirty minutes ahead, which is in the past in
+  London, was accepted too; ten minutes *behind* UTC was refused outright
+  with `GOOD_TILL_DATE_IN_THE_PAST`, which is what makes the other two mean
+  something. This machine is on Europe/Berlin, so AG01's end-of-day expiry
+  was being sent two hours late.
+
+With those fixed, the whole path ran end to end against the account, with the
+money manager, the execution handler and the transaction reader on one bus -
+scripts/live.py's own wiring, with two signals placed by hand in place of the
+strategy:
+
+```
+ORDER  DE30_EUR BUY  STOP 0.5 @25650.1  SL@25640.1 TP@25665.1
+ORDER  DE30_EUR SELL STOP 0.5 @25639.0  SL@25649.0 TP@25624.0
+ORDER_FILL  orderID=PD08c5f850... price=25639.0 reason=STOP_ORDER
+SENT ORDERCANCEL orderID: PDfda95e97...        <- the losing leg, by name
+ORDER_FILL  orderID=PD08c5f850... price=25645.3 reason=UNKNOWN pl=-3.15
+money manager: onTrade=False orderIssued=False signals={}
+working orders at IG: []   positions at IG: []
+```
+
+One leg triggered, the other was cancelled by the id the acknowledgement gave
+it, the position was closed and reported within one poll, and the signal was
+released. The outcome is `UNKNOWN` because that close was sent by hand,
+between the two levels - which is exactly what the inference must refuse to
+name.
+
+What remains unexercised on IG: a bracket leg firing on its own. The stop and
+the target reach IG correctly - they come back on the position, and a stop 30
+points away is reported as `stopDistance: 30.0` - but no leg has yet been
+seen to fire and close a position by itself, which is the event
+`lib/closereason.py` has to read backwards.
 
 So the difference in what backs them is worth spelling out:
 
@@ -620,12 +810,14 @@ So the difference in what backs them is worth spelling out:
 * **the translations** - an order's fields, a candle's sides, a bracket's
   children, a timestamp's format - are pinned test by test, because the
   failure mode there is not a crash but a trade at a price nobody chose.
-* **the behaviour under a real account** is not evidence yet. Where a
-  document and an account might disagree, the code is written to fail rather
-  than to assume: a price row missing one side is skipped rather than
-  half-filled, an IB history window is filtered locally so a misread
-  `startTime` yields fewer bars and never bars from the wrong window, and an
-  unconfirmed IG deal is given up on loudly because it may still be live.
+* **the behaviour under a real account** is evidence on IG now, and nowhere
+  else - the section above says exactly how far it goes. Everywhere it does
+  not reach, the code is written to fail rather than to assume: a price row
+  missing one side is skipped rather than half-filled, an IB history window is
+  filtered locally so a misread `startTime` yields fewer bars and never bars
+  from the wrong window, and an unconfirmed IG deal is given up on loudly
+  because it may still be live. That posture is what made the eleven defects
+  above findable in an evening rather than in a drawdown.
 
 Two specific things to check first on an account, before letting either path
 size a real position:
@@ -639,9 +831,11 @@ size a real position:
    instruments here. If your bars come back off by a power of ten, that is the
    first thing to look at, and it is logged whenever it is not 1.
 
-And the path that matters most cannot be rehearsed on either broker: a bracket
-left resting until one leg triggers and the other is cancelled, and the parity
-monitor judging the pair. That needs a market, not a test.
+The path that matters most has now been rehearsed on IG - a straddle left
+resting until one leg triggered and the other was cancelled - and not on IB at
+all. What is still missing on both is the last step of it: a stop or a target
+firing by itself, and the parity monitor judging the pair. That needs a market
+that moves through a level, not a test.
 
 ## Reading a backtest: the viewer
 
@@ -689,6 +883,24 @@ It runs the offline stack in `backtest/ledger.py`: the strategy, the money
 manager, the simulator, and the adapter that says "the simulator is the broker
 here", driven by the causally ordered replay engine. No broker is contacted,
 no order is ever sent, and nothing is written.
+
+It also runs whatever **viewer plugins** are installed, which are not one of
+those. A plugin is a strategy that brings its own bar loop rather than riding
+the live stack's - because it opens several positions per signal, say, or
+moves a stop on a rule `MoneyManager` is not shaped for - and it is drawn the
+same way regardless: the same chart, the same trade table, the same report. A
+plugin may declare free parameters, and selecting it then reveals a form built
+from what the strategy itself says they are, so the ranges stay where they
+belong instead of in a copy in the page; they are part of the cache key and of
+the deep link. Anything heavier than one run - a grid search, a walk-forward -
+stays on the plugin's own command line, because a few thousand runs behind an
+HTTP request is not a page, it is a timeout.
+
+Not every strategy is published with this repository. `strategy/plugins.py` is
+the whole bridge: with nothing installed the engine runs the strategies above
+and names none of the others, which is the state this repository is checked
+out in and the state its tests run in. See that file for what a plugin has to
+answer.
 
 It refuses four things rather than doing something nobody asked for:
 
@@ -760,6 +972,79 @@ rather than deleted, which is this suite's convention.
 
 If you have backtest results from before this, they are wrong by however many
 of their trades ran into their other leg afterwards.
+
+### Behind a reverse proxy
+
+The service has no authentication of any kind, so putting it anywhere but
+`127.0.0.1` means putting something in front of it. The page is written to be
+prefix-agnostic for exactly this: its assets and its API are referenced
+relatively, so it works at the root of a local server and under whatever path
+a proxy puts it at, with nothing told to either end. The one thing it needs is
+the **trailing slash** - without it a browser resolves `static/app.js` against
+`/`, which is the proxy's site rather than the app.
+
+nginx, with TLS and the password where they belong:
+
+```nginx
+location = /parity {
+        return 301 https://$host/parity/;
+}
+
+location /parity/ {
+        auth_basic "parity-deriva";
+        auth_basic_user_file /etc/nginx/parity-deriva.htpasswd;
+
+        proxy_pass http://127.0.0.1:8731/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # a backtest is seconds inside one blocking call, answered as a single
+        # JSON body of a few hundred kB
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+}
+```
+
+and systemd, so it survives a reboot:
+
+```ini
+[Unit]
+Description=parity-deriva backtest viewer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+# the repository's parent: the package is imported as parity_deriva
+WorkingDirectory=/path/to/parity-deriva
+Environment=PYTHONPATH=/path/to/parity-deriva
+# getLogger() looks for etc/logging.conf under this and calls os._exit(-1)
+# without it, with no traceback to read
+Environment=PARITY_DERIVA_HOME=/path/to/parity-deriva/parity_deriva
+ExecStart=/path/to/venv/bin/python /path/to/parity-deriva/parity_deriva/scripts/web.py \
+    --host 127.0.0.1 --port 8731
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Run as a service it keeps quiet: `getLogger()` reads `logging.conf`, which puts
+everything at DEBUG, and a backtest logs several lines per fill - right for a
+run somebody is watching, and several hundred journal lines per request when
+nobody is. So the trading logger is held at warnings and the service keeps its
+own at info. `--verbose` puts it back.
+
+What still comes through is the simulator's own warnings, which is what a
+warning is for. One of them is noisy and predates all of this: `cancelOrder`
+dumps a whole order when it walks past a filled one at the price it is
+cancelling, which happens seven times over two months of EUR_USD H1 - it then
+carries on and cancels the right order, so it is a warning about nothing in
+particular.
 
 ## The parity alarm
 
@@ -845,6 +1130,11 @@ python -m unittest discover -s parity_deriva -p '*_test.py'
 
 That also picks up the two original ```portfolio/*_test.py``` modules. See
 ```parity_deriva/tests/README.md``` for what each module covers.
+
+A strategy installed under `strategy/private/` brings its own tests, and
+discovery picks them up where they sit. They can be a large share of the run:
+a bar loop with its own engine is usually checked against synthetic series
+swept bar by bar, which is slow on purpose.
 
 # License Terms
 

@@ -63,16 +63,46 @@ ACCEPTED = 'ACCEPTED'
 REJECTED = 'REJECTED'
 
 #: The confirmation's own status, which is about what the deal *did* rather
-#: than whether it was accepted. OPENED is the only one this project's entries
-#: produce, and a working order that is merely resting reports none of them.
-#: The closing ones are named so that a position closed from IG's own platform
-#: is logged as what it is instead of being published as an entry for a signal
-#: it did not come from.
-OPENED = 'OPENED'
-CLOSED = 'FULLY_CLOSED'
+#: than whether it was accepted. IG spells it in two vocabularies at once, and
+#: which word lives where was established by sending real deals to the demo
+#: account rather than read off the documentation:
+#:
+#: * the top-level ``status`` describes the *position* - OPEN, CLOSED,
+#:   PARTIALLY_CLOSED, AMENDED, DELETED;
+#: * the statuses inside ``affectedDeals`` describe the deal - OPENED,
+#:   FULLY_CLOSED, PARTIALLY_CLOSED, AMENDED, DELETED.
+#:
+#: So 'OPENED' never appears at the top level. This file used to look for it
+#: there, which matched nothing and filed every market fill as a working
+#: order; see IGTransactions.outcome. Both spellings are accepted here
+#: because both are read.
+#:
+#: What none of them says is whether the deal is resting or filled: a market
+#: fill and a working order both come back OPEN / OPENED. Only the endpoint
+#: the order was sent to knows that, so that is what decides it.
+OPEN = ('OPEN', 'OPENED')
+CLOSED = ('CLOSED', 'FULLY_CLOSED')
 PARTIAL = 'PARTIALLY_CLOSED'
 AMENDED = 'AMENDED'
 DELETED = 'DELETED'
+
+
+def number(value):
+	"""
+	A level from the transaction history, as a number.
+
+	IG serves openLevel and closeLevel there as *strings* - '1.14646' - where
+	the confirmation and the position list serve them as numbers. Measured on
+	the demo account's own history. Left as a string they would reach the
+	ledger as a price nothing downstream can subtract, and the comparison the
+	parity monitor makes would be between a number and some text.
+	"""
+	if value is None:
+		return None
+	try:
+		return float(value)
+	except (TypeError, ValueError):
+		return None
 
 
 def price(row, field, which='bid'):
@@ -409,6 +439,9 @@ class IGTransactions(StreamHandler):
 		#: how many times each reference has been asked after without an
 		#: answer, so a confirmation that has expired is given up on
 		self.attempts = {}
+		#: dealIds gone from the account whose closing deal has not been
+		#: recorded yet, and how many polls have asked after them
+		self.unrecorded = {}
 		self.max_attempts = int(getattr(self.setup, 'IG_CONFIRM_ATTEMPTS', 20))
 		self.running = True
 
@@ -424,9 +457,18 @@ class IGTransactions(StreamHandler):
 		if kind == 'ORDERCANCEL':
 			# The execution handler sends the delete; drop the deal here so
 			# the poll stops asking about it.
-			reference = getattr(event, 'dealReference', None)
+			reference = (getattr(event, 'dealReference', None)
+						 or getattr(event, 'orderID', None))
 			if reference is not None:
 				self.deals.pop(reference, None)
+				# and the working order it became, if IG had confirmed it:
+				# an order that has been deleted will never trigger, so
+				# pollFills would otherwise look for it for the rest of the
+				# session.
+				for deal_id, position in list(self.positions.items()):
+					if position.get('resting') \
+							and position.get('dealReference') == reference:
+						del self.positions[deal_id]
 
 	def watch(self, event):
 		"""Start following a deal the execution handler just placed."""
@@ -445,6 +487,7 @@ class IGTransactions(StreamHandler):
 			'gtdTime': getattr(event, 'gtdTime', None),
 			'stopLoss': getattr(event, 'stopLoss', None),
 			'takeProfit': getattr(event, 'takeProfit', None),
+			'orderType': str(getattr(event, 'orderType', '') or '').upper(),
 			'resting': str(getattr(event, 'orderType', '') or '').upper() != 'MARKET',
 		}
 		self.attempts[reference] = 0
@@ -494,6 +537,12 @@ class IGTransactions(StreamHandler):
 								  % (reference, payload.get('reason')))
 				self.queue_event(TransactionEvent({
 					'type': 'ORDER_REJECT',
+					# the money manager knows this deal by the reference the
+					# acknowledgement carried, and reads it as orderID - the
+					# name OANDA's transactions use. Without it the rejection
+					# reaches the manager as an event about nothing and the
+					# signal is never released.
+					'orderID': reference,
 					'dealReference': reference,
 					'instrument': known['instrument'],
 					'price': known['price'],
@@ -519,6 +568,22 @@ class IGTransactions(StreamHandler):
 			del self.deals[reference]
 		return sent
 
+	def outcome(self, payload):
+		"""
+		What the confirmation says happened to the deal, as one word.
+
+		The per-deal status in ``affectedDeals`` is preferred over the
+		top-level one because that is where IG puts the word that tells an
+		open from a close; the top level describes the position and answers
+		OPEN either way. Where a confirmation carries no affected deal, the
+		top-level status is all there is.
+		"""
+		for deal in payload.get('affectedDeals') or []:
+			status = str(deal.get('status') or '').upper()
+			if status:
+				return status
+		return str(payload.get('status') or '').upper()
+
 	def reportFill(self, known, payload):
 		"""
 		Publish the fill of an accepted deal.
@@ -526,8 +591,14 @@ class IGTransactions(StreamHandler):
 		A resting order that IG accepted is not a fill: the working order now
 		exists and will fill later, so the acknowledged deal is kept under its
 		dealId and the position is picked up from GET /positions when the
-		order triggers. Only a deal that opened a position right away is
-		published as an ORDER_FILL here.
+		order triggers - pollFills below. Only a deal that opened a position
+		right away is published as an ORDER_FILL here.
+
+		Which of the two it is comes from the endpoint the order was sent to,
+		not from the confirmation: IG answers OPEN / OPENED for a market deal
+		that filled and for a working order that is merely resting, so the
+		status cannot tell them apart. This is measured, and it is what the
+		first live order on the demo account was for.
 
 		A confirmation that says the deal *closed* something is not this
 		project's doing - nothing here sends a closing deal - so it is logged
@@ -540,16 +611,16 @@ class IGTransactions(StreamHandler):
 		units = None
 		if size is not None:
 			units = -abs(float(size)) if direction == 'SELL' else abs(float(size))
-		status = str(payload.get('status') or '').upper()
+		status = self.outcome(payload)
 
-		if status in (CLOSED, PARTIAL):
+		if status in CLOSED or status == PARTIAL:
 			self.logger.warning(
 				"IG deal %s came back as %s: a position was closed by something "
 				"other than this stack, so it is not published as an entry"
 				% (known['dealReference'], status))
 			return 0
 
-		if status != OPENED:
+		if known.get('resting'):
 			# Accepted, but nothing is open yet: this is a working order
 			# resting on the book. Remember it so the expiry we enforce and
 			# the fill that follows can both find it.
@@ -563,6 +634,7 @@ class IGTransactions(StreamHandler):
 				'stopLoss': payload.get('stopLevel') or known['stopLoss'],
 				'takeProfit': payload.get('limitLevel') or known['takeProfit'],
 				'gtdTime': known.get('gtdTime'),
+				'orderType': known.get('orderType'),
 				'opened': None,
 				'resting': True,
 			}
@@ -570,10 +642,19 @@ class IGTransactions(StreamHandler):
 							  % (deal_id, known['signalNumber']))
 			return 0
 
+		if status not in OPEN:
+			# Not one of the words a market entry produces. Published anyway -
+			# IG accepted the deal and it is about to appear among the open
+			# positions - but said out loud, because it is a shape this code
+			# has not seen.
+			self.logger.warning("IG deal %s was accepted with status %s"
+								% (known['dealReference'], status))
+
 		when = dealTime(payload.get('date'))
 		self.queue_event(TransactionEvent({
 			'type': 'ORDER_FILL',
 			'id': deal_id,
+			'orderID': known['dealReference'],
 			'dealId': deal_id,
 			'dealReference': known['dealReference'],
 			'instrument': name,
@@ -593,9 +674,92 @@ class IGTransactions(StreamHandler):
 			'stopLoss': payload.get('stopLevel') or known['stopLoss'],
 			'takeProfit': payload.get('limitLevel') or known['takeProfit'],
 			'gtdTime': known.get('gtdTime'),
+			'orderType': known.get('orderType'),
 			'opened': when,
 			'resting': False,
 		}
+		return 1
+
+	# ------------------------------------------------------- triggered orders
+
+	def reason(self, position):
+		"""The fill reason, in the vocabulary OANDA's transactions use."""
+		kind = str(position.get('orderType') or '').upper()
+		if kind in ('STOP', 'LIMIT'):
+			return kind + '_ORDER'
+		return 'MARKET_ORDER'
+
+	def pollFills(self, live=None):
+		"""
+		Publish the fill of a working order that has triggered.
+
+		A resting order is not a position, so nothing is published when IG
+		accepts it. When it triggers, IG opens a position that keeps *both*
+		the working order's dealId and the dealReference this project chose -
+		measured on the demo account, since neither is documented - so the
+		join is on the dealId already in hand.
+
+		Until this existed nothing ever left the resting state: a strategy
+		whose entries are STOP orders, which is every strategy here, would
+		have had its entries fill at IG and never hear of it, and pollCloses
+		skips a resting position so the close would have been lost too.
+		"""
+		resting = [deal_id for deal_id, p in self.positions.items()
+				   if p.get('resting')]
+		if not resting:
+			return 0
+		if live is None:
+			live = self.open_positions()
+		if live is None:
+			return 0
+
+		sent = 0
+		for deal_id in resting:
+			row = live.get(deal_id)
+			if row is not None:
+				sent += self.reportTrigger(deal_id, row.get('position') or {})
+		return sent
+
+	def reportTrigger(self, deal_id, position):
+		"""
+		Publish one triggered order as an entry, from the position IG holds.
+
+		The levels come from the position rather than from the order: IG
+		fills at the level the market reached, which on a stop is not the
+		level that was asked for, and a fill reported at the requested level
+		would understate every gap.
+		"""
+		known = self.positions[deal_id]
+		when = dealTime(position.get('createdDateUTC') or position.get('createdDate'))
+		level = position.get('level')
+		units = known.get('units')
+		if units is None and position.get('size') is not None:
+			size = abs(float(position['size']))
+			units = -size if str(position.get('direction')).upper() == 'SELL' else size
+
+		self.queue_event(TransactionEvent({
+			'type': 'ORDER_FILL',
+			'id': deal_id,
+			'orderID': known['dealReference'],
+			'dealId': deal_id,
+			'dealReference': known['dealReference'],
+			'instrument': known['instrument'],
+			'units': units,
+			'price': level,
+			'time': when,
+			'reason': self.reason(known),
+			'signalNumber': known['signalNumber'],
+		}))
+		known.update({
+			'units': units,
+			'openLevel': level,
+			'opened': when,
+			'resting': False,
+			'stopLoss': position.get('stopLevel') or known.get('stopLoss'),
+			'takeProfit': position.get('limitLevel') or known.get('takeProfit'),
+		})
+		self.logger.debug("IG working order %s triggered at %s for signal %s"
+						  % (deal_id, level, known['signalNumber']))
 		return 1
 
 	# ---------------------------------------------------------------- closes
@@ -636,7 +800,45 @@ class IGTransactions(StreamHandler):
 			return None
 		return payload.get('transactions') or []
 
-	def pollCloses(self):
+	def closes(self):
+		"""
+		The closing deals IG has recorded, by the dealId each one closed.
+
+		Read from GET /history/activity, and that choice is the point of this
+		method. The transaction history is the only route with a profit
+		figure on it, and it *lags*: a position closed at 23:12:18 was still
+		absent from the transactions at 23:13:25, while an earlier close had
+		appeared there within five seconds. Measured on the demo account, and
+		it matters because the close is noticed within one poll - five
+		seconds - so the level would have been read as missing and published
+		as nothing.
+
+		The activity is current, names the dealId it affected, and carries
+		the level the closing deal was done at, which is the only thing the
+		leg can be inferred from.
+		"""
+		status, payload = self.api.get('activity', params={
+			'from': self.since(), 'detailed': 'true', 'pageSize': 50})
+		if status != 200 or payload is None:
+			self.logger.error("activity: status %s" % status)
+			return None
+
+		out = {}
+		for row in payload.get('activities') or []:
+			details = row.get('details') or {}
+			for action in details.get('actions') or []:
+				kind = str(action.get('actionType') or '').upper()
+				affected = action.get('affectedDealId')
+				if affected is None or 'CLOSE' not in kind:
+					continue
+				out[affected] = {
+					'level': details.get('level'),
+					'date': row.get('date'),
+					'dealReference': details.get('dealReference'),
+				}
+		return out
+
+	def pollCloses(self, live=None):
 		"""
 		Report the positions IG no longer holds.
 
@@ -645,10 +847,21 @@ class IGTransactions(StreamHandler):
 		by a reference this project did not choose and the position list keys
 		by the dealId the confirmation gave us. Matching on presence is the
 		only join both sides can make.
+
+		Missing from the open positions is not enough to report a close,
+		though: the closing deal has to have been *recorded* before there is
+		a level to report, and until it is the position is left alone and
+		asked after again. A close published without a level is worse than a
+		close published late - an absent price becomes 0.0 on the way into an
+		event, which is a number the ledger would believe.
+
+		``live`` is passed in by poll() so that one read of the open positions
+		serves both the fills and the closes; on its own this reads them.
 		"""
 		if not self.positions:
 			return 0
-		live = self.open_positions()
+		if live is None:
+			live = self.open_positions()
 		if live is None:
 			return 0
 
@@ -658,14 +871,27 @@ class IGTransactions(StreamHandler):
 		if not gone:
 			return 0
 
-		rows = self.history()
-		if rows is None:
+		closing = self.closes()
+		if closing is None:
 			return 0
+		# the profit lives only here, and may not have landed yet
+		rows = self.history() or []
 
 		sent = 0
 		for deal_id in gone:
+			record = closing.get(deal_id)
+			if record is None:
+				self.unrecorded[deal_id] = self.unrecorded.get(deal_id, 0) + 1
+				if self.unrecorded[deal_id] < self.max_attempts:
+					continue
+				self.logger.error(
+					"position %s is gone from the account and no closing deal "
+					"was recorded after %d polls; reporting the close without "
+					"a level" % (deal_id, self.unrecorded[deal_id]))
 			position = self.positions.pop(deal_id)
-			sent += self.reportClose(position, self.rowFor(position, rows))
+			self.unrecorded.pop(deal_id, None)
+			sent += self.reportClose(position, self.rowFor(position, rows),
+									 record)
 			self.closed.add(deal_id)
 		return sent
 
@@ -691,17 +917,25 @@ class IGTransactions(StreamHandler):
 				continue
 		return {}
 
-	def reportClose(self, position, row):
+	def reportClose(self, position, row, record=None):
 		"""
 		Publish the close of one position.
 
-		reason is inferred from the closing level - see lib/closereason.py -
-		and the event says so, so nothing downstream mistakes an inference for
-		something the broker reported. accountBalance is None because the
-		transaction history does not carry it, and inventing one would put a
-		figure in the ledger that no read ever returned.
+		The level comes from the activity record where there is one, and from
+		the transaction row otherwise - the two agree, and only the first is
+		prompt. reason is inferred from it - see lib/closereason.py - and the
+		event says so, so nothing downstream mistakes an inference for
+		something the broker reported. accountBalance is None because neither
+		route carries it, and inventing one would put a figure in the ledger
+		that no read ever returned.
+
+		A close with no level at all is published without a price rather than
+		with one: an event coerces a missing price to 0.0, and a trade that
+		closed at zero is a story the ledger would tell for ever.
 		"""
-		level = row.get('closeLevel')
+		level = number((record or {}).get('level'))
+		if level is None:
+			level = number(row.get('closeLevel'))
 		reason = closeReason(level, position.get('stopLoss'),
 							 position.get('takeProfit'))
 		if reason == UNKNOWN:
@@ -711,14 +945,16 @@ class IGTransactions(StreamHandler):
 				% (position['dealId'], level, position.get('stopLoss'),
 				   position.get('takeProfit')))
 
-		self.queue_event(TransactionEvent({
+		when = (row.get('dateUtc') or (record or {}).get('date')
+				or row.get('date'))
+		payload = {
 			'type': 'ORDER_FILL',
+			'orderID': position['dealReference'],
 			'dealId': position['dealId'],
 			'dealReference': position['dealReference'],
 			'instrument': position['instrument'],
-			'price': level,
 			'units': position['units'],
-			'time': dealTime(row.get('dateUtc') or row.get('date')),
+			'time': dealTime(when) if when is not None else utcnow(),
 			'pl': profitAndLoss(row.get('profitAndLoss')),
 			'accountBalance': None,
 			'tradesClosed': [{'tradeID': position['dealId'],
@@ -727,8 +963,11 @@ class IGTransactions(StreamHandler):
 			'reason': reason,
 			'reasonInferred': True,
 			'signalNumber': position['signalNumber'],
-			'openLevel': row.get('openLevel') or position.get('openLevel'),
-		}))
+			'openLevel': number(row.get('openLevel')) or position.get('openLevel'),
+		}
+		if level is not None:
+			payload['price'] = level
+		self.queue_event(TransactionEvent(payload))
 		return 1
 
 	# ---------------------------------------------------------------- expiry
@@ -772,7 +1011,18 @@ class IGTransactions(StreamHandler):
 	# ---------------------------------------------------------------- stream
 
 	def poll(self, now=None):
-		return self.pollDeals(now) + self.pollCloses()
+		"""
+		One cycle: confirmations, then triggers, then closes.
+
+		The open positions are read once and handed to both of the last two.
+		Two reads a cycle would be a third of the per-minute allowance for a
+		list that cannot have changed between them.
+		"""
+		sent = self.pollDeals(now)
+		live = self.open_positions() if self.positions else None
+		sent += self.pollFills(live)
+		sent += self.pollCloses(live)
+		return sent
 
 	def stream_to_queue(self):
 		try:

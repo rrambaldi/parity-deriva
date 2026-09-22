@@ -167,6 +167,15 @@ class OANDAProviderTest(unittest.TestCase):
         self.assertTrue(caps.synchronous_orders)
         self.assertIsNone(caps.max_history_candles)
 
+    def test_declares_that_a_stop_can_be_moved(self):
+        """
+        Not an amend - OANDA has none. PUT on a trade's orders collection
+        cancels the stop it carries and attaches the new one in a single
+        batch, which is what the capability is about: the move can be made,
+        and the trade is never left without a stop while it is made.
+        """
+        self.assertTrue(self.provider.capabilities.stop_modify)
+
     def test_execution_is_the_oanda_handler(self):
         from parity_deriva.execution.execution import OANDAExecutionHandler
         self.assertIsInstance(self.provider.execution(), OANDAExecutionHandler)
@@ -196,6 +205,7 @@ class EToroProviderTest(unittest.TestCase):
         self.assertFalse(caps.close_reason)
         self.assertFalse(caps.order_expiry)
         self.assertFalse(caps.synchronous_orders)
+        self.assertFalse(caps.stop_modify)
         self.assertEqual(caps.max_history_candles, 1000)
 
     def test_accepts_the_projects_order_types(self):

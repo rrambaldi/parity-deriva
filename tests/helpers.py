@@ -21,6 +21,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+from parity_deriva.trading.handler import ExecutionHandler
+
 
 # Most components fetch 'parity_deriva.trading.trading' by name; a few use
 # __name__. Silence the whole tree so the suite output stays readable.
@@ -242,3 +244,24 @@ class TempDirCase(unittest.TestCase):
 
     def path(self, *parts):
         return os.path.join(self.tmpdir, *parts)
+
+
+class MovingStopStrategy(ExecutionHandler):
+    """
+    A stand-in for a strategy whose exit is a stop that has to be moved.
+
+    tests/live_test.py asks what the runner registers for one of those, and
+    the answer has to hold for any such strategy rather than for a particular
+    one - the strategies that exit this way are not all shipped with this
+    repository, and a test naming one would pass or fail depending on which
+    checkout it ran in. It signals nothing: what is under test is the wiring
+    around it, not what it would trade.
+    """
+
+    def __init__(self, **args):
+        self.logger = logging.getLogger('parity_deriva.trading.trading')
+        self._set(args, 'pairs', [])
+        self._set(args, 'granularity', 'D')
+
+    def execute_event(self, event):
+        return None

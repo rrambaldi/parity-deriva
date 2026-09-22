@@ -94,6 +94,16 @@ class FakeAPI(object):
         self.answers.setdefault(key, []).append((status, payload))
         return self
 
+    def respond(self, key, status=200, payload=None):
+        """
+        The answer to every later call on this route, replacing what was
+        queued. queue() appends, so a second queue() on the same route is
+        answered only after the first has been used up - which is the wrong
+        shape for a test that changes what the account holds.
+        """
+        self.answers[key] = [(status, payload)]
+        return self
+
     def _call(self, method, key, parts, params, body):
         self.calls.append({'method': method, 'key': key, 'parts': tuple(parts),
                            'params': params, 'body': body})
@@ -119,6 +129,93 @@ class FakeAPI(object):
 
     def of(self, key):
         return [c for c in self.calls if c['key'] == key]
+
+
+def confirmation(status='OPEN', deal='OPENED', dealId='D1', level=1.16512,
+                 stop=1.1600, limit=1.1700, distances=None, direction='BUY',
+                 size=1):
+    """
+    GET /confirms, in the shape the demo account answered with.
+
+    Both status vocabularies are here because both are real: the top-level
+    one is the position's - OPEN, CLOSED - and the one in affectedDeals is the
+    deal's - OPENED, FULLY_CLOSED. A working order reports the same pair as a
+    filled market deal, and carries distances where a fill carries levels.
+    """
+    return {
+        'date': '2018-01-15T10:00:01.000',
+        'status': status,
+        'reason': 'SUCCESS',
+        'dealStatus': 'ACCEPTED',
+        'epic': 'CS.D.EURUSD.MINI.IP',
+        'expiry': '-',
+        'dealReference': 'REF1',
+        'dealId': dealId,
+        'affectedDeals': [{'dealId': dealId, 'status': deal}],
+        'level': level,
+        'size': size,
+        'direction': direction,
+        'stopLevel': stop,
+        'limitLevel': limit,
+        'stopDistance': distances,
+        'limitDistance': distances,
+        'guaranteedStop': False,
+        'trailingStop': False,
+        'profit': None,
+        'profitCurrency': None,
+    }
+
+
+def close_activity(dealId='D1', level=1.17000, when='2018-01-15T11:00:00'):
+    """
+    One row of GET /history/activity, as the demo account serves it for a
+    position that has just closed. This is the prompt record; the transaction
+    history carries the profit and can arrive minutes later.
+    """
+    return {
+        'date': when,
+        'epic': 'CS.D.EURUSD.MINI.IP',
+        'dealId': 'DCLOSE1',
+        'type': 'POSITION',
+        'status': 'ACCEPTED',
+        'description': 'Posizioni chiuse: %s' % dealId,
+        'details': {
+            'dealReference': 'CLOSEREF',
+            'actions': [{'actionType': 'POSITION_CLOSED',
+                         'affectedDealId': dealId}],
+            'marketName': 'EUR/USD Mini',
+            'size': 1, 'direction': 'SELL', 'level': level,
+        },
+    }
+
+
+def position_row(dealId='D1', level=1.16680, stop=1.1600, limit=1.1700,
+                 size=1, direction='BUY', reference='REF1'):
+    """
+    One row of GET /positions, as the demo account serves it.
+
+    The dealId is the working order's own - that is what makes the join
+    possible - and createdDate is local while createdDateUTC is not, which is
+    why only the second is read.
+    """
+    return {
+        'position': {
+            'contractSize': 10000.0,
+            'createdDate': '2018/01/15 11:00:02:000',
+            'createdDateUTC': '2018-01-15T10:00:02',
+            'dealId': dealId,
+            'dealReference': reference,
+            'size': size,
+            'direction': direction,
+            'limitLevel': limit,
+            'level': level,
+            'currency': 'USD',
+            'controlledRisk': False,
+            'stopLevel': stop,
+        },
+        'market': {'instrumentName': 'EUR/USD Mini', 'epic':
+                   'CS.D.EURUSD.MINI.IP', 'scalingFactor': 10000},
+    }
 
 
 def price_row(when=T0, o=1.1600, h=1.1610, l=1.1590, c=1.1605, spread=0.0002,
@@ -189,8 +286,21 @@ class NamingTest(unittest.TestCase):
     def test_scale_is_one_unless_configured(self):
         self.assertEqual(scale('EUR_USD', self.setup), 1.0)
         setup = settings_stub(IG_INSTRUMENTS={
-            'EUR_USD': {'epic': 'X', 'scalingFactor': 10000}})
+            'EUR_USD': {'epic': 'X', 'priceDivisor': 10000}})
         self.assertEqual(scale('EUR_USD', setup), 10000.0)
+
+    def test_igs_own_scaling_factor_is_not_a_price_divisor(self):
+        """
+        Measured on the demo account: EUR/USD reports scalingFactor 10000 and
+        quotes 1.14625. The field relates distances in points to price units -
+        the same market's minimum stop is 2.0 points, which is 0.0002 - and
+        using it as a divisor would put every level four decimal places from
+        the market. So the override is keyed 'priceDivisor', and pasting IG's
+        field into an entry does nothing at all.
+        """
+        setup = settings_stub(IG_INSTRUMENTS={
+            'EUR_USD': {'epic': 'X', 'scalingFactor': 10000}})
+        self.assertEqual(scale('EUR_USD', setup), 1.0)
 
     def test_precision_prefers_the_instrument_entry(self):
         self.assertEqual(pricePrecision('EUR_USD', self.setup), 5)
@@ -275,8 +385,29 @@ class TimeTest(unittest.TestCase):
         self.assertIsNone(utcnow().tzinfo)
 
     def test_good_till_date_is_igs_own_format(self):
-        self.assertEqual(goodTillDate(datetime.datetime(2018, 1, 15, 23, 59, 0)),
-                         '2018/01/15 23:59:00')
+        """
+        Was: the wall clock was copied out verbatim, on the belief that IG
+        read it in the account's timezone. Now: it is converted to UTC, which
+        is the clock the demo account was measured on - an expiry ten minutes
+        behind UTC was refused as being in the past, while one thirty minutes
+        ahead of UTC but behind both London and the account's own clock was
+        accepted. A naive datetime is the machine's local time, so the
+        expected value is computed the same way rather than written out: the
+        test would otherwise pass only on a machine set to UTC.
+        """
+        when = datetime.datetime(2018, 1, 15, 23, 59, 0)
+        expected = when.astimezone(datetime.timezone.utc)
+        self.assertEqual(goodTillDate(when),
+                         expected.strftime('%Y/%m/%d %H:%M:%S'))
+
+    def test_an_expiry_with_an_offset_is_converted_not_copied(self):
+        """
+        Rome in winter is an hour ahead: an order meant to rest until 23:59
+        there has to reach IG as 22:59, or it dies an hour early.
+        """
+        rome = datetime.timezone(datetime.timedelta(hours=1))
+        when = datetime.datetime(2018, 1, 15, 23, 59, 0, tzinfo=rome)
+        self.assertEqual(goodTillDate(when), '2018/01/15 22:59:00')
 
 
 class APITest(unittest.TestCase):
@@ -475,9 +606,9 @@ class CandlesTest(unittest.TestCase):
         handler.poll(pair='EUR_USD', now=T0 + datetime.timedelta(minutes=2))
         self.assertEqual(len(self.api.noted), 1)
 
-    def test_scaled_market_is_divided_back(self):
+    def test_a_configured_divisor_is_applied(self):
         setup = settings_stub(IG_INSTRUMENTS={
-            'EUR_USD': {'epic': 'X', 'scalingFactor': 10000}})
+            'EUR_USD': {'epic': 'X', 'priceDivisor': 10000}})
         api = FakeAPI(setup=setup)
         api.queue('prices', 200, prices_payload([
             price_row(T0, o=11600, h=11610, l=11590, c=11605, spread=2)]))
@@ -572,10 +703,20 @@ class ExecutionTest(unittest.TestCase):
         """
         This is what IG has that eToro does not, so nothing has to be
         cancelled on our side.
+
+        Was: the expiry was expected verbatim, '2018/01/15 23:59:00', which
+        pinned the wall clock being copied out. IG reads the field in UTC -
+        measured, see lib/ig.goodTillDate - and a strategy's gtdTime is the
+        machine's local time, so the two differ by the machine's offset on
+        every machine that is not on UTC. The expected value is computed the
+        same way the code converts it, which is the only form of this
+        assertion that is true anywhere.
         """
         _route, body = self.handler.body(self.order())
+        expected = datetime.datetime(2018, 1, 15, 23, 59, 0).astimezone(
+            datetime.timezone.utc).strftime('%Y/%m/%d %H:%M:%S')
         self.assertEqual(body['timeInForce'], 'GOOD_TILL_DATE')
-        self.assertEqual(body['goodTillDate'], '2018/01/15 23:59:00')
+        self.assertEqual(body['goodTillDate'], expected)
 
     def test_an_order_without_an_expiry_rests_until_cancelled(self):
         _route, body = self.handler.body(self.order(gtdTime=None))
@@ -619,14 +760,59 @@ class ExecutionTest(unittest.TestCase):
         self.assertEqual(len(rejects), 1)
         self.assertEqual(rejects[0].rejectReason, 'error.invalid.dealReference')
 
-    def test_cancel_without_a_deal_id_is_not_sent(self):
+    def test_cancel_with_nothing_to_go_on_is_not_sent(self):
         """
         IG deletes a working order by dealId, and the acknowledgement carried
-        only the reference. Sending the delete anyway would name the wrong
-        resource.
+        only the reference. With no instrument and no level there is nothing
+        to look the order up by either, so the delete is refused rather than
+        aimed at a resource named by the wrong identifier.
         """
         event = OrderCancelEvent({'dealReference': 'REF123'})
         self.assertIsNone(self.handler.cancelOrder(event))
+        self.assertEqual(self.api.of('cancel_order'), [])
+
+    def working_order(self, dealId='DEAL1', level=11710.0,
+                      ig_epic='IX.D.DAX.IFMM.IP'):
+        return {'workingOrderData': {'dealId': dealId, 'epic': ig_epic,
+                                     'orderLevel': level, 'orderType': 'STOP',
+                                     'direction': 'BUY', 'orderSize': 1}}
+
+    def test_a_cancel_that_knows_only_the_reference_finds_the_order(self):
+        """
+        This is how the money manager cancels the losing leg: it names the
+        order by the id it was given, which for IG is the deal reference, and
+        GET /workingorders does not carry that. So the order is found on the
+        epic and the level - the fields both sides have - and the delete goes
+        out with the dealId IG does publish.
+
+        Until this existed the cancel was logged and dropped, which on a
+        straddle leaves the abandoned leg live on the account.
+        """
+        self.api.queue('workingorders', 200,
+                       {'workingOrders': [self.working_order()]})
+        self.api.queue('cancel_order', 200, {'dealReference': 'REF999'})
+        status = self.handler.cancelOrder(OrderCancelEvent(
+            {'orderID': 'PDabc', 'instrument': 'DE30_EUR', 'price': 11710.0}))
+        self.assertEqual(status, 200)
+        self.assertEqual(self.api.of('cancel_order')[0]['parts'], ('DEAL1',))
+
+    def test_two_orders_at_one_level_cancel_neither(self):
+        """
+        Cancelling the wrong leg leaves the account holding the position the
+        strategy meant to abandon.
+        """
+        self.api.queue('workingorders', 200, {'workingOrders': [
+            self.working_order(dealId='DEAL1'),
+            self.working_order(dealId='DEAL2')]})
+        self.assertIsNone(self.handler.cancelOrder(OrderCancelEvent(
+            {'orderID': 'PDabc', 'instrument': 'DE30_EUR', 'price': 11710.0})))
+        self.assertEqual(self.api.of('cancel_order'), [])
+
+    def test_an_order_on_another_market_is_not_the_one_to_cancel(self):
+        self.api.queue('workingorders', 200, {'workingOrders': [
+            self.working_order(ig_epic='CS.D.EURUSD.CEBM.IP')]})
+        self.assertIsNone(self.handler.cancelOrder(OrderCancelEvent(
+            {'orderID': 'PDabc', 'instrument': 'DE30_EUR', 'price': 11710.0})))
         self.assertEqual(self.api.of('cancel_order'), [])
 
     def test_cancel_with_a_deal_id_is_sent(self):
@@ -668,16 +854,20 @@ class TransactionsTest(unittest.TestCase):
         self.assertIn('REF1', self.handler.deals)
 
     def test_an_accepted_market_deal_becomes_a_fill(self):
+        """
+        Was: the confirmation was written with status 'OPENED', which IG never
+        sends at that level, and the test passed on a payload the broker does
+        not produce. Now: the payload is the one a live deal on the demo
+        account came back with - 'OPEN' at the top, 'OPENED' only inside
+        affectedDeals.
+        """
         self.acknowledge()
-        self.api.queue('confirm', 200, {
-            'dealStatus': 'ACCEPTED', 'status': 'OPENED', 'dealId': 'D1',
-            'epic': 'CS.D.EURUSD.MINI.IP', 'direction': 'BUY', 'size': 1,
-            'level': 1.16512, 'date': '2018-01-15T10:00:01.000',
-            'stopLevel': 1.1600, 'limitLevel': 1.1700})
+        self.api.queue('confirm', 200, confirmation(status='OPEN', deal='OPENED'))
         self.handler.pollDeals()
         fills = self.fills()
         self.assertEqual(len(fills), 1)
         self.assertEqual(fills[0].price, 1.16512)
+        self.assertEqual(fills[0].reason, 'MARKET_ORDER')
         self.assertEqual(fills[0].signalNumber,
                          'AG01:EUR_USD:H1:20180115T010000')
 
@@ -697,14 +887,137 @@ class TransactionsTest(unittest.TestCase):
         """
         An accepted working order exists; it has not filled. Publishing it as
         a fill would have the money manager believe it holds a position.
+
+        Was: the confirmation was given a status of None, so any reading of
+        that field kept the two apart. Now: it carries exactly what a live
+        working order came back with - the same 'OPEN' / 'OPENED' a filled
+        market deal reports - because that is the trap. Only the endpoint the
+        order went to tells them apart.
         """
         self.acknowledge(orderType='STOP')
-        self.api.queue('confirm', 200, {
-            'dealStatus': 'ACCEPTED', 'status': None, 'dealId': 'D2',
-            'direction': 'BUY', 'size': 1, 'date': '2018-01-15T10:00:01.000'})
+        self.api.queue('confirm', 200,
+                       confirmation(dealId='D2', level=1.16651, stop=None,
+                                    limit=None, distances=30.0))
         self.handler.pollDeals()
         self.assertEqual(self.fills(), [])
         self.assertIn('D2', self.handler.positions)
+        self.assertTrue(self.handler.positions['D2']['resting'])
+
+    def test_a_working_order_that_has_triggered_becomes_a_fill(self):
+        """
+        Nothing published a fill for a triggered order before this existed:
+        the position stayed marked resting for good, so the entry was never
+        reported and pollCloses - which skips a resting position - would have
+        dropped the close as well. Every strategy here enters on a STOP.
+
+        The join is on the dealId, which the position IG opens keeps from the
+        working order, as does the dealReference this project chose.
+        """
+        self.acknowledge(orderType='STOP', price=1.16651)
+        self.api.queue('confirm', 200,
+                       confirmation(dealId='D2', level=1.16651, stop=None,
+                                    limit=None, distances=30.0))
+        self.handler.pollDeals()
+
+        self.api.queue('positions', 200, {'positions': [
+            position_row(dealId='D2', level=1.16680, stop=1.16351,
+                         limit=1.16951)]})
+        sent = self.handler.pollFills()
+
+        self.assertEqual(sent, 1)
+        fill = self.fills()[0]
+        # the level the market reached, not the level that was asked for: a
+        # stop that gapped fills worse than its own price
+        self.assertEqual(fill.price, 1.16680)
+        self.assertEqual(fill.reason, 'STOP_ORDER')
+        self.assertEqual(fill.dealId, 'D2')
+        self.assertEqual(fill.signalNumber,
+                         'AG01:EUR_USD:H1:20180115T010000')
+        self.assertFalse(self.handler.positions['D2']['resting'])
+
+    def test_an_order_still_resting_publishes_nothing(self):
+        self.acknowledge(orderType='STOP')
+        self.api.queue('confirm', 200,
+                       confirmation(dealId='D2', level=1.16651, stop=None,
+                                    limit=None, distances=30.0))
+        self.handler.pollDeals()
+        self.api.queue('positions', 200, {'positions': []})
+        self.assertEqual(self.handler.pollFills(), 0)
+        self.assertEqual(self.fills(), [])
+        self.assertTrue(self.handler.positions['D2']['resting'])
+
+    def test_a_triggered_order_is_then_followed_to_its_close(self):
+        """
+        The whole path an entry takes at IG: accepted, resting, triggered,
+        gone. The close was unreachable while the position stayed resting.
+        """
+        self.acknowledge(orderType='STOP', price=1.16651)
+        self.api.queue('confirm', 200,
+                       confirmation(dealId='D2', level=1.16651, stop=None,
+                                    limit=None, distances=30.0))
+        self.handler.pollDeals()
+        self.api.queue('positions', 200, {'positions': [
+            position_row(dealId='D2', level=1.16680, stop=1.16351,
+                         limit=1.16951)]})
+        self.handler.pollFills()
+
+        self.api.respond('positions', 200, {'positions': []})
+        self.api.queue('activity', 200, {'activities': [
+            close_activity(dealId='D2', level=1.16951)]})
+        self.api.queue('transactions', 200, {'transactions': [
+            {'openLevel': 1.16680, 'closeLevel': 1.16951,
+             'profitAndLoss': 'E27.10', 'dateUtc': '2018-01-15T12:00:00'}]})
+        sent = self.handler.pollCloses()
+
+        self.assertEqual(sent, 1)
+        close = self.fills()[-1]
+        self.assertEqual(close.price, 1.16951)
+        self.assertEqual(close.reason, TAKE_PROFIT)
+        self.assertEqual(close.pl, 27.10)
+
+    def test_a_confirmation_that_closed_something_is_not_an_entry(self):
+        """
+        Nothing here sends a closing deal, so a confirmation that says one
+        happened belongs to something else - the platform, a margin call -
+        and is not a position this stack opened. The word that says so is in
+        affectedDeals; the top level says CLOSED.
+        """
+        self.acknowledge()
+        self.api.queue('confirm', 200,
+                       confirmation(status='CLOSED', deal='FULLY_CLOSED'))
+        self.handler.pollDeals()
+        self.assertEqual(self.fills(), [])
+        self.assertEqual(self.handler.positions, {})
+
+    def test_one_read_of_the_positions_serves_both_polls(self):
+        """
+        A cycle runs every few seconds against a 30-a-minute allowance, and
+        the open positions cannot change between two reads in the same cycle.
+        """
+        self.acknowledge(orderType='STOP')
+        self.api.queue('confirm', 200,
+                       confirmation(dealId='D2', level=1.16651, stop=None,
+                                    limit=None, distances=30.0))
+        self.handler.pollDeals()
+        self.api.queue('positions', 200, {'positions': [
+            position_row(dealId='D2', level=1.16680)]})
+        before = len(self.api.of('positions'))
+        self.handler.poll()
+        self.assertEqual(len(self.api.of('positions')) - before, 1)
+
+    def test_a_cancelled_working_order_is_not_watched_for_a_fill(self):
+        """
+        A deleted order will never trigger, so looking for it among the open
+        positions for the rest of the session is work with one answer.
+        """
+        self.acknowledge(orderType='STOP')
+        self.api.queue('confirm', 200,
+                       confirmation(dealId='D2', level=1.16651, stop=None,
+                                    limit=None, distances=30.0))
+        self.handler.pollDeals()
+        self.handler.execute_event(OrderCancelEvent({'orderID': 'REF1',
+                                                     'price': 1.16651}))
+        self.assertEqual(self.handler.positions, {})
 
     def test_a_confirmation_that_never_arrives_is_given_up_on_loudly(self):
         """
@@ -718,6 +1031,70 @@ class TransactionsTest(unittest.TestCase):
         for _ in range(self.handler.max_attempts):
             self.handler.pollDeals()
         self.assertNotIn('REF1', self.handler.deals)
+
+    def open_position(self, **over):
+        """A position this handler is already following, as a fill left it."""
+        data = {'dealId': 'D1', 'dealReference': 'REF1', 'signalNumber': 'sig',
+                'instrument': 'EUR_USD', 'units': 1, 'openLevel': 1.1650,
+                'stopLoss': 1.1600, 'takeProfit': 1.1700, 'opened': T0,
+                'orderType': 'STOP', 'resting': False}
+        data.update(over)
+        self.handler.positions[data['dealId']] = data
+        return data
+
+    def test_the_close_is_reported_before_the_profit_is_known(self):
+        """
+        The transaction history is the only route with a profit on it and it
+        lags - measured at over a minute on the demo account, where an
+        earlier close had landed within five seconds. The activity is
+        current, so the close is published as soon as it is recorded, with
+        the level that decides the leg and without a profit figure. A missing
+        P&L is not a flat trade, and the event says None rather than zero.
+        """
+        self.open_position()
+        self.api.queue('positions', 200, {'positions': []})
+        self.api.queue('activity', 200, {'activities': [close_activity()]})
+        self.api.queue('transactions', 200, {'transactions': []})
+
+        self.assertEqual(self.handler.pollCloses(), 1)
+        close = self.fills()[0]
+        self.assertEqual(close.price, 1.17)
+        self.assertEqual(close.reason, TAKE_PROFIT)
+        self.assertIsNone(close.pl)
+
+    def test_a_position_gone_with_no_closing_deal_yet_is_asked_after_again(self):
+        """
+        Missing from the open positions is not a level. Publishing here would
+        put a close in the ledger with no price - and an absent price becomes
+        0.0 on the way into an event.
+        """
+        self.open_position()
+        self.api.queue('positions', 200, {'positions': []})
+        self.api.queue('activity', 200, {'activities': []})
+        self.api.queue('transactions', 200, {'transactions': []})
+
+        self.assertEqual(self.handler.pollCloses(), 0)
+        self.assertEqual(self.fills(), [])
+        self.assertIn('D1', self.handler.positions)
+
+    def test_a_close_that_is_never_recorded_is_published_without_a_price(self):
+        """
+        Giving up eventually, loudly, and without inventing a level: the
+        trade did close, and the money manager is waiting to hear so.
+        """
+        self.open_position()
+        self.api.respond('positions', 200, {'positions': []})
+        self.api.respond('activity', 200, {'activities': []})
+        self.api.respond('transactions', 200, {'transactions': []})
+
+        for _ in range(self.handler.max_attempts):
+            self.handler.pollCloses()
+
+        closes = self.fills()
+        self.assertEqual(len(closes), 1)
+        self.assertFalse(closes[0].has_attr('price'))
+        self.assertEqual(closes[0].reason, UNKNOWN)
+        self.assertEqual(self.handler.positions, {})
 
     def test_a_close_names_the_leg_and_says_it_was_inferred(self):
         position = {'dealId': 'D1', 'dealReference': 'REF1',
@@ -745,6 +1122,24 @@ class TransactionsTest(unittest.TestCase):
                     'takeProfit': 1.1700, 'opened': T0, 'resting': False}
         self.handler.reportClose(position, {'closeLevel': 1.1660})
         self.assertEqual(self.fills()[0].reason, UNKNOWN)
+
+    def test_a_level_the_history_sent_as_text_is_published_as_a_number(self):
+        """
+        IG's transaction history quotes openLevel and closeLevel as strings
+        while every other route sends numbers. A price that reached the
+        ledger as text is one nothing downstream can subtract.
+        """
+        position = {'dealId': 'D1', 'dealReference': 'REF1',
+                    'signalNumber': 'sig', 'instrument': 'EUR_USD',
+                    'units': 1, 'openLevel': 1.1650, 'stopLoss': 1.1600,
+                    'takeProfit': 1.1700, 'opened': T0, 'resting': False}
+        self.handler.reportClose(position, {'closeLevel': '1.17000',
+                                            'openLevel': '1.16500',
+                                            'profitAndLoss': 'E5.00'})
+        close = self.fills()[0]
+        self.assertEqual(close.price, 1.17)
+        self.assertEqual(close.openLevel, 1.165)
+        self.assertEqual(close.reason, TAKE_PROFIT)
 
     def test_the_balance_is_absent_rather_than_invented(self):
         position = {'dealId': 'D1', 'dealReference': 'REF1',
