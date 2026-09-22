@@ -99,7 +99,7 @@ def load_strategy(name):
 	return getattr(sys.modules[module], attr)
 
 
-def moneyManager(units=1, setup=None):
+def moneyManager(units=1, setup=None, risk=None, balance=None):
 	"""
 	A MoneyManager that remembers nothing from a previous run.
 
@@ -109,7 +109,8 @@ def moneyManager(units=1, setup=None):
 	attributes, which is the smallest change that keeps runs independent
 	without touching a component the live path depends on.
 	"""
-	mm = MoneyManager(setup=setup if setup is not None else settings, units=units)
+	mm = MoneyManager(setup=setup if setup is not None else settings, units=units,
+					  risk=risk, balance=balance)
 	mm.signals = {}
 	mm.processed = []
 	mm.onTrade = False
@@ -192,6 +193,11 @@ class Ledger(ExecutionHandler):
 			'units': float(getattr(event, 'units', 0) or 0),
 			'price': _float(getattr(event, 'price', None)),
 			'stopLoss': _float(getattr(event, 'stopLoss', None)),
+			# where the stop ended up, for a strategy whose exit is one that
+			# walks. None means it was never moved, which is not the same as
+			# "it is where it started": one is a ladder that never got going
+			# and the other is a record nobody kept.
+			'stopFinal': None,
 			'takeProfit': _float(getattr(event, 'takeProfit', None)),
 			'status': 'PENDING',
 			'entryTime': None,
@@ -269,6 +275,31 @@ class Ledger(ExecutionHandler):
 		leg['pl'] = _float(getattr(event, 'pl', None))
 		leg['balance'] = _float(getattr(event, 'accountBalance', None))
 
+	def onStopModify(self, event):
+		"""
+		Follow the stop of an open trade as portfolio/trailer.py walks it.
+
+		Was: nothing read these. The leg kept the stop its order was issued
+		     with, so a trade that exited on a stop the trailer had moved was
+		     written down next to a level it had not been at for days - and
+		     the strategies whose whole exit is that ladder (they set no take
+		     profit at all) reported every close as STOP_LOSS_ORDER against a
+		     price the exit did not match. Reading the table, a winning trade
+		     looked like a bug in the simulator.
+		Now: the level is recorded as it moves, and the exit can be checked
+		     against the stop that was actually standing when it happened.
+
+		By the entry order's id, which is the one the trailer addresses: see
+		backtest/oanda.modifyStop, which moves the same order for the same
+		reason. Only an open leg is followed - a stop that has already been
+		taken is not moved by the simulator either, and a late event must not
+		rewrite what a closed trade exited on.
+		"""
+		leg = self.legs.get(_int(getattr(event, 'orderID', None)))
+		if leg is None or leg['status'] != 'FILLED':
+			return
+		leg['stopFinal'] = _float(getattr(event, 'price', None))
+
 	def onReject(self, event):
 		key = getattr(event, 'signalNumber', None)
 		if key not in self.groups:
@@ -291,6 +322,8 @@ class Ledger(ExecutionHandler):
 			return self.onClientOrder(event)
 		if kind == 'ORDERCANCEL':
 			return self.onCancel(event)
+		if kind == 'STOPMODIFY':
+			return self.onStopModify(event)
 		if kind == 'TRANSACTION':
 			return self.onTransaction(event)
 
@@ -320,6 +353,7 @@ class Ledger(ExecutionHandler):
 					'signalTime': group['signalTime'],
 					'orderPrice': leg['price'],
 					'stopLoss': leg['stopLoss'],
+					'stopFinal': leg['stopFinal'],
 					'takeProfit': leg['takeProfit'],
 					'entryTime': leg['entryTime'],
 					'entryPrice': leg['entryPrice'],
@@ -355,7 +389,7 @@ class Result(object):
 	"""What one backtest produced, with nothing computed from it yet."""
 
 	def __init__(self, instrument, granularity, strategy, dtfrom, dtto,
-				 candles, trades, counts):
+				 candles, trades, counts, balance=None, risk=None):
 		self.instrument = instrument
 		self.granularity = granularity
 		self.strategy = strategy
@@ -364,10 +398,17 @@ class Result(object):
 		self.candles = candles
 		self.trades = trades
 		self.counts = counts
+		#: what the account started with, which is where a trade's 'balance'
+		#: is counted from. Reported because a curve of balances is not
+		#: readable without the level it began at.
+		self.balance = balance
+		#: the fraction of capital risked per trade, or None when the size
+		#: was a fixed number of units
+		self.risk = risk
 
 
 def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
-		units=1, setup=None, source=None):
+		units=1, setup=None, source=None, balance=None, risk=None):
 	"""
 	Replay stored candles through the whole offline stack and collect trades.
 
@@ -379,8 +420,24 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 	no trades at all.
 
 	`source` is there for tests, which have candles of their own and no store.
+
+	`balance` is what the simulated account starts with. settings.EQUITY is
+	the default, which is the same figure the live portfolio starts from.
+
+	`risk` chooses how a position is sized, and it is the one argument here
+	that changes which trades are taken rather than only how they are
+	counted:
+
+	* None - `units` is the size, fixed, the way this has always worked. The
+	  starting balance then does nothing but set the level of the curve.
+	* a fraction - a trade is sized so that exiting on its stop costs that
+	  fraction of the capital, and the capital is re-read from the account at
+	  the start of each calendar month. `units` is ignored. A signal carrying
+	  no stop cannot be sized and is not sent, so a strategy that sets none
+	  trades nothing at all this way.
 	"""
 	cfg = setup if setup is not None else settings
+	balance = float(cfg.EQUITY) if balance is None else float(balance)
 	strategy_class = load_strategy(strategy)
 	dtfrom = dtfrom if dtfrom is not None else datetime.datetime(1970, 1, 1)
 	dtto = dtto if dtto is not None else datetime.datetime.today()
@@ -388,7 +445,8 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 	ledger = Ledger(instrument=instrument, granularity=granularity)
 	engine = ReplayEngine()
 	for handler in (strategy_class(pairs=[instrument], granularity=granularity),
-					moneyManager(units=units, setup=cfg),
+					moneyManager(units=units, setup=cfg, risk=risk,
+								 balance=balance),
 					# Before the simulator, so that a stop moved on this bar
 					# applies from the next one: the ladder is read off a bar
 					# that has closed, and a stop that could be moved and
@@ -399,7 +457,8 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 					# named: with two granularities of one instrument on the
 					# bus the simulator has no way to tell which stream it
 					# should fill against
-					OANDABacktester(setup=cfg, granularity=granularity),
+					OANDABacktester(setup=cfg, granularity=granularity,
+									balance=balance),
 					SimulatedBroker(),
 					ledger):
 		engine.add_handler(handler)
@@ -411,7 +470,8 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 	engine.run(source)
 
 	return Result(instrument, granularity, strategy, dtfrom, dtto,
-				  ledger.candles, ledger.trades(), ledger.counts())
+				  ledger.candles, ledger.trades(), ledger.counts(), balance,
+				  risk)
 
 
 def _float(value):

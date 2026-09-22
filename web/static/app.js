@@ -32,6 +32,15 @@ const $ = (id) => document.getElementById(id);
 const canvas = $('chart');
 const ctx = canvas.getContext('2d');
 
+// The capital chart's own axis. A wider left margin than the price chart's:
+// a balance carries its whole starting figure plus the decimals the moves
+// happen in, so the labels are longer than a price. The two canvases
+// therefore do not line up pixel for pixel, which they are not meant to -
+// this one always shows the whole run while the other one zooms.
+const EQ_AXIS = { left: 92, right: 14, top: 12, bottom: 22 };
+const equityCanvas = $('equity');
+const ectx = equityCanvas.getContext('2d');
+
 /* ------------------------------------------------------------- formatting */
 
 function decimalsOf(candles) {
@@ -49,6 +58,11 @@ function decimalsOf(candles) {
 
 const price = (v) => (v === null || v === undefined) ? '' : v.toFixed(state.decimals);
 const pl = (v) => (v === null || v === undefined) ? '' : v.toFixed(Math.min(state.decimals + 1, 8));
+
+// A position size. Whole units read as whole units; a fractional one keeps
+// the two decimals the money manager rounds to.
+const size = (v) => (v === null || v === undefined) ? ''
+  : Math.abs(v).toFixed(Number.isInteger(v) ? 0 : 2);
 
 function stamp(ms, withDate = true) {
   if (ms === null || ms === undefined) return '';
@@ -80,7 +94,8 @@ function levels(trade) {
   // so that a stop just outside the window's own high/low is still drawn -
   // a level you cannot see is a level you cannot check.
   if (!trade) return [];
-  return [trade.entryPrice, trade.exitPrice, trade.stopLoss, trade.takeProfit]
+  return [trade.entryPrice, trade.exitPrice, trade.stopLoss, trade.takeProfit,
+          trade.stopFinal]
     .filter((v) => v !== null && v !== undefined);
 }
 
@@ -97,15 +112,18 @@ function scales(view, extra) {
   return { high: high + pad, low: low - pad };
 }
 
-function resize() {
+function fitCanvas(cv, context, height) {
   const ratio = window.devicePixelRatio || 1;
-  const width = canvas.clientWidth || canvas.parentElement.clientWidth;
-  const height = 420;
-  canvas.width = Math.floor(width * ratio);
-  canvas.height = Math.floor(height * ratio);
-  canvas.style.height = height + 'px';
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  const width = cv.clientWidth || cv.parentElement.clientWidth;
+  cv.width = Math.floor(width * ratio);
+  cv.height = Math.floor(height * ratio);
+  cv.style.height = height + 'px';
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
   return { width, height };
+}
+
+function resize() {
+  return fitCanvas(canvas, ctx, 420);
 }
 
 function draw() {
@@ -230,6 +248,14 @@ function overlay(trade, view, x, y, plotW, n, step) {
 
   line(trade.takeProfit, '#3fb68b', [5, 4], 'target', 'right');
   line(trade.stopLoss, '#e2555a', [5, 4], 'stop', 'right');
+  // Where a walking stop ended up, drawn only when it is not where it was
+  // ordered. Usually it is also the exit - but not when the bar gapped
+  // through it, and that is the case worth being able to see: the fill is
+  // past the level, never short of it.
+  if (trade.stopFinal !== null && trade.stopFinal !== undefined
+      && trade.stopFinal !== trade.stopLoss) {
+    line(trade.stopFinal, '#ff9f45', [2, 3], 'stop moved to', 'right');
+  }
   line(trade.entryPrice, '#58a6ff', [], 'entry', 'left');
   line(trade.exitPrice, '#c8a2ff', [], 'exit', 'left');
 
@@ -272,7 +298,152 @@ function times(view, x, height, n, step) {
   }
 }
 
+
+/* ------------------------------------------------------------ the capital */
+
+/*
+ * The account balance after each trade that closed, in the order the closes
+ * happened.
+ *
+ * Read off the trades rather than off report.equity, which is a running total
+ * in the order trades *opened* and starts from zero. Two trades that overlap
+ * close in the other order, and a curve that draws them in entry order shows
+ * a balance the account never held.
+ *
+ * x is the candle index the exit landed on, so the curve runs on the same
+ * horizontal domain as the price chart above it: weekends take no width in
+ * either, which they would in a chart drawn against the clock.
+ */
+function equityPoints() {
+  const data = state.data;
+  if (!data || data.balance === null || data.balance === undefined) return [];
+  const closed = data.trades
+    .filter((t) => t.exitIndex !== null && t.exitIndex !== undefined
+                   && t.balance !== null && t.balance !== undefined)
+    .sort((a, b) => a.exitIndex - b.exitIndex);
+  const points = [[0, data.balance]];
+  for (const t of closed) points.push([t.exitIndex, t.balance]);
+  return points;
+}
+
+function amount(v, decimals) {
+  return (v === null || v === undefined) ? '' : v.toFixed(decimals);
+}
+
+/*
+ * How many decimals the axis needs to tell its own gridlines apart.
+ *
+ * P&L here is price x units, not money (see performance/report.py), so on a
+ * one-unit forex run the whole curve moves in the fourth decimal of a balance
+ * that starts at a hundred thousand. Rounding those labels to the two
+ * decimals money would want prints six identical numbers up the axis.
+ */
+function amountDecimals(span) {
+  if (!(span > 0)) return 2;
+  return Math.min(8, Math.max(2, Math.ceil(-Math.log10(span)) + 2));
+}
+
+function drawEquity() {
+  const panel = $('equity-panel');
+  const points = equityPoints();
+  panel.hidden = points.length < 2;
+  if (panel.hidden) { $('equity-note').textContent = ''; return; }
+
+  const { width, height } = fitCanvas(equityCanvas, ectx, 200);
+  ectx.clearRect(0, 0, width, height);
+
+  const start = points[0][1];
+  const last = points[points.length - 1][1];
+  const values = points.map((p) => p[1]);
+  let high = Math.max(...values), low = Math.min(...values);
+  if (high === low) { high += 0.5; low -= 0.5; }
+  const pad = (high - low) * 0.08;
+  high += pad; low -= pad;
+  const decimals = amountDecimals(high - low);
+
+  const bars = state.data.candles.length;
+  const plotW = width - EQ_AXIS.left - EQ_AXIS.right;
+  const plotH = height - EQ_AXIS.top - EQ_AXIS.bottom;
+  const step = plotW / bars;
+  const x = (i) => EQ_AXIS.left + (i + 0.5) * step;
+  const y = (v) => EQ_AXIS.top + (high - v) / (high - low) * plotH;
+
+  ectx.font = '11px ui-monospace, Menlo, Consolas, monospace';
+  ectx.textAlign = 'right';
+  ectx.textBaseline = 'middle';
+  ectx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const v = low + (high - low) * (i / 4);
+    const py = Math.round(y(v)) + 0.5;
+    ectx.strokeStyle = '#232932';
+    ectx.beginPath();
+    ectx.moveTo(EQ_AXIS.left, py);
+    ectx.lineTo(width - EQ_AXIS.right, py);
+    ectx.stroke();
+    ectx.fillStyle = '#8b95a6';
+    ectx.fillText(amount(v, decimals), EQ_AXIS.left - 8, py);
+  }
+
+  // where it started, so profit and loss are read against a line rather than
+  // against the axis labels
+  ectx.strokeStyle = '#8b95a6';
+  ectx.setLineDash([4, 4]);
+  ectx.beginPath();
+  ectx.moveTo(EQ_AXIS.left, Math.round(y(start)) + 0.5);
+  ectx.lineTo(width - EQ_AXIS.right, Math.round(y(start)) + 0.5);
+  ectx.stroke();
+  ectx.setLineDash([]);
+
+  // A step, not a slope: the realised balance does not drift between closes,
+  // it sits still and then jumps. Drawing it as a slope would invent a
+  // reading for every bar in between.
+  ectx.strokeStyle = last >= start ? '#3fb68b' : '#e2555a';
+  ectx.lineWidth = 1.5;
+  ectx.beginPath();
+  ectx.moveTo(x(points[0][0]), y(points[0][1]));
+  for (let i = 1; i < points.length; i++) {
+    ectx.lineTo(x(points[i][0]), y(points[i - 1][1]));
+    ectx.lineTo(x(points[i][0]), y(points[i][1]));
+  }
+  ectx.lineTo(width - EQ_AXIS.right, y(last));
+  ectx.stroke();
+
+  // the selected trade's own close, so clicking a row in the table says where
+  // on the curve that trade was
+  const trade = state.selected === null ? null : state.data.trades[state.selected];
+  if (trade && trade.exitIndex !== null && trade.balance !== null) {
+    ectx.fillStyle = '#58a6ff';
+    ectx.beginPath();
+    ectx.arc(x(trade.exitIndex), y(trade.balance), 3.5, 0, Math.PI * 2);
+    ectx.fill();
+  }
+
+  const moved = last - start;
+  $('equity-note').textContent =
+    `${amount(start, decimals)} \u2192 ${amount(last, decimals)}`
+    + `  (${moved >= 0 ? '+' : ''}${amount(moved, decimals)}`
+    + `, ${percent(moved / start)})`
+    + `  \u00b7 ${points.length - 1} closed trades`
+    + (state.data.risk
+        // sized off the account, so the curve is in the instrument's quote
+        // currency - and only that, since no conversion to the account's own
+        // currency is modelled anywhere here
+        ? `  \u00b7 ${(state.data.risk * 100).toFixed(2)}% risked per trade,`
+          + ' reviewed monthly \u00b7 quote currency, unconverted'
+        : '  \u00b7 price x units, not money');
+}
+
 /* ------------------------------------------------------------------ table */
+
+function stopCell(trade) {
+  // Both stops when they differ: the one it was ordered with, which is what
+  // the size was worked out from, and the one that was standing when it
+  // exited, which is what explains the exit.
+  const ordered = price(trade.stopLoss);
+  if (trade.stopFinal === null || trade.stopFinal === undefined
+      || trade.stopFinal === trade.stopLoss) return ordered;
+  return ordered + ' \u2192 ' + price(trade.stopFinal);
+}
 
 function outcomeCell(trade) {
   if (trade.outcome === 'TAKE_PROFIT_ORDER') return ['tp', 'target'];
@@ -288,7 +459,7 @@ function renderTrades() {
     const row = document.createElement('tr');
     row.className = 'empty';
     const cell = document.createElement('td');
-    cell.colSpan = 12;
+    cell.colSpan = 13;
     cell.textContent = state.data
       ? 'this run entered no trades'
       : 'run a backtest to see its trades';
@@ -309,11 +480,15 @@ function renderTrades() {
       ['', String(trade.n)],
       ['', stamp(trade.signalTime)],
       ['side ' + trade.direction, trade.direction],
+      // the size, because under a risk rule it is worked out per trade from
+      // the distance to the stop rather than being the same every time, and
+      // a number nobody can see is a number nobody can check
+      ['num', size(trade.units)],
       ['', stamp(trade.entryTime)],
       ['num', price(trade.entryPrice)],
       ['', stamp(trade.exitTime)],
       ['num', price(trade.exitPrice)],
-      ['num', price(trade.stopLoss)],
+      ['num', stopCell(trade)],
       ['num', price(trade.takeProfit)],
       ['outcome-cell', null],
       ['num pl ' + (trade.pl > 0 ? 'good' : trade.pl < 0 ? 'bad' : ''), pl(trade.pl)],
@@ -363,9 +538,12 @@ function renderReport() {
     stat('won', String(r.wins), 'good'),
     stat('lost', String(r.losses), 'bad'),
     stat('win rate', percent(r.winRate)),
-    // P&L is price x units, not money: web/service.py and the report module
-    // both say so, and the label says it here as well
-    stat('net (price x units)', pl(r.net), r.net > 0 ? 'good' : r.net < 0 ? 'bad' : ''),
+    // P&L is price x units: web/service.py and the report module both say
+    // so, and the label says it here as well. Sized off the account it is
+    // the quote currency - still not the account's own, since nothing here
+    // converts one into the other.
+    stat(state.data.risk ? 'net (quote ccy)' : 'net (price x units)',
+         pl(r.net), r.net > 0 ? 'good' : r.net < 0 ? 'bad' : ''),
     stat('profit factor', r.profitFactor === null ? 'n/a' : r.profitFactor.toFixed(2)),
     stat('avg win', pl(r.averageWin)),
     stat('avg loss', pl(r.averageLoss)),
@@ -409,6 +587,7 @@ function select(index) {
 
   renderTrades();
   draw();
+  drawEquity();
   writeURL();
   const row = document.querySelector('tr.selected');
   if (row) row.scrollIntoView({ block: 'nearest' });
@@ -421,6 +600,7 @@ function resetView() {
   $('chart-zoom').textContent = '';
   renderTrades();
   draw();
+  drawEquity();
   writeURL();
 }
 
@@ -519,7 +699,8 @@ function formParams(params) {
 }
 
 async function loadStores() {
-  const { instruments, strategies, params } = await ask('api/stores');
+  const { instruments, strategies, params, equity } = await ask('api/stores');
+  if (equity !== undefined && equity !== null) $('balance').value = equity;
   fill($('strategy'), strategies || []);
   buildForms(params);
   const select = $('instrument');
@@ -576,7 +757,8 @@ async function run(event) {
     strategy: $('strategy').value,
     from: $('from').value,
     to: $('to').value,
-    units: $('units').value,
+    risk: $('risk').value,
+    balance: $('balance').value,
   }));
   $('run').disabled = true;
   message('running the backtest…', 'info');
@@ -596,6 +778,7 @@ async function run(event) {
     renderReport();
     renderTrades();
     draw();
+    drawEquity();
     writeURL();
   } catch (error) {
     message(String(error.message || error));
@@ -624,7 +807,8 @@ function writeURL() {
     strategy: $('strategy').value,
     from: day(state.data.from),
     to: day(state.data.to),
-    units: $('units').value,
+    risk: $('risk').value,
+    balance: $('balance').value,
   }));
   if (state.selected !== null) {
     params.set('trade', String(state.data.trades[state.selected].n));
@@ -652,7 +836,8 @@ function fieldsFromURL() {
   if (form) for (const field of form) set(field.name, params.get(field.name));
   set('from', params.get('from'));
   set('to', params.get('to'));
-  set('units', params.get('units'));
+  set('risk', params.get('risk'));
+  set('balance', params.get('balance'));
   const trade = Number(params.get('trade'));
   return { trade: Number.isFinite(trade) && trade > 0 ? trade : null };
 }
@@ -706,7 +891,7 @@ canvas.addEventListener('mouseleave', () => {
     + ` → ${trade.exitTime === null ? 'still open' : stamp(trade.exitTime)}`;
 });
 
-window.addEventListener('resize', draw);
+window.addEventListener('resize', () => { draw(); drawEquity(); });
 
 async function start() {
   await loadStores();

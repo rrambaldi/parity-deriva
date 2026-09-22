@@ -278,12 +278,12 @@ class Service(object):
 	# -------------------------------------------------------------- the work
 
 	def key(self, instrument, granularity, strategy, dtfrom, dtto, units,
-			params=None):
+			params=None, balance=None, risk=None):
 		# a plugin's parameters are part of the question, so they are part of
 		# the key. Leaving them out would serve the first combination asked
 		# for to every later request for a different one
 		return (instrument, granularity, strategy, dtfrom, dtto, units,
-				params.label() if params is not None else None)
+				params.label() if params is not None else None, balance, risk)
 
 	def window(self, known, granularity):
 		for row in known['granularities']:
@@ -293,7 +293,7 @@ class Service(object):
 													  granularity))
 
 	def backtest(self, instrument, granularity, strategy='AG01', dtfrom=None,
-				 dtto=None, units=1, params=None):
+				 dtto=None, units=1, params=None, balance=None, risk=None):
 		"""Run one backtest and return the payload the page reads."""
 		known = self.check(instrument, granularity, strategy)
 
@@ -311,7 +311,7 @@ class Service(object):
 		self.span(known, granularity, dtfrom, dtto)
 
 		key = self.key(instrument, granularity, strategy, dtfrom, dtto, units,
-					   params)
+					   params, balance, risk)
 		if key in self._cache:
 			return self._cache[key]
 
@@ -328,7 +328,8 @@ class Service(object):
 			else:
 				result = ledger.run(instrument, granularity, strategy,
 									dtfrom=dtfrom, dtto=dtto, units=units,
-									setup=self.setup)
+									setup=self.setup, balance=balance,
+									risk=risk)
 			payload = self.payload(result, time.time() - started)
 			self.remember(key, payload)
 			return payload
@@ -379,6 +380,11 @@ class Service(object):
 				'signalTime': millis(trade['signalTime']),
 				'orderPrice': number(trade['orderPrice']),
 				'stopLoss': number(trade['stopLoss']),
+				# where a walking stop ended up, or None for one that never
+				# moved. The page shows both: a trade that exited on a stop
+				# 70 pips from the one it was ordered with is not a mystery
+				# once the table says the stop had been moved there.
+				'stopFinal': number(trade.get('stopFinal')),
 				'takeProfit': number(trade['takeProfit']),
 				'entryTime': entry,
 				'entryPrice': number(trade['entryPrice']),
@@ -404,6 +410,14 @@ class Service(object):
 			'candles': candles,
 			'trades': trades,
 			'counts': result.counts,
+			# what the account opened with. A curve of balances cannot be read
+			# without it, and a viewer plugin that runs its own engine has no
+			# account at all, which is None rather than a number invented here.
+			'balance': getattr(result, 'balance', None),
+			# the fraction of capital a trade risks, or None when the size was
+			# a fixed number of units. The page says which it was, because the
+			# same curve means two different things under the two rules.
+			'risk': getattr(result, 'risk', None),
 			'report': report_module.report(result.trades),
 			'elapsed': round(elapsed, 3),
 		}
@@ -442,6 +456,45 @@ def parseInt(text, name, default):
 		return int(text)
 	except (TypeError, ValueError):
 		raise ServiceError("%s: %r is not a number" % (name, text))
+
+
+def parseAmount(text, name, default):
+	"""
+	A positive amount from the query, or the default.
+
+	Zero and negative are refused rather than clamped: a starting balance of
+	nothing is not a smaller account, it is a question nobody meant to ask,
+	and a curve drawn from it says a trade multiplied the account by infinity.
+	"""
+	if text in (None, ''):
+		return default
+	try:
+		value = float(text)
+	except (TypeError, ValueError):
+		raise ServiceError("%s: %r is not a number" % (name, text))
+	if not value > 0:
+		raise ServiceError("%s: %s is not a positive amount" % (name, text))
+	return value
+
+
+def parsePercent(text, name, default):
+	"""
+	A percentage from the query, as the fraction the engine works in.
+
+	Bounded above at 100: a trade risking more than the whole account is not
+	a larger bet, it is an account that cannot pay for its own stop, and
+	every number after it would be arithmetic about money nobody has.
+	"""
+	if text in (None, ''):
+		return default
+	try:
+		value = float(text)
+	except (TypeError, ValueError):
+		raise ServiceError("%s: %r is not a number" % (name, text))
+	if not 0 < value <= 100:
+		raise ServiceError(
+			"%s: %s is not a percentage between 0 and 100" % (name, text))
+	return value / 100.0
 
 
 def _none(name):
@@ -544,7 +597,11 @@ class Handler(BaseHTTPRequestHandler):
 					# page builds the controls from this rather than holding a
 					# copy in the JavaScript that would drift from the
 					# strategy's own defaults
-					'params': _forms()})
+					'params': _forms(),
+					# the starting balance the page puts in its field, read
+					# from the setting rather than typed into the markup,
+					# where it would be a second figure to keep in step
+					'equity': float(self.service.setup.EQUITY)})
 			if route == '/api/backtest':
 				return self.sendJSON(self.runBacktest(query))
 			if route.startswith('/static/'):
@@ -576,6 +633,8 @@ class Handler(BaseHTTPRequestHandler):
 			dtfrom=parseDate(self.one(query, 'from'), 'from'),
 			dtto=parseDate(self.one(query, 'to'), 'to', end=True),
 			units=parseInt(self.one(query, 'units'), 'units', 1),
+			balance=parseAmount(self.one(query, 'balance'), 'balance', None),
+			risk=parsePercent(self.one(query, 'risk'), 'risk', None),
 			params=self.pluginParams(query))
 
 	def pluginParams(self, query):

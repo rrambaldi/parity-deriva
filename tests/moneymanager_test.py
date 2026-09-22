@@ -8,6 +8,7 @@ where a real fill can be matched back to the signal that produced it, so it is
 the natural anchor for a real-vs-simulated comparison.
 """
 
+import datetime
 import logging
 import unittest
 
@@ -488,3 +489,181 @@ class TestOrdersThatNeverFill(MoneyManagerCase):
         self.mm.orderIssued = True
         self.mm.release()
         self.assertTrue(self.mm.orderIssued)
+
+
+class RiskSizingCase(MoneyManagerCase):
+    """
+    Sizing a trade off the account instead of off a fixed number of units.
+
+    The rule: a trade that exits on its stop loses `risk` of the capital,
+    whatever the distance to that stop is, and the capital is re-read from
+    the account at the start of each calendar month. Every number below is
+    chosen so the arithmetic can be checked in the head - a stop ten points
+    away and a thousand at risk is a hundred units.
+    """
+
+    def manager(self, risk=0.01, balance=100000.0, **extra):
+        mm = MoneyManager(setup=self.settings, units=100, risk=risk,
+                          balance=balance, **extra)
+        mm.signals = {}
+        mm.processed = []
+        mm.onTrade = False
+        mm.orderIssued = False
+        mm.set_queue(self.sink)
+        return mm
+
+    def at(self, when, units=1, price=11700.0, stop=11690.0, number="S1"):
+        """A signal that happened on a given day."""
+        event = self.signal(units=units, price=price, number=number)
+        event.stopLoss = stop
+        event.time = when
+        return event
+
+    def sizes(self):
+        return [o.units for o in self.sink.events if str(o) == 'ORDER']
+
+    def close(self, mm, balance):
+        """What the broker says the account holds after a trade closed."""
+        mm.closeTrade(TransactionEvent({"type": "ORDER_FILL",
+                                        "orderID": "1",
+                                        "tradesClosed": [{}],
+                                        "accountBalance": balance}))
+
+
+class TestRiskSizing(RiskSizingCase):
+
+    def test_the_stop_distance_decides_the_size(self):
+        mm = self.manager()
+        # 1% of 100000 is 1000; a stop 10 points away is 100 units
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5)))
+        self.assertEqual(self.sizes(), [100.0])
+
+    def test_a_wider_stop_buys_fewer_units(self):
+        """The loss at the stop is the constant, not the size."""
+        mm = self.manager()
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5), stop=11600.0))
+        self.assertEqual(self.sizes(), [10.0])
+
+    def test_the_side_of_the_signal_survives_the_sizing(self):
+        mm = self.manager()
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5), units=-1))
+        self.assertEqual(self.sizes(), [-100.0])
+
+    def test_units_is_ignored_when_a_risk_is_given(self):
+        """
+        Two ways to size would be two answers to one question. The fixture
+        asks for units=100 as well, and a size of 100 here would be that
+        number by coincidence, so the stop is moved to tell them apart.
+        """
+        mm = self.manager()
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5), stop=11695.0))
+        self.assertEqual(self.sizes(), [200.0])
+
+    def test_without_a_risk_nothing_changes(self):
+        mm = self.manager(risk=None)
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5)))
+        self.assertEqual(self.sizes(), [100.0])   # units=100 x the signal's 1
+
+
+class TestRiskRefusals(RiskSizingCase):
+    """
+    A signal that cannot be sized is dropped, not guessed at and not raised.
+
+    Dropped because any size invented here is a position whose loss nobody
+    chose; not raised because trading/engine.py answers an exception in a
+    handler with os._exit(1), and one bad signal is not a reason to take a
+    live session down.
+    """
+
+    def test_a_signal_with_no_stop_is_not_sent(self):
+        mm = self.manager()
+        event = self.at(datetime.datetime(2018, 1, 5))
+        event.stopLoss = None
+        mm.handleSignal(event)
+        self.assertEqual(self.sizes(), [])
+        self.assertFalse(mm.orderIssued, "and the manager is not left blocked")
+
+    def test_a_stop_at_the_entry_price_is_not_sent(self):
+        mm = self.manager()
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5), stop=11700.0))
+        self.assertEqual(self.sizes(), [])
+
+    def test_an_account_at_nothing_sends_nothing(self):
+        mm = self.manager(balance=0.0)
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5)))
+        self.assertEqual(self.sizes(), [])
+
+    def test_a_size_that_rounds_to_nothing_is_not_sent(self):
+        """Not a small trade: no trade. 0 units is an order for nothing."""
+        mm = self.manager(balance=0.01, risk=0.0001)
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5)))
+        self.assertEqual(self.sizes(), [])
+
+
+class TestMonthlyReview(RiskSizingCase):
+
+    def test_the_size_does_not_move_inside_a_month(self):
+        """
+        Re-reading the balance after every close would make each trade's size
+        depend on the one before it, which is compounding by the hour rather
+        than a monthly review.
+        """
+        mm = self.manager()
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5)))
+        self.close(mm, 200000.0)
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 25), number="S2"))
+        self.assertEqual(self.sizes(), [100.0, 100.0])
+
+    def test_the_next_month_sizes_off_what_the_account_now_holds(self):
+        mm = self.manager()
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5)))
+        self.close(mm, 200000.0)
+        mm.handleSignal(self.at(datetime.datetime(2018, 2, 1), number="S2"))
+        self.assertEqual(self.sizes(), [100.0, 200.0])
+
+    def test_a_losing_month_sizes_down(self):
+        mm = self.manager()
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5)))
+        self.close(mm, 50000.0)
+        mm.handleSignal(self.at(datetime.datetime(2018, 2, 1), number="S2"))
+        self.assertEqual(self.sizes(), [100.0, 50.0])
+
+    def test_january_of_the_next_year_is_a_new_month(self):
+        """(year, month), not the month number, which repeats every twelve."""
+        mm = self.manager()
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5)))
+        self.close(mm, 200000.0)
+        mm.handleSignal(self.at(datetime.datetime(2019, 1, 5), number="S2"))
+        self.assertEqual(self.sizes(), [100.0, 200.0])
+
+    def test_a_month_that_ended_where_it_began_sizes_the_same(self):
+        """
+        The review re-reads the account; it does not move the size by itself.
+        A month that gave back exactly what it made sizes the next one
+        identically. (A month with no close at all cannot be asked here: the
+        manager allows one trade at a time, so the second signal would be
+        refused for that reason and the test would pass without touching the
+        review.)
+        """
+        mm = self.manager()
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5)))
+        self.close(mm, 100000.0)
+        mm.handleSignal(self.at(datetime.datetime(2018, 3, 5), number="S2"))
+        self.assertEqual(self.sizes(), [100.0, 100.0])
+
+    def test_a_signal_with_no_time_sizes_off_the_opening_capital(self):
+        """
+        Replays and tests build signals without one. Such a run must not
+        re-read the balance on every signal - that would be the compounding
+        the monthly review exists to avoid - so it sizes off the opening
+        figure throughout.
+        """
+        mm = self.manager()
+        first = self.at(datetime.datetime(2018, 1, 5))
+        del first.time
+        mm.handleSignal(first)
+        self.close(mm, 200000.0)
+        second = self.at(datetime.datetime(2018, 1, 5), number="S2")
+        del second.time
+        mm.handleSignal(second)
+        self.assertEqual(self.sizes(), [100.0, 100.0])

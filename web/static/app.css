@@ -20,6 +20,9 @@
   --exit: #c8a2ff;
   --tp: #3fb68b;
   --sl: #e2555a;
+  /* where a walking stop ended up: the same family as the stop it came from
+     would be unreadable next to it, so it gets its own */
+  --trail: #ff9f45;
   --long: #58a6ff;
   --short: #e8a33d;
   --font: 13px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -90,14 +93,17 @@ button:disabled { opacity: .5; cursor: default; }
 
 section { padding: 12px 16px; }
 
-#chart-head {
+#chart-head, #equity-head {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-bottom: 6px;
   color: var(--dim);
 }
-#chart-title { color: var(--text); }
+#chart-title, #equity-title { color: var(--text); }
+/* the curve has nothing to hover, so it does not offer a crosshair */
+#equity { cursor: default; }
+#equity-note { color: var(--dim); }
 #chart-zoom { color: var(--entry); }
 #chart-head button { margin-left: auto; }
 
@@ -124,7 +130,8 @@ canvas {
 .k.exit { color: var(--exit); }
 .k.tp { color: var(--tp); }
 .k.sl { color: var(--sl); }
-.k.tp::before, .k.sl::before { border-top-style: dashed; }
+.k.trail { color: var(--trail); }
+.k.tp::before, .k.sl::before, .k.trail::before { border-top-style: dashed; }
 .note { color: var(--dim); }
 
 #report-panel { display: flex; flex-wrap: wrap; gap: 24px; padding-top: 0; }

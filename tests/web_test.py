@@ -30,6 +30,7 @@ import shutil
 import tempfile
 import threading
 import types
+from decimal import Decimal
 import unittest
 import urllib.error
 import urllib.request
@@ -41,12 +42,14 @@ from parity_deriva.backtest.offline import SimulatedBroker
 from parity_deriva.backtest.driver import ReplayEngine
 from parity_deriva.event.event import (CandleEvent, ClientOrderEvent,
                                        OrderCancelEvent, OrderEvent,
-                                       SignalEvent, TransactionEvent)
+                                       SignalEvent, StopModifyEvent,
+                                       TransactionEvent)
 from parity_deriva.performance import report as report_module
 from parity_deriva.trading.handler import StreamHandler
 from parity_deriva.strategy import plugins as plugins_module
 from parity_deriva.web import service as service_module
-from parity_deriva.web.service import Service, ServiceError, millis
+from parity_deriva.web.service import (Service, ServiceError, millis,
+                                        parseAmount, parsePercent)
 from parity_deriva.tests.helpers import T0, candle_dict
 
 MINUTE = datetime.timedelta(minutes=1)
@@ -108,6 +111,12 @@ class LedgerRecordingTest(unittest.TestCase):
             'time': when, 'reason': reason, 'pl': pl,
             'accountBalance': 100020.0, 'instrument': 'DE30_EUR',
             'tradesClosed': [{'tradeID': order_id, 'realizedPL': pl}]}))
+
+    def move(self, order_id=1, price=11695.0, when=T0 + MINUTE):
+        """The trailer walking the stop of an open trade."""
+        self.ledger.execute_event(StopModifyEvent({
+            'orderID': order_id, 'tradeID': order_id, 'signalNumber': 'K1',
+            'instrument': 'DE30_EUR', 'price': price, 'time': when}))
 
     def opened(self):
         self.signal()
@@ -247,6 +256,73 @@ class LedgerRecordingTest(unittest.TestCase):
         self.assertEqual(self.ledger.trades(), [])
         self.assertEqual(self.ledger.groups['K1']['legs'][0]['status'],
                          'REJECTED')
+
+    # ------------------------------------------------------ the walking stop
+
+    def test_a_stop_that_never_moved_has_no_final_level(self):
+        """
+        None, not the level it was ordered with. "It never moved" and "nobody
+        wrote down where it went" are different facts, and only one of them
+        should make the page draw a second line.
+        """
+        self.opened()
+        self.close()
+        trade, = self.ledger.trades()
+        self.assertIsNone(trade['stopFinal'])
+
+    def test_the_stop_is_followed_as_it_walks(self):
+        self.opened()
+        self.move(price=11695.0)
+        self.move(price=11702.0)
+        self.close(reason='STOP_LOSS_ORDER', price=11702.0, pl=2.0)
+        trade, = self.ledger.trades()
+        self.assertEqual(trade['stopLoss'], 11690.0, "as ordered, untouched")
+        self.assertEqual(trade['stopFinal'], 11702.0, "where it ended up")
+        self.assertEqual(trade['exitPrice'], 11702.0)
+
+    def test_a_winning_trade_can_still_exit_on_its_stop(self):
+        """
+        The case that reads as a bug in the table and is not one: a strategy
+        whose only exit is a stop that climbs closes every trade as
+        STOP_LOSS_ORDER, including the ones it made money on.
+        """
+        self.opened()
+        self.move(price=11710.0)
+        self.close(reason='STOP_LOSS_ORDER', price=11710.0, pl=10.0)
+        trade, = self.ledger.trades()
+        self.assertEqual(trade['outcome'], 'STOP_LOSS_ORDER')
+        self.assertGreater(trade['pl'], 0)
+        self.assertGreater(trade['stopFinal'], trade['stopLoss'])
+
+    def test_a_stop_moved_before_the_fill_is_not_recorded(self):
+        """A pending order has no trade to walk a stop for."""
+        self.signal()
+        self.order()
+        self.ack()
+        self.move(price=11695.0)
+        self.fill()
+        self.close()
+        trade, = self.ledger.trades()
+        self.assertIsNone(trade['stopFinal'])
+
+    def test_a_stop_moved_after_the_close_does_not_rewrite_it(self):
+        """
+        The exit has happened; what the trade exited on is settled. A late
+        event overwriting it would make the table disagree with the fill.
+        """
+        self.opened()
+        self.move(price=11695.0)
+        self.close(reason='STOP_LOSS_ORDER', price=11695.0, pl=-5.0)
+        self.move(price=11800.0)
+        trade, = self.ledger.trades()
+        self.assertEqual(trade['stopFinal'], 11695.0)
+
+    def test_a_move_for_an_order_nobody_knows_is_dropped(self):
+        self.opened()
+        self.move(order_id=99, price=11695.0)
+        self.close()
+        trade, = self.ledger.trades()
+        self.assertIsNone(trade['stopFinal'])
 
     def test_candles_of_another_stream_are_not_collected(self):
         """
@@ -489,7 +565,10 @@ class StoreCase(unittest.TestCase):
         self.tmpdir = tempfile.mkdtemp(prefix='parity-deriva-web-')
         self.addCleanup(shutil.rmtree, self.tmpdir, True)
         self.store(os.path.join(self.tmpdir, 'EUR_USD.hd5'))
-        self.settings = types.SimpleNamespace(DATA_DIR=self.tmpdir)
+        # EQUITY because a backtest now opens the simulated account with it,
+        # and the page reads it to fill its capital field
+        self.settings = types.SimpleNamespace(DATA_DIR=self.tmpdir,
+                                              EQUITY=Decimal("100000.00"))
         self.service = Service(setup=self.settings, max_candles=1000)
 
 
@@ -556,7 +635,8 @@ class ServicePayloadTest(StoreCase):
 
     def test_the_shape_is_what_the_page_reads(self):
         for key in ('instrument', 'granularity', 'strategy', 'from', 'to',
-                    'candles', 'trades', 'counts', 'report', 'elapsed'):
+                    'candles', 'trades', 'counts', 'report', 'elapsed',
+                    'balance', 'risk'):
             self.assertIn(key, self.payload)
 
     def test_a_candle_is_nine_numbers_in_a_fixed_order(self):
@@ -620,6 +700,134 @@ class ServicePayloadTest(StoreCase):
         first = service.backtest('EUR_USD', 'H1', units=1)
         service.backtest('EUR_USD', 'H1', units=2)
         self.assertIsNot(service.backtest('EUR_USD', 'H1', units=1), first)
+
+
+class StartingBalanceTest(StoreCase):
+    """
+    What the account opens with, and the curve the page draws from it.
+
+    The curve itself is the trades' own 'balance' read in exit order, so what
+    is pinned here is the two things it stands on: that the opening figure is
+    the one asked for, and that the closing one is that figure plus what the
+    run made.
+    """
+
+    def closed(self, payload):
+        """The trades with a realised balance, in the order they closed."""
+        done = [t for t in payload['trades']
+                if t['exitTime'] is not None and t['balance'] is not None]
+        return sorted(done, key=lambda t: t['exitTime'])
+
+    def test_the_account_opens_with_the_setting(self):
+        payload = self.service.backtest('EUR_USD', 'H1')
+        self.assertEqual(payload['balance'], float(self.settings.EQUITY))
+
+    def test_the_account_opens_with_what_was_asked_for(self):
+        payload = self.service.backtest('EUR_USD', 'H1', balance=5000)
+        self.assertEqual(payload['balance'], 5000.0)
+        self.assertAlmostEqual(self.closed(payload)[0]['balance'],
+                               5000.0 + self.closed(payload)[0]['pl'], places=9)
+
+    def test_the_last_balance_is_the_opening_one_plus_the_net(self):
+        payload = self.service.backtest('EUR_USD', 'H1', balance=5000)
+        done = self.closed(payload)
+        self.assertTrue(done, "the fixture is meant to produce closed trades")
+        self.assertAlmostEqual(done[-1]['balance'],
+                               5000.0 + payload['report']['net'], places=9)
+
+    def test_the_trades_are_the_same_whatever_the_account_holds(self):
+        """
+        Position size is `units`, not a fraction of equity, so a different
+        opening balance must move the curve and nothing else. A run that
+        traded differently would mean sizing had quietly started to depend on
+        it, and every backtest ever compared across two balances would be
+        comparing two strategies.
+        """
+        poor = self.service.backtest('EUR_USD', 'H1', balance=1000)
+        rich = self.service.backtest('EUR_USD', 'H1', balance=999999)
+        self.assertEqual([t['entryTime'] for t in poor['trades']],
+                         [t['entryTime'] for t in rich['trades']])
+        self.assertAlmostEqual(poor['report']['net'], rich['report']['net'],
+                               places=9)
+
+    def test_two_balances_are_two_answers(self):
+        """The opening balance is part of the question, so part of the key."""
+        first = self.service.backtest('EUR_USD', 'H1', balance=1000)
+        self.assertIsNot(self.service.backtest('EUR_USD', 'H1', balance=2000),
+                         first)
+        self.assertIs(self.service.backtest('EUR_USD', 'H1', balance=1000),
+                      first)
+
+
+class RiskSizingTest(StoreCase):
+    """
+    The service's end of the risk rule. What the sizing itself does is pinned
+    in moneymanager_test.py; what is asked here is that the page's percentage
+    arrives as the fraction the engine works in, and that it reaches the run.
+    """
+
+    def test_a_run_without_a_risk_says_so(self):
+        payload = self.service.backtest('EUR_USD', 'H1')
+        self.assertIsNone(payload['risk'])
+
+    def test_the_risk_is_reported_back(self):
+        payload = self.service.backtest('EUR_USD', 'H1', risk=0.01)
+        self.assertEqual(payload['risk'], 0.01)
+
+    def test_a_risk_sizes_the_trades_off_the_capital(self):
+        """
+        Under a risk rule the size is the capital times the risk over the
+        distance to the stop, so doubling the capital doubles every size and
+        leaves the entries where they were.
+        """
+        poor = self.service.backtest('EUR_USD', 'H1', balance=50000, risk=0.01)
+        rich = self.service.backtest('EUR_USD', 'H1', balance=100000, risk=0.01)
+        self.assertTrue(poor['trades'], "the fixture is meant to trade")
+        self.assertEqual([t['entryTime'] for t in poor['trades']],
+                         [t['entryTime'] for t in rich['trades']])
+        for small, large in zip(poor['trades'], rich['trades']):
+            self.assertAlmostEqual(large['units'], small['units'] * 2, places=1)
+
+    def test_a_risk_and_a_fixed_size_are_two_different_runs(self):
+        fixed = self.service.backtest('EUR_USD', 'H1', units=1)
+        risked = self.service.backtest('EUR_USD', 'H1', risk=0.01)
+        self.assertIsNot(fixed, risked)
+        self.assertNotEqual([t['units'] for t in fixed['trades']],
+                            [t['units'] for t in risked['trades']])
+
+
+class PercentTest(unittest.TestCase):
+
+    def test_an_absent_percentage_is_the_default(self):
+        self.assertIsNone(parsePercent(None, 'risk', None))
+        self.assertIsNone(parsePercent('', 'risk', None))
+
+    def test_a_percentage_arrives_as_a_fraction(self):
+        self.assertAlmostEqual(parsePercent('1', 'risk', None), 0.01)
+        self.assertAlmostEqual(parsePercent('2.5', 'risk', None), 0.025)
+        self.assertAlmostEqual(parsePercent('100', 'risk', None), 1.0)
+
+    def test_nothing_outside_zero_to_a_hundred_is_taken(self):
+        for text in ('0', '-1', '101', 'some'):
+            with self.assertRaises(ServiceError) as caught:
+                parsePercent(text, 'risk', None)
+            self.assertIn('risk', str(caught.exception))
+
+
+class AmountTest(unittest.TestCase):
+
+    def test_an_absent_amount_is_the_default(self):
+        self.assertIsNone(parseAmount(None, 'balance', None))
+        self.assertIsNone(parseAmount('', 'balance', None))
+
+    def test_a_number_is_taken(self):
+        self.assertEqual(parseAmount('2500.5', 'balance', None), 2500.5)
+
+    def test_nothing_is_refused_by_name(self):
+        for text in ('0', '-1', 'lots'):
+            with self.assertRaises(ServiceError) as caught:
+                parseAmount(text, 'balance', None)
+            self.assertIn('balance', str(caught.exception))
 
 
 class HTTPTest(StoreCase):
@@ -702,6 +910,39 @@ class HTTPTest(StoreCase):
             for field in form:
                 self.assertIn('name', field)
                 self.assertIn('value', field)
+
+    def test_the_capital_field_is_filled_from_the_setting(self):
+        """
+        The page's capital box is not a figure typed into the markup: it is
+        the setting the service would use anyway, so the two cannot drift.
+        """
+        status, payload = self.json('/api/stores')
+        self.assertEqual(status, 200)
+        self.assertEqual(payload['equity'], float(self.settings.EQUITY))
+
+    def test_the_backtest_route_takes_a_risk(self):
+        status, payload = self.json(
+            '/api/backtest?instrument=EUR_USD&granularity=H1&risk=2')
+        self.assertEqual(status, 200)
+        self.assertAlmostEqual(payload['risk'], 0.02)
+
+    def test_a_risk_over_the_whole_account_is_refused(self):
+        status, payload = self.json(
+            '/api/backtest?instrument=EUR_USD&granularity=H1&risk=150')
+        self.assertEqual(status, 400)
+        self.assertIn('risk', payload['error'])
+
+    def test_the_backtest_route_takes_a_starting_balance(self):
+        status, payload = self.json(
+            '/api/backtest?instrument=EUR_USD&granularity=H1&balance=2500')
+        self.assertEqual(status, 200)
+        self.assertEqual(payload['balance'], 2500.0)
+
+    def test_a_balance_of_nothing_is_refused(self):
+        status, payload = self.json(
+            '/api/backtest?instrument=EUR_USD&granularity=H1&balance=0')
+        self.assertEqual(status, 400)
+        self.assertIn('balance', payload['error'])
 
     def test_the_backtest_route(self):
         status, payload = self.json('/api/backtest?instrument=EUR_USD&granularity=H1')

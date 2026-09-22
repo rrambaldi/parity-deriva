@@ -30,7 +30,20 @@
     </label>
     <label>from <input type="date" name="from" id="from"></label>
     <label>to <input type="date" name="to" id="to"></label>
-    <label>units <input type="number" name="units" id="units" value="1" min="1" step="1"></label>
+    <!--
+      What one trade may lose. The size is worked out from it and from the
+      distance to the stop, so a trade that exits on its stop costs this much
+      of the capital whatever that distance is. The capital it is a
+      percentage of is re-read from the account at the start of each month.
+    -->
+    <label>risk % <input type="number" name="risk" id="risk" value="1" min="0.01" max="100" step="0.01"></label>
+    <!--
+      What the simulated account opens with: where the capital curve starts,
+      and what the first month's risk is a percentage of. From then on the
+      risk follows the account rather than this figure. The value comes from
+      settings.EQUITY via /api/stores rather than being typed here.
+    -->
+    <label>capital <input type="number" name="balance" id="balance" min="0" step="any"></label>
     <button type="submit" id="run">run</button>
     <!--
       The free parameters of whichever strategy is selected, or nothing at all
@@ -56,6 +69,7 @@
     <span class="k exit">exit</span>
     <span class="k tp">take profit</span>
     <span class="k sl">stop loss</span>
+    <span class="k trail">stop moved to</span>
     <span class="note">times are UTC &middot; the thin whiskers on a zoomed
       chart are the ask high and the bid low, which are the prices the fill
       rule reads</span>
@@ -67,11 +81,25 @@
   <div id="counts"></div>
 </section>
 
+<!--
+  The capital over the run: the account balance after each trade that closed,
+  drawn as a step because that is when the balance actually moves. Its own
+  panel under the report rather than a second series on the price chart - the
+  two have nothing in common on the y axis.
+-->
+<section id="equity-panel" hidden>
+  <div id="equity-head">
+    <span id="equity-title">capital</span>
+    <span id="equity-note"></span>
+  </div>
+  <canvas id="equity" height="200"></canvas>
+</section>
+
 <section id="trades-panel">
   <table id="trades">
     <thead>
       <tr>
-        <th>#</th><th>signal</th><th>side</th>
+        <th>#</th><th>signal</th><th>side</th><th class="num">size</th>
         <th>entry</th><th class="num">at</th>
         <th>exit</th><th class="num">at</th>
         <th class="num">stop</th><th class="num">target</th>
@@ -79,7 +107,7 @@
       </tr>
     </thead>
     <tbody id="trade-rows">
-      <tr class="empty"><td colspan="12">run a backtest to see its trades</td></tr>
+      <tr class="empty"><td colspan="13">run a backtest to see its trades</td></tr>
     </tbody>
   </table>
 </section>

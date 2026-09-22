@@ -921,14 +921,41 @@ that is fine. `--host` will bind it elsewhere and prints a warning when you
 use it, because the difference between `127.0.0.1` and `0.0.0.0` is the whole
 of the security model here.
 
+### The capital, and how a trade is sized
+
+The page asks for a starting capital and a **risk per trade**, and draws what
+the account did with them: the balance after each close, as a step, because
+that is when a balance moves.
+
+The size is not asked for. It follows from the risk and from the distance to
+the stop - `capital x risk / |entry - stop|` - so a trade that exits on its
+stop costs that percentage of the capital whatever the distance was, and a
+wide stop simply buys fewer units. Two consequences worth knowing before
+reading a curve:
+
+* **The capital is re-read at the start of each calendar month**, and not
+  more often. Re-reading it after every close would make each trade's size
+  depend on the one before it, which is compounding by the hour rather than a
+  decision anybody takes; re-reading it monthly is one somebody could.
+* **A signal carrying no stop cannot be sized and is not sent.** There is no
+  distance to divide by, and any size invented for it would be a position
+  whose loss nobody chose. A strategy that sets no stop trades nothing this
+  way, which is the honest outcome rather than a surprise one.
+
+`ledger.run(risk=None)` is still the old behaviour - a fixed `units` for every
+trade - and it is what every caller that has not asked for this gets.
+
 ### Two things the numbers are not
 
 **P&L is price times units, not money.** The simulator closes a trade as
 (exit - entry) x units, so a one-unit EUR_USD trade that ran 29 pips reports
-`0.00292`. Turning that into a currency needs a contract size and a conversion
-this project does not model, so the column is labelled `price x units` and the
-payload carries the same string - a euro sign on a number that is not euros is
-exactly the sort of quiet wrongness the rest of this code is written to avoid.
+`0.00292`. Sized off the account instead, the same arithmetic lands in the
+instrument's **quote currency** - USD on EUR_USD - and converting that into
+the account's own currency needs a rate this project does not model, any more
+than it models contract sizes. So the column is labelled `price x units` under
+a fixed size and `quote ccy` under a risk, and never with a euro sign: a
+currency symbol on a number that is not that currency is exactly the sort of
+quiet wrongness the rest of this code is written to avoid.
 
 **A trade still open when the data runs out is not a result.** It is listed,
 because it happened, with its outcome as `STILL_OPEN` and no P&L at all rather

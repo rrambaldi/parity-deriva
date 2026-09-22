@@ -128,3 +128,15 @@ relevant `setUp` methods reset those attributes. `OANDABacktester` was moved
 to per-instance state, because one simulator per instrument is the intended
 deployment; the others have not been, and a test in each module pins the
 sharing so the constraint stays visible.
+
+## The one test that is not Python
+
+`app_check.js` loads `web/static/app.js` in a fake DOM and asks whether the
+capital curve is built and drawn. It needs node, which this project does not
+otherwise depend on, so it is run by hand and `unittest` never sees it:
+
+    node parity_deriva/tests/app_check.js
+
+It checks the plotting only. What a balance actually is - the account opening
+with what was asked for, and closing at that figure plus the run's net - is
+pinned in `web_test.py`, where it belongs.

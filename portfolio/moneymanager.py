@@ -1,10 +1,18 @@
 
 import datetime
+import math
 from parity_deriva.etc import settings
 from parity_deriva.event.event import OrderEvent
 from parity_deriva.event.event import OrderCancelEvent
 from parity_deriva.trading.handler import ExecutionHandler
 import logging
+
+
+#: "no month has been reviewed yet", which None cannot stand for: a signal
+#: that carries no time has no month either, and the two have to be told
+#: apart or every such signal would look like the first one and re-read the
+#: balance - the compounding the monthly review exists to avoid.
+_NEVER = object()
 
 
 #: order states nothing further can come of. An order in one of these will
@@ -45,11 +53,95 @@ class MoneyManager(ExecutionHandler):
 		self.logger = logging.getLogger('parity_deriva.trading.trading')
 		self._set(args,'setup', settings)
 		self._set(args,'units', 1)
+		# Size from the account rather than from a fixed number of units.
+		# `risk` is the fraction of the capital a trade is allowed to lose if
+		# it exits on its stop - 0.01 for one per cent - and None keeps the
+		# old behaviour, which is what every caller that has not asked for
+		# this gets. `balance` is what the account holds; it is seeded with
+		# the opening figure and then followed from the broker's own closes,
+		# because the account is the thing being risked and the only honest
+		# source for it is the account.
+		self.risk = None
+		self._set(args,'risk')
+		self.balance = None
+		self._set(args,'balance')
+		#: the capital the risk is taken from, and the month it belongs to
+		self.capital = self.balance
+		self.month = _NEVER
 		# set by StatusEvent('HALT') from the parity monitor, cleared by
 		# StatusEvent('RESUME'). Nothing else stopped this component before:
 		# an alarm could be raised and orders kept going out.
 		self.halted = False
 		self.logger.debug("initialized...")
+
+	def base(self, when):
+		"""
+		The capital a trade's risk is a percentage of, reviewed monthly.
+
+		Not the running balance. Re-reading it after every close would make
+		each trade's size depend on the one before it - compounding by the
+		hour - and two runs over the same month would size differently
+		because of where a trade happened to land inside it. Re-reading it
+		once a month is a decision somebody could actually take, and it is
+		the one this implements: within a calendar month the size of a trade
+		does not move, and at the first signal of the next one the balance is
+		read again.
+
+		A signal without a time leaves the month as None, which matches
+		itself, so such a run sizes off the opening capital throughout rather
+		than re-reading it on every signal.
+		"""
+		month = None if when is None else (when.year, when.month)
+		if self.month is _NEVER or month != self.month:
+			if self.month is not _NEVER and self.balance is not None:
+				self.logger.info("New month %s: risk now taken on %s"
+					% (month, self.balance))
+			self.month = month
+			if self.balance is not None:
+				self.capital = self.balance
+		return self.capital
+
+	def size(self, ev, when):
+		"""
+		The units one signal is worth, or None for a signal that cannot be
+		sized and must therefore not be sent.
+
+		With `risk` set, the distance to the stop is what decides: a trade
+		that exits there loses the capital times the risk, whatever that
+		distance is, so a wide stop buys fewer units and a narrow one more.
+		That is the whole point of sizing this way, and it means a signal
+		carrying no stop has no size - there is no distance to divide by.
+		Refusing it is the only safe answer: any number invented here would
+		be a position whose loss nobody chose.
+		"""
+		if self.risk is None:
+			return ev['units'] * self.units
+
+		capital = self.base(when)
+		price, stop = ev.get('price'), ev.get('stopLoss')
+		if not capital or capital <= 0:
+			self.logger.warning("cannot size a signal: capital is %s" % capital)
+			return None
+		if price is None or stop is None:
+			self.logger.warning("cannot size a signal with no stop: "
+				"price %s stop %s" % (price, stop))
+			return None
+		distance = abs(float(price) - float(stop))
+		if not distance:
+			self.logger.warning("cannot size a signal whose stop is its own "
+				"entry price (%s)" % price)
+			return None
+
+		# ponytail: two decimals, which is the precision IG and eToro already
+		# take a size in (see SignalEvent.info). There is no per-instrument
+		# rounding rule here because this project does not model contract
+		# sizes; add one when a broker refuses a size this produces.
+		units = round(capital * self.risk / distance, 2)
+		if units <= 0:
+			self.logger.warning("cannot size a signal: %s of %s over a stop "
+				"%s away rounds to nothing" % (self.risk, capital, distance))
+			return None
+		return math.copysign(units, ev['units'])
 
 	def addOrder(self, oe):
 		oe.batchID = 0
@@ -68,7 +160,14 @@ class MoneyManager(ExecutionHandler):
 			return
  
 		ev_dict=se.to_dict()
-		ev_dict['units'] = ev_dict['units'] * self.units
+		units = self.size(ev_dict, getattr(se, 'time', None))
+		if units is None:
+			# said and dropped, not raised: trading/engine.py answers an
+			# exception in a handler with os._exit(1), and one unsizable
+			# signal is not a reason to take the process down mid-session
+			self.logger.warning("SIGNAL IGNORED: it cannot be sized")
+			return
+		ev_dict['units'] = units
 		oe = OrderEvent(ev_dict)
 		self.queue_event(oe)
 		self.addOrder(oe)
@@ -175,6 +274,13 @@ class MoneyManager(ExecutionHandler):
 
 	def closeTrade(self, event):
 		self.logger.debug("Trade closed...")
+		# the account's own figure, which is what the monthly review reads.
+		# Only the broker knows it - adding up this component's own fills
+		# would miss financing, and on a live account would drift from the
+		# truth a little more with every trade.
+		balance = getattr(event, 'accountBalance', None)
+		if balance is not None:
+			self.balance = float(balance)
 		self.onTrade = False
 		self.orderIssued = False
 		orderID = orderId(getattr(event, 'orderID', None))
