@@ -207,11 +207,14 @@ function onInstrument() {
   onGranularity();
 }
 
+// the dates typed stay when the timeframe, the instrument or the strategy
+// changes: only an empty one is filled, with what the series holds. They were
+// overwritten here, and a sweep asked for from 2025 ran from 2015
 function onGranularity() {
   const row = granularities().find((r) => r.granularity === $('granularity').value);
   if (!row) return;
-  $('from').value = stamp(row.from);
-  $('to').value = stamp(row.to);
+  if (!$('from').value) $('from').value = stamp(row.from);
+  if (!$('to').value) $('to').value = stamp(row.to);
 }
 
 function fixedFields() {
@@ -299,6 +302,7 @@ async function simulate(event) {
       from: fields.from, to: fields.to }));
     if (ahead.ticks * combos > TICK_WARNING) {
       const question = `${combos} runs, each walking ${ahead.ticks.toLocaleString()} bars`
+        + ` from ${fields.from || 'the start'} to ${fields.to || 'the end'}`
         + (ahead.fine ? ` (${ahead.granularity} candles and the ${ahead.fine} bars under them)` : '')
         + `.\n\nAt the ${ahead.rate.toLocaleString()} bars a second the last run managed,`
         + ` that is about ${howLong(ahead.seconds * combos)} in all.\n\nRun it anyway?`;
