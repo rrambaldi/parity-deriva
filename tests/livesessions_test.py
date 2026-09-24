@@ -71,12 +71,15 @@ class LiveSessionsTest(unittest.TestCase):
         self.assertEqual(got['net'], -12.5)
         self.assertEqual(got['curve'][-1][1], 987.5)
         self.assertIn('fake session up', '\n'.join(got['console']))
+        # the menu's light: one process up
+        self.assertEqual(self.live.running(), 1)
         stopped = self.live.stop(session)
         for _ in range(50):
             if not self.live.summary(session)['running']:
                 break
             time.sleep(0.1)
         self.assertFalse(self.live.summary(session)['running'])
+        self.assertEqual(self.live.running(), 0)
         self.assertIsNotNone(stopped['stopped'])
         self.live.delete(session)
         self.assertEqual(self.live.sessions(), [])

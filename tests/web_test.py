@@ -1878,6 +1878,12 @@ class HTTPTest(HTTPCase):
             self.assertEqual(status, 200)
             self.assertIn(kind, headers['Content-Type'])
 
+    def test_the_busy_route(self):
+        # what the menu lights up: nothing, in a service that runs nothing
+        status, payload = self.json('/api/busy')
+        self.assertEqual(status, 200)
+        self.assertEqual(payload, {'simulate': False, 'live': 0})
+
     def test_the_stores_route(self):
         status, payload = self.json('/api/stores')
         self.assertEqual(status, 200)

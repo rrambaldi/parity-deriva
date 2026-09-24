@@ -490,6 +490,15 @@ tbody tr.empty:hover { background: none; }
 #menu [aria-current="page"] { color: var(--text); border-color: var(--entry); background: #1d222b; }
 #menu a:focus-visible, #menu button:focus-visible { outline: 2px solid var(--entry); outline-offset: 1px; }
 .embed #menu { display: none; }
+/* something going on in the service - a sweep, a live session - lights its
+   entry up on every page (menu.js, api/busy) */
+#menu a.busy { color: var(--up); }
+#menu a.busy svg { animation: busy 1.6s ease-in-out infinite; }
+@keyframes busy {
+  0%, 100% { opacity: 1; filter: drop-shadow(0 0 0 transparent); }
+  50% { opacity: .5; filter: drop-shadow(0 0 5px currentColor); }
+}
+@media (prefers-reduced-motion: reduce) { #menu a.busy svg { animation: none; } }
 @media (max-width: 900px) {
   :root { --menu-w: 176px; }
   #menu span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

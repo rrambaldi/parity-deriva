@@ -6,6 +6,10 @@
  * values, and one run of a set opens on the run page (run.html), which is
  * reached from the set and not from here.
  * Links are relative, like the stylesheet, so a /parity/ prefix needs nothing.
+ *
+ * A sweep and a live session go on in the service whether a page is open or
+ * not, so every page asks api/busy every few seconds and the entry of what
+ * is going lights up: see #menu a.busy in app.css.
  */
 (function () {
   const svg = (d) => '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" '
@@ -32,6 +36,7 @@
   const item = (name, href, title) => {
     const el = document.createElement('a');
     el.href = href;
+    el.dataset.page = name;
     if (name === page) el.setAttribute('aria-current', 'page');
     el.title = title;
     el.innerHTML = ICONS[name] + '<span>' + name + '</span>';
@@ -41,4 +46,24 @@
   item('live', 'live', 'the sessions trading on the accounts, as they go');
   item('settings', 'settings', 'data: stores and imports');
   document.body.prepend(nav);
+
+  // not inside the simulate page's run dialog: the page around it asks
+  if (new URLSearchParams(location.search).has('embed')) return;
+  const titles = Object.fromEntries([...nav.children].map((el) => [el.dataset.page, el.title]));
+  const light = async () => {
+    // a tab in the background asks nothing; it asks again once shown
+    if (!document.hidden) {
+      try {
+        const busy = await (await fetch('api/busy')).json();
+        for (const [name, on, what] of [['simulate', busy.simulate, 'a simulation is running'],
+          ['live', busy.live, `${busy.live} live session${busy.live === 1 ? '' : 's'} running`]]) {
+          const el = nav.querySelector(`[data-page="${name}"]`);
+          el.classList.toggle('busy', !!on);
+          el.title = titles[name] + (on ? ' - ' + what : '');
+        }
+      } catch (error) { /* no answer, no light: the page itself is unaffected */ }
+    }
+    setTimeout(light, 5000);
+  };
+  light();
 })();

@@ -318,6 +318,16 @@ class LiveSessions(object):
                 continue
         return out
 
+    def running(self):
+        """How many sessions have their process up: the menu's light."""
+        count = 0
+        for session in self.ids():
+            try:
+                count += bool(self.alive(self.meta(session)))
+            except (LiveError, OSError, ValueError):
+                continue
+        return count
+
     def delete(self, session):
         meta = self.meta(session)
         if self.alive(meta):

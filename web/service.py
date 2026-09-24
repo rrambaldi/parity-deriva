@@ -1249,6 +1249,17 @@ class Service(object):
 		return {'stopping': True, 'bars': state.get('bars'),
 				'total': state.get('total'), 'at': state.get('at')}
 
+	def busy(self):
+		"""
+		What the menu lights up on every page: a sweep or a backtest going,
+		and how many live sessions have their process up. Asked every few
+		seconds by every page open, so it reads flags and pids and nothing
+		else - no event log, no candles.
+		"""
+		sweep = getattr(self, '_sweep', None) or {}
+		return {'simulate': bool(sweep.get('running') or self._progress.get('running')),
+				'live': self.live.running()}
+
 	def progress(self):
 		"""
 		Where the backtest running now has got to.
@@ -2285,6 +2296,8 @@ class Handler(BaseHTTPRequestHandler):
 					parseDate(self.one(query, 'to'), 'to', end=True)))
 			if route == '/api/progress':
 				return self.sendJSON(self.service.progress())
+			if route == '/api/busy':
+				return self.sendJSON(self.service.busy())
 			if route == '/api/imports':
 				return self.sendJSON(self.service.pending())
 			if route == '/api/imports/status':

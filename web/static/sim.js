@@ -1101,25 +1101,29 @@ $('instrument').addEventListener('change', onInstrument);
 $('granularity').addEventListener('change', onGranularity);
 
 async function start() {
-  const stores = await ask('api/stores');
-  state.instruments = stores.instruments || [];
-  state.forms = stores.params || {};
-  state.defaults = stores.defaults || {};
-  if (stores.equity !== undefined && stores.equity !== null) $('balance').value = stores.equity;
-  fill($('strategy'), stores.strategies || []);
+  // both asked at once, and the sweep shown first: it is what the page is
+  // opened to see - one going on without anybody watching - and the stores
+  // take seconds to answer while it runs, the sweep status milliseconds
+  const stores = ask('api/stores');
+  const job = await ask('api/sweep?since=0')
+    .catch((error) => { message(String(error.message || error)); return { total: 0 }; });
+  if (job.total) {
+    state.fields = job.fields || null;
+    follow(job);
+  }
+  const s = await stores;
+  state.instruments = s.instruments || [];
+  state.forms = s.params || {};
+  state.defaults = s.defaults || {};
+  if (s.equity !== undefined && s.equity !== null) $('balance').value = s.equity;
+  fill($('strategy'), s.strategies || []);
   fill($('instrument'), state.instruments.map((r) => r.instrument));
   onStrategy();
+  // the form of the sweep going, or of the last one to finish
+  if (job.total) fillForm({ ...(job.fields || {}), ...(job.grid || {}) });
   countLater();
   // not awaited: the stars can wait, the table cannot wait on them
   loadFavourites().catch((error) => message(String(error.message || error)));
-  // a sweep already going, or the last one to finish, is picked up again
-  const job = await ask('api/sweep?since=0');
-  if (job.total) {
-    state.fields = job.fields || null;
-    fillForm({ ...(job.fields || {}), ...(job.grid || {}) });
-    countLater();
-    follow(job);
-  }
 }
 
 start().catch((error) => message(String(error.message || error)));
