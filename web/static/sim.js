@@ -292,7 +292,10 @@ function follow(job) {
     const c = job.current;
     const params = c ? Object.fromEntries((job.varied || []).map((k) => [k, c.params[k]])) : {};
     const text = paramsText(params);
-    message(`run ${c ? c.n : state.rows.length} of ${job.total}` + (text ? ` · ${text}` : ''), 'info');
+    // while this run reads its candles, how far it has got (backtest/ledger._reading)
+    const p = job.progress;
+    const loading = p && p.loading && p.toRead ? ` · candele ${Math.floor(100 * p.read / p.toRead)}%` : '';
+    message(`run ${c ? c.n : state.rows.length} of ${job.total}${loading}` + (text ? ` · ${text}` : ''), 'info');
   }
   else if (job.total) message(job.cancel ? `stopped after ${state.rows.length} of ${job.total} runs` : '');
   const f = job.fields || {};
