@@ -6,3 +6,7 @@ stores/*.tmp
 results/**/predictions_*.csv
 results/**/*.npz
 .pytest_cache/
+# Kronos: codice clonato al volo, modelli grandi, prova veloce
+third_party/
+results/kronos/**/*.pt
+results/kronos/smoke/

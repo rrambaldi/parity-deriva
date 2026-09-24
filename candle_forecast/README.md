@@ -84,6 +84,25 @@ Per ricaricarli: `models.lgbm.load(dir, M)` e `models.gru.load(path)`, poi `pred
 stessi X costruiti con `samples.windows` (stessi N, M, indicatori).
 `results/summary.csv`: una riga per (sistema, modello, segmento).
 
+## Kronos da zero: `run_kronos.cmd`
+
+Confronto con il LightGBM delle escursioni (`parity_deriva/scripts/excursion_lgbm.py`, branch `dev`):
+stesso EURUSD M5, stesso taglio (si impara prima del 2020-11-11 meno 288 candele, si prevede dopo),
+stesse misure. `candle_forecast/kronos_scratch.py` addestra il tokenizer (config di
+Kronos-Tokenizer-base) e il modello (config di Kronos-mini, 4,1M parametri) partendo da pesi casuali,
+poi per un punto di test ogni 96 candele genera 8 percorsi di 288 candele e salva, per h = 16, 48, 288,
+la media di massimo, minimo e close raggiunti in `results/kronos/scratch-mini/predictions.csv`.
+Il codice di Kronos (MIT, commit fissato) si clona da solo in `third_party/`, fuori da git.
+
+Doppio clic su `run_kronos.cmd`: librerie, torch con CUDA se c'è una GPU NVIDIA, prova veloce
+(`--smoke`), training, previsioni, push. Con GPU circa un'ora; solo CPU molte ore (lo stima dopo i
+primi passi). `run_kronos.cmd --pretrained` usa invece Kronos-small già addestrato, senza training.
+Il confronto si fa sul server, dove c'è lo store che legge LightGBM:
+
+```bash
+python -m parity_deriva.scripts.excursion_lgbm EUR_USD --compare <repo>/candle_forecast/results/kronos/scratch-mini/predictions.csv
+```
+
 ## Decisioni
 
 | Codice | Voce | Valore | Stato | Dove |
