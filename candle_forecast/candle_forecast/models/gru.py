@@ -4,6 +4,7 @@ della rete, le previsioni tornano in unità minime prima della valutazione (DEC-
 from __future__ import annotations
 
 import copy
+import os
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +68,7 @@ def load(path: Path) -> Scaled:
 def fit(X_fit: np.ndarray, Y_fit: np.ndarray, X_es: np.ndarray, Y_es: np.ndarray,
         p: dict[str, Any], seed: int) -> tuple[Scaled, dict[str, Any]]:
     torch.manual_seed(seed)
-    torch.set_num_threads(p.get("num_threads", 1))
+    torch.set_num_threads(p.get("num_threads") or os.cpu_count() or 1)   # 0 = tutti i core
     rng = np.random.default_rng(seed)
     M = Y_fit.shape[1]
     sx = col_std(X_fit)

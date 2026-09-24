@@ -24,6 +24,13 @@ come `parity_deriva.data.store.load`) e SMA, EMA e ATR sono copiati da `parity_d
 Due test verificano che restino identici agli originali dove `parity_deriva` è importabile.
 Solo `pack-stores` usa `parity_deriva` (per `settings.DATA_DIR`), quindi gira sul server.
 
+## Su Windows: `run.cmd`
+
+Doppio clic su `run.cmd` (o lancio da "Anaconda Prompt"). Chiede subito se alla fine fare commit e
+push dei risultati, poi fa tutto da solo: crea l'env conda `candle_forecast` se manca e installa le
+librerie, lancia i test (si ferma se falliscono), `prepare`, `run` su tutti i sistemi, e il push se
+richiesto. Serve solo conda installato (Miniconda va bene). `num_threads = 0` nel config usa tutti i core.
+
 ## Store zippati (dati in git)
 
 I dati di training viaggiano nel repo come `stores/<store>.zip` (per EURUSD `stores/EUR_USD.hd5.zip`,

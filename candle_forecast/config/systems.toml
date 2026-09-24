@@ -39,7 +39,7 @@ learning_rate = 0.05
 num_leaves = 31
 seed = 42
 early_stopping_rounds = 50     # DA-CONFERMARE
-num_threads = 2                # DA-CONFERMARE (macchina a 2 core)
+num_threads = 0                # 0 = tutti i core della macchina
 
 [gru]                          # L0-P8
 hidden = 32
@@ -49,4 +49,4 @@ batch = 256
 seeds = [0, 1, 2]
 max_epochs = 30                # DA-CONFERMARE
 patience = 3                   # DA-CONFERMARE
-num_threads = 2                # DA-CONFERMARE
+num_threads = 0                # 0 = tutti i core della macchina

@@ -1,0 +1,2 @@
+# cmd.exe vuole CRLF: git li scrive cosi anche da un checkout Linux
+*.cmd text eol=crlf
