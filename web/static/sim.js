@@ -337,10 +337,14 @@ function follow(job) {
     const c = job.current;
     const params = c ? Object.fromEntries((job.varied || []).map((k) => [k, c.params[k]])) : {};
     const text = paramsText(params);
-    // while this run reads its candles, how far it has got (backtest/ledger._reading)
+    // the phase this run is in, with its own share: each series read or taken
+    // from memory, its bars prepared (data/replay.py), then the simulation
     const p = job.progress;
-    const loading = p && p.loading && p.toRead ? ` · candele ${Math.floor(100 * p.read / p.toRead)}%` : '';
-    message(`run ${c ? c.n : state.rows.length} of ${job.total}${loading}` + (text ? ` · ${text}` : ''), 'info');
+    const share = (done, total) => total ? ` ${Math.min(100, Math.floor(100 * done / total))}%` : '';
+    const phase = !p ? ' · starting'
+      : p.loading ? ` · ${p.stage || 'reading the candles'}${share(p.read, p.toRead)}`
+      : ` · simulating${share(p.bars, p.total)}`;
+    message(`run ${c ? c.n : state.rows.length} of ${job.total}${phase}` + (text ? ` · ${text}` : ''), 'info');
   }
   else if (job.total) message(job.cancel ? `stopped after ${state.rows.length} of ${job.total} runs` : '');
   const f = job.fields || {};

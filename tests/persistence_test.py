@@ -287,6 +287,7 @@ class TestOfflineReplay(TempDirCase):
         for name in ('last', 'url', 'store', 'curr', 'candles', 'samples', 'cent'):
             if hasattr(replay_mod.ForexCandles, name):
                 setattr(replay_mod.ForexCandles, name, {})
+        replay_mod.FRAMES.clear()
         BulkSaver.curr = {}
         BulkSaver.url = {}
         with mock.patch.object(bulk_mod, 'requests',
@@ -309,7 +310,32 @@ class TestOfflineReplay(TempDirCase):
 
     def test_the_store_is_loaded_into_memory(self):
         src = self.build()
-        self.assertEqual(len(src.store["DE30_EUR"]), 30)
+        self.assertEqual(len(src.frames["DE30_EUR"]), 30)
+
+    def test_a_second_run_reads_from_memory_a_rewritten_store_afresh(self):
+        stages = []
+        first = self.build(progress=lambda stage, done, total: stages.append(stage))
+        again = self.build(progress=lambda stage, done, total: stages.append(stage))
+        self.assertIs(first.frames["DE30_EUR"], again.frames["DE30_EUR"])
+        self.assertEqual(stages, ["DE30_EUR M1: reading the file", "DE30_EUR M1: in memory"])
+        # an import rewrites the file: its size and mtime move, it is read again
+        store = pd.HDFStore(self.path("DE30_EUR.hd5"))
+        table = store['/M1'].iloc[:20]
+        store.close()
+        os.remove(self.path("DE30_EUR.hd5"))
+        table.to_hdf(self.path("DE30_EUR.hd5"), key='/M1', format='table')
+        self.assertEqual(len(self.build().frames["DE30_EUR"]), 20)
+        self.assertEqual(len(replay_mod.FRAMES), 1)
+
+    def test_two_pairs_come_in_time_order_each_under_its_own_name(self):
+        import shutil
+        shutil.copy(self.path("DE30_EUR.hd5"), self.path("EUR_USD.hd5"))
+        src = self.build(pairs=["DE30_EUR", "EUR_USD"])
+        src.stream_to_queue()
+        seen = [(bar.time, bar.instrument) for bar in self.sink.of('CANDLE')]
+        self.assertEqual(len(seen), 20)
+        self.assertEqual(seen, sorted(seen, key=lambda r: (r[0], r[1] != "DE30_EUR")))
+        self.assertEqual(seen[:2], [(seen[0][0], "DE30_EUR"), (seen[0][0], "EUR_USD")])
 
     def test_the_bar_interval_comes_from_the_granularity(self):
         self.assertEqual(self.build().interval, pd.Timedelta(minutes=1))

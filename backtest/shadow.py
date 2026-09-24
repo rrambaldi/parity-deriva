@@ -170,6 +170,9 @@ def source(instrument, granularity, fine, dtfrom, dtto, setup=None,
 						  progress=progress)
 	if not fine:
 		return coarse
+	# "EUR_USD M5 (fills): reading the file": which of the two is loading
+	fills = None if progress is None else (
+		lambda stage, done, total: progress(stage.replace(': ', ' (fills): ', 1), done, total))
 	return Shadowed(coarse, ForexCandles(setup=cfg, pairs=[instrument],
 										 granularity=fine, dtfrom=dtfrom,
-										 dtto=dtto, progress=progress))
+										 dtto=dtto, progress=fills))
