@@ -1,1 +1,73 @@
-{}
+{
+ "lgbm": {
+  "seed": 42,
+  "best_iterations": [
+   166,
+   111,
+   2,
+   75,
+   88,
+   73
+  ],
+  "seconds": 88.8,
+  "files": [
+   "lgbm_h1_high.txt",
+   "lgbm_h1_low.txt",
+   "lgbm_h1_close.txt",
+   "lgbm_h2_high.txt",
+   "lgbm_h2_low.txt",
+   "lgbm_h2_close.txt"
+  ]
+ },
+ "gru": [
+  {
+   "seed": 0,
+   "epochs": 9,
+   "best_es_mse": 0.7289966344833374,
+   "es_history": [
+    0.730177,
+    0.729696,
+    0.729897,
+    0.72954,
+    0.729341,
+    0.728997,
+    0.729416,
+    0.72935,
+    0.729045
+   ],
+   "seconds": 799.2,
+   "file": "gru_s0.pt"
+  },
+  {
+   "seed": 1,
+   "epochs": 8,
+   "best_es_mse": 0.7293490767478943,
+   "es_history": [
+    0.73002,
+    0.730233,
+    0.73032,
+    0.729725,
+    0.729349,
+    0.729663,
+    0.729443,
+    0.72956
+   ],
+   "seconds": 516.5,
+   "file": "gru_s1.pt"
+  },
+  {
+   "seed": 2,
+   "epochs": 5,
+   "best_es_mse": 0.7292822003364563,
+   "es_history": [
+    0.730941,
+    0.729282,
+    0.730262,
+    0.729291,
+    0.729449
+   ],
+   "seconds": 430.1,
+   "file": "gru_s2.pt"
+  }
+ ]
+}
