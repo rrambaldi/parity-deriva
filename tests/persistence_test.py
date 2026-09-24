@@ -317,7 +317,7 @@ class TestOfflineReplay(TempDirCase):
         first = self.build(progress=lambda stage, done, total: stages.append(stage))
         again = self.build(progress=lambda stage, done, total: stages.append(stage))
         self.assertIs(first.frames["DE30_EUR"], again.frames["DE30_EUR"])
-        self.assertEqual(stages, ["DE30_EUR M1: reading the file", "DE30_EUR M1: in memory"])
+        self.assertEqual(stages, ["reading DE30_EUR M1 from disk", "loading DE30_EUR M1 from memory"])
         # an import rewrites the file: its size and mtime move, it is read again
         store = pd.HDFStore(self.path("DE30_EUR.hd5"))
         table = store['/M1'].iloc[:20]

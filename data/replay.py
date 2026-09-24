@@ -76,6 +76,9 @@ class ForexCandles(StreamHandler):
 		# who to tell how far the reading has got, or None. Set directly
 		# rather than through _set, which cannot hold a default of None.
 		self.progress = args.get('progress')
+		# what the series is for, in the progress lines: 'fills' for the fine
+		# one a shadowed run fills its orders on (backtest/shadow.source)
+		self.role = args.get('role') or ''
 
 		self._set(args,'pairs','DE30_EUR')
 		self._set(args,'granularity','M5')
@@ -105,6 +108,7 @@ class ForexCandles(StreamHandler):
 		self.logger.debug("SLEEP %d" % self.sleep)
 		
 		self.frames = {}
+		self.label = {}
 		self.curr = {}
 		self.last = {}
 		self.candles = {}
@@ -118,9 +122,11 @@ class ForexCandles(StreamHandler):
 			# one it does, so a D run replays off an M5-only store. Read once
 			# per file and granularity for the whole process (frame())
 			path = os.path.join(self.setup.DATA_DIR, store_name)
-			label = "%s %s" % (p, self.granularity)
+			self.label[p] = "%s %s%s" % (p, self.granularity,
+										 " (%s)" % self.role if self.role else "")
 			cached = any(k[:2] == (path, self.granularity) for k in list(FRAMES))
-			self.report(("%s: in memory" if cached else "%s: reading the file") % label, 0, 0)
+			self.report(("loading %s from memory" if cached else "reading %s from disk")
+						% self.label[p], 0, 1)
 			s, cached = frame(path, self.granularity)
 			self.last[p] = min(s.index.max(), self.dtto)
 			self.samples[p] = len(s.loc[self.curr[p]:self.last[p]])
@@ -201,7 +207,7 @@ class ForexCandles(StreamHandler):
 				self.candles[pair] += 1
 				self.queue_event(cev)
 				if self.candles[pair] % self.cent[pair] == 0:
-					self.report("%s %s: preparing the bars" % (pair, self.granularity),
+					self.report("preparing %s bars" % self.label[pair],
 								self.candles[pair], self.samples[pair])
 			for pair in self.pairs:
 				self.curr[pair] = max(pd.Timestamp(self.curr[pair]),

@@ -447,9 +447,14 @@ class OANDABacktester(ExecutionHandler):
 			% ( event.time, event.mid['o'], event.mid['h'], event.mid['l'], event.mid['c']))
 		# snapshot: handleSLTP appends the stop/target to self.orders, and a
 		# child must not be matched against the very bar that opened the trade
+		# Pending ones only: the book keeps every order that expired or filled
+		# (thousands over a year), and sorting them all on every bar was most
+		# of a run's time. None of those turns pending again, and dropping
+		# them keeps the others in their relative order, so it is the same
+		# walk
 		resting = [o for o in self.orders
-				   if instrument is None
-				   or getattr(o, 'instrument', None) == instrument]
+				   if o.state == 'PENDING' and (instrument is None
+				   or getattr(o, 'instrument', None) == instrument)]
 		# Nearest to the open first.
 		#
 		# A bar that reaches two of these says nothing about which it reached
