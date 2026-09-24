@@ -5,9 +5,13 @@ from parity_deriva.etc import settings
 from parity_deriva.event.event import OrderEvent
 from parity_deriva.event.event import OrderCancelEvent
 from parity_deriva.event.event import CloseTradeEvent
-from parity_deriva.lib.utils import pipSize
+from parity_deriva.lib.utils import pipSize, roundPrice
 from parity_deriva.trading.handler import ExecutionHandler
 import logging
+
+
+#: the numbers a strategy's own climbing stop rides on (portfolio/trailer.py)
+LADDER = ('trailStep', 'trailFirst', 'timeStopBars', 'timeStopOffset')
 
 
 #: "no month has been reviewed yet", which None cannot stand for: a signal
@@ -131,6 +135,17 @@ class MoneyManager(ExecutionHandler):
 		self._set(args,'slScale')
 		self.tpScale = None
 		self._set(args,'tpScale')
+		# Three more rules about every order rather than about a setup - see
+		# turnRound() and trail(). `inverse` turns every order round. `trailing` is None for
+		# the strategy's own stop (FTW's ladder, nobody else's), 0 for a stop
+		# that never moves and 1 for one that always follows. `trailProfit`
+		# makes the target a floor for the stop rather than an exit.
+		self.inverse = False
+		self._set(args,'inverse')
+		self.trailing = None
+		self._set(args,'trailing')
+		self.trailProfit = False
+		self._set(args,'trailProfit')
 		#: the capital the risk is taken from, and the month it belongs to
 		self.capital = self.balance
 		self.month = _NEVER
@@ -275,6 +290,58 @@ class MoneyManager(ExecutionHandler):
 			if scale and scale != 1 and ev.get(key) is not None:
 				ev[key] = float(price) + (float(ev[key]) - float(price)) * scale
 
+	def turnRound(self, ev):
+		"""
+		inverse: buy and sell swapped, stop and target swapped, and a stop
+		entry becomes a limit - a sell where the strategy would buy on a break
+		upwards rests above the market. A missing level is the other one
+		mirrored through the entry: FTW has no target, so its inverse takes
+		FTW's stop as the target and a stop as far on the other side.
+
+		Before the scales, so SL x and TP x stretch the stop and target the
+		order is really placed with.
+		"""
+		if not self.inverse:
+			return
+		price, instrument = ev.get('price'), ev.get('instrument')
+		stop, target = ev.get('stopLoss'), ev.get('takeProfit')
+
+		def mirror(level):
+			if level is None or price is None:
+				return None
+			return roundPrice(instrument, 2 * float(price) - float(level))
+		ev['stopLoss'] = target if target is not None else mirror(stop)
+		ev['takeProfit'] = stop if stop is not None else mirror(target)
+		ev['units'] = -ev['units']
+		swap = {'STOP': 'LIMIT', 'LIMIT': 'STOP'}
+		for key in ('type', 'orderType'):
+			if key in ev:
+				ev[key] = swap.get(ev[key], ev[key])
+
+	def trail(self, ev):
+		"""
+		trailing: 0 takes the ladder off the order, so portfolio/trailer.py
+		leaves it alone; 1 gives an order that has none a stop that follows
+		the market at its initial distance.
+
+		trailProfit: the target is not sent - the broker holds no target -
+		and rides on the order as trailTarget, which the trailer raises the
+		stop to once the market gets there, following from then on.
+
+		After the scales: the distance followed and the target are the ones
+		the order is placed with.
+		"""
+		price, stop = ev.get('price'), ev.get('stopLoss')
+		if self.trailing == 0:
+			for key in LADDER:
+				ev.pop(key, None)
+		elif self.trailing == 1 and ev.get('trailStep') is None \
+				and price is not None and stop is not None:
+			ev['trailDistance'] = abs(float(price) - float(stop))
+		if self.trailProfit and ev.get('takeProfit') is not None:
+			ev['trailTarget'] = ev['takeProfit']
+			ev['takeProfit'] = None
+
 	def addOrder(self, oe):
 		oe.batchID = 0
 		if oe.signalNumber in self.signals:
@@ -311,7 +378,9 @@ class MoneyManager(ExecutionHandler):
 
 		ev_dict=se.to_dict()
 		# before the ceiling and the size, which are about the stop traded
+		self.turnRound(ev_dict)
 		self.scaleLevels(ev_dict)
+		self.trail(ev_dict)
 		if self.tooWide(ev_dict):
 			self.logger.info("SIGNAL IGNORED: stop %s is more than %s pips "
 				"from the entry %s"

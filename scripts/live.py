@@ -151,7 +151,36 @@ def fromForm(text):
             if spec.get(name) and name not in takes:
                 raise SystemExit("%s runs its own engine, which has no %s: "
                                  "leave it empty" % (spec['strategy'], label))
+        # its engine moves its stops inside the walk (ftw_ab/live.py) and
+        # nothing sends those moves to the account
+        for name, label in (('trailing', 'trailing stop'),
+                            ('trailProfit', 'trailing profit')):
+            if spec.get(name):
+                raise SystemExit("%s runs its own engine, and live its stop "
+                                 "does not move: leave %s empty"
+                                 % (spec['strategy'], label))
     return spec
+
+
+def liveStrategy(spec):
+    """
+    (the live wiring a form runs on, what it needs of the provider).
+
+    A plugin turns its orders round inside its own engine, so turned round
+    it is a different wiring - registered as NAME-INVERSA - and the money
+    manager is not told to turn them again (wire). A stop that moves needs a
+    provider that can move one.
+    """
+    name = spec['strategy']
+    if spec.get('inverse') and name in plugins.viewers():
+        name += '-INVERSA'
+    if name not in STRATEGIES:
+        return name, None
+    needs = tuple(STRATEGIES[name][2])
+    if (spec.get('trailing') == 1 or spec.get('trailProfit')) \
+            and 'stop_modify' not in needs:
+        needs += ('stop_modify',)
+    return name, needs
 
 
 def parse(argv):
@@ -231,16 +260,18 @@ def main(argv=None):
         args.no_shadow = True
     spec = fromForm(args.form) if args.form else None
     if spec is not None:
-        args.strategy = spec['strategy']
+        args.strategy, wanted = liveStrategy(spec)
         args.instruments = [spec['instrument']]
         args.granularity = spec['granularity']
-        if args.strategy not in STRATEGIES:
+        if wanted is None:
             print("%s cannot run on a live account: %s"
                   % (args.strategy, ", ".join(sorted(STRATEGIES))))
             return 2
     pairs = args.instruments or list(getattr(settings, 'DEF_PAIRS', ['EUR_USD']))
     granularity = args.granularity or getattr(settings, 'DEF_GRANULARITY', 'M1')
     strategy_class, needs, style = load_strategy(args.strategy)
+    if spec is not None:
+        needs = wanted
 
     print(plan(args, provider, pairs, granularity, needs))
     if args.strategy in RESEARCH_ONLY:
@@ -379,7 +410,9 @@ def wire(engine, provider, spec, args, strategy_class, style, pairs, granularity
             risk = ab_config.RISK_PER_TRADE
     else:
         kwargs = spec['strategyArgs'] or {}
-        scales = {'slScale': spec['slScale'], 'tpScale': spec['tpScale']}
+        scales = {'slScale': spec['slScale'], 'tpScale': spec['tpScale'],
+                  'inverse': spec['inverse'], 'trailing': spec['trailing'],
+                  'trailProfit': spec['trailProfit']}
         # the same two handlers backtest/ledger.py registers
         if spec['intraday']:
             rules.append(SessionCloser(

@@ -54,7 +54,7 @@ class LiveSessionsTest(unittest.TestCase):
 
     def test_started_read_and_stopped(self):
         with mock.patch.object(livesessions, 'SCRIPT', self.script):
-            started = self.live.start({'strategy': 'AB-INVERSA', 'balance': '1000'},
+            started = self.live.start({'strategy': 'AB', 'inverse': '1', 'balance': '1000'},
                                       [{'provider': 'ig', 'account': 'Z1'}])
         session = started[0]['id']
         # the backtest's capital, as every account's reference
@@ -83,7 +83,7 @@ class LiveSessionsTest(unittest.TestCase):
 
     def test_a_session_never_stopped_comes_back_after_a_restart(self):
         with mock.patch.object(livesessions, 'SCRIPT', self.script):
-            session = self.live.start({'strategy': 'AB-INVERSA'},
+            session = self.live.start({'strategy': 'AB', 'inverse': '1'},
                                       [{'provider': 'ig', 'account': 'Z1'}])[0]['id']
             # no capital and no backtest's: the default equity, on every account
             self.assertEqual(float(self.live.meta(session)['fields']['capital']),
@@ -289,16 +289,31 @@ class CheckTest(unittest.TestCase):
 
     def test_the_live_script_refusals_are_given_before_a_start(self):
         live = livesessions.LiveSessions(tempfile.mkdtemp())
-        base = {'strategy': 'AB-INVERSA', 'instrument': 'EUR_USD', 'granularity': 'H1'}
-        self.assertEqual(live.check(base, 'ig')['strategy'], 'AB-INVERSA')
+        base = {'strategy': 'AB', 'inverse': '1', 'instrument': 'EUR_USD',
+                'granularity': 'H1'}
+        self.assertEqual(live.check(base, 'ig')['strategy'], 'AB')
         # the clock rules AB's engine applies go live, the hours it has not
         self.assertEqual(live.check(dict(base, maxBars='5', intraday='1'), 'ig')['maxBars'], 5)
         with self.assertRaises(livesessions.LiveError):
             live.check(dict(base, session='07:00-16:00'), 'ig')
         # eToro expires orders itself (data/etoro.py), which is what AB needs
-        self.assertEqual(live.check(base, 'etoro')['strategy'], 'AB-INVERSA')
+        self.assertEqual(live.check(base, 'etoro')['strategy'], 'AB')
+        # AB goes live turned round only; the old name is AB turned round
         with self.assertRaises(livesessions.LiveError):
-            live.check(dict(base, strategy='AB'), 'ig')
+            live.check(dict(base, inverse=''), 'ig')
+        self.assertTrue(live.check(dict(base, strategy='AB-INVERSA', inverse=''),
+                                   'ig')['inverse'])
+        # its engine's stop moves are not sent to the account
+        with self.assertRaises(livesessions.LiveError):
+            live.check(dict(base, trailing='1'), 'ig')
+        # a stop that follows needs a provider that can move one: IG cannot
+        plain = {'strategy': 'AG01', 'instrument': 'EUR_USD', 'granularity': 'H1'}
+        live.check(plain, 'ig')
+        with self.assertRaises(livesessions.LiveError):
+            live.check(dict(plain, trailing='1'), 'ig')
+        with self.assertRaises(livesessions.LiveError):
+            live.check(dict(plain, trailProfit='1'), 'ig')
+        live.check(dict(plain, trailing='1'), 'oanda')
 
 
 if __name__ == '__main__':

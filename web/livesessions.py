@@ -196,10 +196,10 @@ class LiveSessions(object):
             raise LiveError(str(exc))
         except Exception as exc:
             raise LiveError(str(exc))
-        if spec['strategy'] not in script.STRATEGIES:
+        name, needs = script.liveStrategy(spec)
+        if needs is None:
             raise LiveError("%s has no live wiring; these do: %s"
-                            % (spec['strategy'], ", ".join(sorted(script.STRATEGIES))))
-        _module, _cls, needs, _style = script.STRATEGIES[spec['strategy']]
+                            % (name, ", ".join(sorted(script.STRATEGIES))))
         try:
             providers.require(providers.get_provider(provider), *needs)
         except providers.ProviderError as exc:

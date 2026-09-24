@@ -88,9 +88,33 @@
          strategy moves later is not scaled. Empty is 1 -->
     <label>SL &times; <input type="number" name="slScale" id="slScale" min="0.05" step="0.05" placeholder="1"></label>
     <label>TP &times; <input type="number" name="tpScale" id="tpScale" min="0.05" step="0.05" placeholder="1"></label>
+    <!--
+      How a trade is taken and let go, for whichever strategy is selected.
+      Each is a Y box and an N box: one run has one value, so ticking one
+      clears the other, and clearing both puts the default back.
+
+      inverti         every order turned round: buy for sell, a limit for a
+                      stop, stop and target swapped. With no target the
+                      target goes where the stop was and the stop as far the
+                      other way. Default N.
+      trailing stop   Y moves the stop with the price - the strategy's own
+                      ladder where it has one (FTW), the initial stop's
+                      distance where it has not; N never moves it. The
+                      default follows the strategy: Y for the FTWs, N for
+                      the rest.
+      trailing profit the target does not close the trade: once touched the
+                      stop goes there and follows the price. Default N.
+    -->
+    <span class="yn">inverti <span><label><input type="checkbox" id="inverse-y"> Y</label>
+      <label><input type="checkbox" id="inverse-n" checked> N</label></span></span>
+    <span class="yn">trailing stop <span><label><input type="checkbox" id="trailing-y"> Y</label>
+      <label><input type="checkbox" id="trailing-n" checked> N</label></span></span>
+    <span class="yn">trailing profit <span><label><input type="checkbox" id="trailProfit-y"> Y</label>
+      <label><input type="checkbox" id="trailProfit-n" checked> N</label></span></span>
     <label>hours UTC <input type="text" name="session" id="session"
                             placeholder="07:00-16:00" size="11"></label>
-    <label>intraday <input type="checkbox" name="intraday" id="intraday"></label>
+    <span class="yn">intraday <span><label><input type="checkbox" id="intraday-y"> Y</label>
+      <label><input type="checkbox" id="intraday-n" checked> N</label></span></span>
     <label>news -min <input type="number" name="newsBefore" id="newsBefore"
                             min="0" step="1" placeholder="0"></label>
     <label>+min <input type="number" name="newsAfter" id="newsAfter"

@@ -128,14 +128,17 @@ def descriptions():
 
 def defaults():
 	"""
-	strategy -> {instrument, granularity}: what the page selects when it is
-	picked. Read off the strategy - INSTRUMENT and GRANULARITY on a handler
-	class, the same keys on a plugin - like descriptions(), and for the same
-	reason. A strategy that declares neither gets no entry.
+	strategy -> {instrument, granularity, trailing}: what the page selects
+	when it is picked. Read off the strategy - INSTRUMENT, GRANULARITY and
+	TRAILING on a handler class, the same keys on a plugin - like
+	descriptions(), and for the same reason. TRAILING says the strategy walks
+	a stop of its own, so the page's trailing stop starts on for it. A
+	strategy that declares none of them gets no entry.
 	"""
+	keys = ('instrument', 'granularity', 'trailing')
 	out = {}
 	for name, plugin in plugins.viewers().items():
-		found = dict((k, plugin[k]) for k in ('instrument', 'granularity') if plugin.get(k))
+		found = dict((k, plugin[k]) for k in keys if plugin.get(k))
 		if found:
 			out[name] = found
 	for name in ledger.STRATEGIES:
@@ -143,7 +146,7 @@ def defaults():
 			handler = ledger.load_strategy(name)
 		except ledger.LedgerError:
 			continue
-		found = dict((k, getattr(handler, k.upper())) for k in ('instrument', 'granularity')
+		found = dict((k, getattr(handler, k.upper())) for k in keys
 					 if getattr(handler, k.upper(), None))
 		if found:
 			out[name] = found
@@ -825,7 +828,8 @@ class Service(object):
 	def key(self, instrument, granularity, strategy, dtfrom, dtto, units,
 			params=None, balance=None, risk=None, maxStopPips=None,
 			session=None, intraday=False, news=None, newsImpacts=None,
-			maxBars=None, strategyArgs=None, slScale=None, tpScale=None):
+			maxBars=None, strategyArgs=None, slScale=None, tpScale=None,
+			inverse=False, trailing=None, trailProfit=False):
 		# a plugin's parameters are part of the question, so they are part of
 		# the key. Leaving them out would serve the first combination asked
 		# for to every later request for a different one - and the same goes
@@ -836,7 +840,7 @@ class Service(object):
 				maxStopPips, session, bool(intraday), news,
 				tuple(newsImpacts) if newsImpacts else None, maxBars,
 				tuple(sorted(strategyArgs.items())) if strategyArgs else None,
-				slScale, tpScale)
+				slScale, tpScale, bool(inverse), trailing, bool(trailProfit))
 
 	def window(self, known, granularity):
 		for row in known['granularities']:
@@ -849,7 +853,8 @@ class Service(object):
 				 dtto=None, units=1, params=None, balance=None, risk=None,
 				 maxStopPips=None, session=None, intraday=False, news=None,
 				 newsImpacts=None, maxBars=None, strategyArgs=None,
-				 slScale=None, tpScale=None, cachedOnly=False, confirmed=False):
+				 slScale=None, tpScale=None, inverse=False, trailing=None,
+				 trailProfit=False, cachedOnly=False, confirmed=False):
 		"""
 		Run one backtest and return the payload the page reads. cachedOnly
 		answers from the cache or with None, and never starts a run: it is
@@ -876,7 +881,8 @@ class Service(object):
 
 		key = self.key(instrument, granularity, strategy, dtfrom, dtto, units,
 					   params, balance, risk, maxStopPips, session, intraday,
-					   news, newsImpacts, maxBars, strategyArgs, slScale, tpScale)
+					   news, newsImpacts, maxBars, strategyArgs, slScale, tpScale,
+				   inverse, trailing, trailProfit)
 		if key in self._cache or cachedOnly:
 			return self._cache.get(key)
 
@@ -938,7 +944,10 @@ class Service(object):
 							('slScale', 'SL x', slScale), ('tpScale', 'TP x', tpScale),
 							('maxStopPips', 'max stop', maxStopPips),
 							('session', 'hours', session), ('intraday', 'intraday', intraday),
-							('maxBars', 'max bars', maxBars), ('news', 'news', news)):
+							('maxBars', 'max bars', maxBars), ('news', 'news', news),
+						('inverse', 'inverse', inverse),
+						('trailing', 'trailing stop', trailing),
+						('trailProfit', 'trailing profit', trailProfit)):
 						if not value:
 							continue
 						if name not in takes:
@@ -959,6 +968,8 @@ class Service(object):
 										maxBars=maxBars,
 										strategyArgs=strategyArgs,
 										slScale=slScale, tpScale=tpScale,
+										inverse=inverse, trailing=trailing,
+										trailProfit=trailProfit,
 										progress=report)
 			except Cancelled as stopped:
 				# nothing is kept and nothing is cached: half a run drawn as a
@@ -1810,7 +1821,7 @@ NOT_PARAMS = ('pairs', 'granularity', 'pipSize')
 #: be read twice from the same key, so it is not offered
 FORM_FIELDS = ('instrument', 'granularity', 'strategy', 'from', 'to', 'units',
 			   'balance', 'risk', 'maxStop', 'maxBars', 'slScale', 'tpScale',
-			   'session', 'intraday',
+			   'session', 'intraday', 'inverse', 'trailing', 'trailProfit',
 			   'newsBefore', 'newsAfter', 'newsImpacts')
 
 
@@ -1920,6 +1931,19 @@ def parseScale(text, name):
 	return None if value == 1 else value
 
 
+#: what the name of a strategy turned round ended in, before `inverse`
+INVERSA = '-INVERSA'
+
+
+def parseSwitch(text, name):
+	"""'' for the strategy's own, '0' off, '1' on: None, 0 or 1."""
+	if text in (None, ''):
+		return None
+	if text not in ('0', '1'):
+		raise ServiceError("%s: %r is not empty, 0 or 1" % (name, text))
+	return int(text)
+
+
 def backtestArgs(get):
 	"""
 	The form as Service.backtest's keyword arguments. `get` takes a field
@@ -1931,6 +1955,11 @@ def backtestArgs(get):
 	if not instrument or not granularity:
 		raise ServiceError("instrument and granularity are both required")
 	strategy = get('strategy') or 'AG01'
+	inverse = get('inverse') in ('1', 'true', 'on')
+	# the saved runs and sweeps of before inverse was a rule of the account:
+	# AB-INVERSA was AB turned round, and is read as that
+	if strategy.endswith(INVERSA) and strategy[:-len(INVERSA)] in strategies():
+		strategy, inverse = strategy[:-len(INVERSA)], True
 	return dict(
 		instrument=instrument,
 		granularity=granularity,
@@ -1946,6 +1975,9 @@ def backtestArgs(get):
 		tpScale=parseScale(get('tpScale'), 'tpScale'),
 		session=parseSession(get('session')),
 		intraday=get('intraday') in ('1', 'true', 'on'),
+		inverse=inverse,
+		trailing=parseSwitch(get('trailing'), 'trailing'),
+		trailProfit=get('trailProfit') in ('1', 'true', 'on'),
 		news=parseNews(get('newsBefore'), get('newsAfter')),
 		newsImpacts=parseImpacts(get('newsImpacts')),
 		params=pluginParams(strategy, get),

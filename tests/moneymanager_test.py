@@ -602,6 +602,64 @@ class TestLevelScale(MoneyManagerCase):
         self.assertIsNone(self.scaled(sl=1.5, pips=12))
 
 
+class TestOrderShape(TestLevelScale):
+    """
+    inverse, trailing and trailProfit: rules about every order, on the same
+    fixture - a buy stop at 11700, stop 11690, target 11720.
+    """
+
+    def shaped(self, signal=None, **rules):
+        mm = MoneyManager(setup=self.settings, units=100, **rules)
+        mm.signals, mm.processed = {}, []
+        mm.onTrade = mm.orderIssued = False
+        mm.set_queue(self.sink)
+        mm.handleSignal(signal or self.signal())
+        return self.sink.of('ORDER')[0]
+
+    def test_inverse_sells_on_a_limit_with_stop_and_target_swapped(self):
+        order = self.shaped(inverse=True)
+        self.assertEqual(order.units, -100)
+        self.assertEqual(order.orderType, 'LIMIT')
+        self.assertEqual((order.stopLoss, order.takeProfit), (11720.0, 11690.0))
+
+    def test_inverse_mirrors_a_missing_target(self):
+        signal = self.signal()
+        signal.takeProfit = None
+        order = self.shaped(signal, inverse=True)
+        self.assertEqual((order.stopLoss, order.takeProfit), (11710.0, 11690.0))
+
+    def test_the_scales_stretch_the_inverse_bracket(self):
+        order = self.shaped(inverse=True, slScale=2)
+        self.assertAlmostEqual(order.stopLoss, 11740.0)
+
+    def test_trailing_0_takes_the_ladder_off(self):
+        signal = self.signal()
+        signal.trailStep, signal.timeStopBars = 5.0, 2
+        order = self.shaped(signal, trailing=0)
+        self.assertIsNone(getattr(order, 'trailStep', None))
+        self.assertIsNone(getattr(order, 'timeStopBars', None))
+
+    def test_trailing_1_follows_at_the_initial_distance_unless_there_is_a_ladder(self):
+        self.assertAlmostEqual(self.shaped(trailing=1).trailDistance, 10.0)
+        self.sink.events[:] = []
+        self.assertAlmostEqual(self.shaped(trailing=1, slScale=1.5).trailDistance, 15.0)
+        self.sink.events[:] = []
+        signal = self.signal()
+        signal.trailStep = 5.0
+        self.assertIsNone(getattr(self.shaped(signal, trailing=1), 'trailDistance', None))
+
+    def test_trail_profit_sends_no_target_and_carries_it(self):
+        order = self.shaped(trailProfit=True, tpScale=0.5)
+        self.assertIsNone(order.takeProfit)
+        self.assertAlmostEqual(order.trailTarget, 11710.0)
+
+    def test_none_of_them_is_the_order_as_it_was(self):
+        order = self.shaped()
+        self.assertEqual((order.units, order.orderType, order.takeProfit),
+                         (100, 'STOP', 11720.0))
+        self.assertIsNone(getattr(order, 'trailDistance', None))
+
+
 class TestSessionHours(MoneyManagerCase):
     """
     When this account decides, in UTC.

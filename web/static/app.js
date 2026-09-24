@@ -1746,9 +1746,38 @@ function strategyDefault() {
   return state.defaults[$('strategy').value] || {};
 }
 
+/* The account's flags, each a Y box and an N box (index.html). One run has
+   one value, so ticking one clears the other, and clearing the one ticked
+   puts the default back. The trailing stop's default is the strategy's:
+   on for those with a climbing stop of their own (api/stores defaults). */
+const FLAGS = ['intraday', 'inverse', 'trailing', 'trailProfit'];
+
+function flagDefault(name) {
+  return name === 'trailing' && strategyDefault().trailing === 1 ? '1' : '0';
+}
+
+function flag(name) {
+  return $(name + '-y').checked ? '1' : '0';
+}
+
+function setFlag(name, value) {
+  $(name + '-y').checked = value === '1';
+  $(name + '-n').checked = value !== '1';
+}
+
+for (const name of FLAGS) {
+  for (const [side, other] of [['y', 'n'], ['n', 'y']]) {
+    $(`${name}-${side}`).addEventListener('change', (event) => {
+      if (event.target.checked) $(`${name}-${other}`).checked = false;
+      else setFlag(name, flagDefault(name));
+    });
+  }
+}
+
 // Picking a strategy selects the instrument it is written for, when there is
 // a store for it, and onInstrument() then selects its timeframe.
 function applyDefaults() {
+  setFlag('trailing', flagDefault('trailing'));
   const select = $('instrument');
   const { instrument } = strategyDefault();
   if (instrument && Array.from(select.options).some((o) => o.value === instrument)) {
@@ -1880,10 +1909,13 @@ function formFields() {
     maxBars: $('maxBars').value,
     slScale: $('slScale').value,
     tpScale: $('tpScale').value,
+    inverse: flag('inverse'),
+    trailing: flag('trailing'),
+    trailProfit: flag('trailProfit'),
     // when this account trades: the hours a signal may be taken in, whether
     // it holds overnight, and how wide a hole the calendar makes
     session: $('session').value,
-    intraday: $('intraday').checked ? '1' : '',
+    intraday: flag('intraday'),
     newsBefore: $('newsBefore').value,
     newsAfter: $('newsAfter').value,
     newsImpacts: $('newsImpacts').value,
@@ -2018,6 +2050,12 @@ function fillForm(fields) {
         && !Array.from(field.options).some((o) => o.value === value)) return;
     field.value = value;
   };
+  // AB-INVERSA and the FTW ones were strategies before `inverse` was an
+  // option: an old run comes back as its strategy turned round
+  const alias = /^(.+)-INVERSA$/.exec(fields.strategy || '');
+  if (alias && Array.from($('strategy').options).some((o) => o.value === alias[1])) {
+    fields = { ...fields, strategy: alias[1], inverse: '1' };
+  }
   set('strategy', fields.strategy);
   onStrategy();
   applyDefaults();
@@ -2031,9 +2069,13 @@ function fillForm(fields) {
                     'newsBefore', 'newsAfter', 'newsImpacts']) {
     set(id, fields[id]);
   }
-  // a checkbox is not a value: a field that is absent is off, which is what
-  // a run that was never asked for it has to come back as
-  $('intraday').checked = fields.intraday === '1' || fields.intraday === true;
+  // a flag that is absent or empty is the default, which is what a run that
+  // was never asked for it has to come back as
+  for (const name of FLAGS) {
+    const value = String(fields[name] ?? '');
+    setFlag(name, value === '1' || value === 'true' ? '1'
+      : value === '0' || value === 'false' ? '0' : flagDefault(name));
+  }
 }
 
 /* -------------------------------------------------------------- listeners */

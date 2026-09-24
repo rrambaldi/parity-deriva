@@ -81,20 +81,32 @@ class Trailer(ExecutionHandler):
 
 		An order without a trailStep is somebody else's - AG01's brackets go
 		past here too - and is not remembered at all, so this component is
-		inert on a bus it has nothing to do with.
+		inert on a bus it has nothing to do with. Unless the account's rules
+		gave it a stop to follow (trailDistance) or a target to follow from
+		(trailTarget): see MoneyManager.trail.
 		"""
 		step = getattr(event, 'trailStep', None)
-		if step is None:
+		distance = _float(getattr(event, 'trailDistance', None))
+		target = _float(getattr(event, 'trailTarget', None))
+		if step is None and distance is None and target is None:
 			return
+		price = _float(getattr(event, 'price', None))
+		stop = _float(getattr(event, 'stopLoss', None))
 		key = (getattr(event, 'signalNumber', None), getattr(event, 'price', None))
 		self.ladders[key] = {
 			'instrument': getattr(event, 'instrument', None),
 			'units': float(getattr(event, 'units', 0) or 0),
-			'stop': _float(getattr(event, 'stopLoss', None)),
+			'stop': stop,
 			'step': _float(step),
 			'first': _float(getattr(event, 'trailFirst', None)),
 			'timeStopBars': int(getattr(event, 'timeStopBars', 0) or 0),
 			'timeStopOffset': _float(getattr(event, 'timeStopOffset', None)),
+			'distance': distance,
+			'target': target,
+			#: how far the stop follows once the target is reached: the
+			#: initial stop's distance, as the order was placed
+			'risk': abs(price - stop) if price is not None and stop is not None else None,
+			'floored': False,
 		}
 
 	def onFill(self, event):
@@ -185,7 +197,37 @@ class Trailer(ExecutionHandler):
 
 	def rung(self, trade, candle):
 		"""
-		Where the stop belongs after this bar, or None to leave it alone.
+		Where the stop belongs after this bar, or None to leave it alone: the
+		best of the ladder, the stop that follows and the target's floor,
+		whichever of them this trade carries.
+
+		The one that follows sits `distance` behind the bar's favourable
+		extreme. The floor starts once an extreme reaches the target: the stop
+		goes to the target and follows `risk` behind from there, so a trade
+		that reached its target never gives it back and one that runs on is
+		followed. onCandle's ratchet keeps the stop from ever loosening.
+		"""
+		long = trade['units'] > 0
+		sign = 1 if long else -1
+		best = candle.bid['h'] if long else candle.ask['l']
+		levels = [self.ladder(trade, candle)]
+		if trade['distance']:
+			levels.append(best - sign * trade['distance'])
+		if trade['target'] is not None:
+			if (best - trade['target']) * sign >= 0:
+				trade['floored'] = True
+			if trade['floored']:
+				levels.append(trade['target'])
+				if trade['risk']:
+					levels.append(best - sign * trade['risk'])
+		levels = [level for level in levels if level is not None]
+		if not levels:
+			return None
+		return max(levels) if long else min(levels)
+
+	def ladder(self, trade, candle):
+		"""
+		Where the strategy's own ladder puts the stop after this bar, or None.
 
 		The step count is read off the bar's favourable extreme on the side
 		the trade will exit against - a long exits by selling, so its progress

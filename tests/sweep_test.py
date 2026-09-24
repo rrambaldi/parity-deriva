@@ -47,6 +47,35 @@ class TestGrid(unittest.TestCase):
                                                'maxBars': '0'}.get(name))
 
 
+class TestOrderRules(unittest.TestCase):
+    """inverse, trailing and trailProfit, as backtestArgs reads the form."""
+
+    def args(self, **form):
+        form = dict({'instrument': 'X', 'granularity': 'H4', 'strategy': 'AG01'}, **form)
+        return service.backtestArgs(lambda name: form.get(name))
+
+    def test_empty_is_the_strategy_as_it_is(self):
+        got = self.args()
+        self.assertEqual((got['inverse'], got['trailing'], got['trailProfit']),
+                         (False, None, False))
+
+    def test_set(self):
+        got = self.args(inverse='1', trailing='0', trailProfit='1')
+        self.assertEqual((got['inverse'], got['trailing'], got['trailProfit']),
+                         (True, 0, True))
+        self.assertEqual(self.args(trailing='1')['trailing'], 1)
+
+    def test_trailing_is_empty_0_or_1(self):
+        with self.assertRaises(ServiceError):
+            self.args(trailing='2')
+
+    def test_an_old_inverse_name_is_the_strategy_turned_round(self):
+        got = self.args(strategy='AG01-INVERSA')
+        self.assertEqual((got['strategy'], got['inverse']), ('AG01', True))
+        # a name that only looks like one is left alone
+        self.assertEqual(self.args(strategy='NOPE-INVERSA')['strategy'], 'NOPE-INVERSA')
+
+
 class TestHandlerFields(unittest.TestCase):
 
     def test_numbers_set_through_set_are_the_form(self):

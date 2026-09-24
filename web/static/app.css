@@ -68,7 +68,7 @@ h1 {
 
 form { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
 
-label {
+label, .yn {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -77,6 +77,8 @@ label {
   letter-spacing: .06em;
   color: var(--dim);
 }
+/* a flag as a Y box and an N box, side by side under its name */
+.yn label { display: inline-flex; flex-direction: row; align-items: center; gap: 3px; }
 
 select, input, button {
   font: var(--font);

@@ -35,7 +35,14 @@
       <div id="grid-account">
         <label>max stop (pips) <input type="text" id="g-maxStop" placeholder="none"></label>
         <label>hours UTC <input type="text" id="g-session" placeholder="07:00-16:00, none" size="18"></label>
-        <label>intraday <input type="text" id="g-intraday" placeholder="0, 1" size="5"></label>
+        <span class="yn" title="close whatever is open when the day ends. Y and N: both">intraday <span><label><input type="checkbox" id="g-intraday-y"> Y</label>
+          <label><input type="checkbox" id="g-intraday-n" checked> N</label></span></span>
+        <span class="yn" title="every order turned round: buy for sell, stop and target swapped. Y and N: both">inverti <span><label><input type="checkbox" id="g-inverse-y"> Y</label>
+          <label><input type="checkbox" id="g-inverse-n" checked> N</label></span></span>
+        <span class="yn" title="the stop moves with the price; the default follows the strategy. Y and N: both">trailing stop <span><label><input type="checkbox" id="g-trailing-y"> Y</label>
+          <label><input type="checkbox" id="g-trailing-n" checked> N</label></span></span>
+        <span class="yn" title="the target does not close the trade: once touched the stop goes there and follows. Y and N: both">trailing profit <span><label><input type="checkbox" id="g-trailProfit-y"> Y</label>
+          <label><input type="checkbox" id="g-trailProfit-n" checked> N</label></span></span>
         <label>max bars <input type="text" id="g-maxBars" placeholder="none"></label>
         <label title="initial stop distance x this: 1 as the strategy, 1.5 half as far again">SL &times; <input type="text" id="g-slScale" placeholder="1" size="10"></label>
         <label title="initial target distance x this">TP &times; <input type="text" id="g-tpScale" placeholder="1" size="10"></label>

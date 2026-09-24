@@ -139,7 +139,43 @@ function granularities() {
   return row ? row.granularities : [];
 }
 
+/* The account's flags, each a Y box and an N box (sim.html): Y is '1', N is
+   '0', both is a run of each. Clearing the last one ticked puts the default
+   back. The trailing stop's default is the strategy's: on for those with a
+   climbing stop of their own (api/stores defaults). */
+const FLAGS = ['intraday', 'inverse', 'trailing', 'trailProfit'];
+
+function flagDefault(name) {
+  return name === 'trailing'
+    && (state.defaults[$('strategy').value] || {}).trailing === 1 ? '1' : '0';
+}
+
+function flagGrid(name) {
+  const y = $(`g-${name}-y`).checked, n = $(`g-${name}-n`).checked;
+  return y && n ? '0, 1' : y ? '1' : '0';
+}
+
+// from a grid's text, or one run's value: 'none' and '' are the default
+function fillFlag(name, text) {
+  const values = String(text ?? '').split(',').map((v) => v.trim().toLowerCase())
+    .map((v) => (v === '' || v === 'none' ? flagDefault(name) : v === 'true' ? '1' : v));
+  let y = values.includes('1'), n = values.includes('0');
+  if (!y && !n) [y, n] = flagDefault(name) === '1' ? [true, false] : [false, true];
+  $(`g-${name}-y`).checked = y;
+  $(`g-${name}-n`).checked = n;
+}
+
+for (const name of FLAGS) {
+  for (const side of ['y', 'n']) {
+    $(`g-${name}-${side}`).addEventListener('change', () => {
+      if (!$(`g-${name}-y`).checked && !$(`g-${name}-n`).checked) fillFlag(name, '');
+    });
+  }
+}
+
 function onStrategy() {
+  // a strategy picked puts its own trailing default back; fillForm runs after
+  fillFlag('trailing', '');
   const box = $('grid-strategy');
   box.textContent = '';
   for (const field of state.forms[$('strategy').value] || []) {
@@ -192,9 +228,10 @@ function gridFields() {
   for (const input of $('grid-strategy').querySelectorAll('input')) {
     grid[input.dataset.name] = input.value;
   }
-  for (const name of ['maxStop', 'session', 'intraday', 'maxBars', 'slScale', 'tpScale']) {
+  for (const name of ['maxStop', 'session', 'maxBars', 'slScale', 'tpScale']) {
     grid[name] = $('g-' + name).value;
   }
+  for (const name of FLAGS) grid[name] = flagGrid(name);
   return grid;
 }
 
@@ -209,6 +246,12 @@ function fromMainPage() {
 // the form from a set of fields: the main page's saved ones, or a sweep's
 // fixed fields with its grid over them
 function fillForm(f) {
+  // AB-INVERSA and the FTW ones were strategies before `inverse` was an
+  // option: an old set comes back as its strategy turned round
+  const alias = /^(.+)-INVERSA$/.exec(f.strategy || '');
+  if (alias && Array.from($('strategy').options).some((o) => o.value === alias[1])) {
+    f = { ...f, strategy: alias[1], inverse: '1' };
+  }
   if (Array.from($('strategy').options).some((o) => o.value === f.strategy)) {
     $('strategy').value = f.strategy;
     onStrategy();
@@ -225,9 +268,10 @@ function fillForm(f) {
   for (const input of $('grid-strategy').querySelectorAll('input')) {
     if (f[input.dataset.name] !== undefined) input.value = f[input.dataset.name];
   }
-  for (const name of ['maxStop', 'session', 'intraday', 'maxBars', 'slScale', 'tpScale']) {
+  for (const name of ['maxStop', 'session', 'maxBars', 'slScale', 'tpScale']) {
     if (f[name]) $('g-' + name).value = f[name];
   }
+  for (const name of FLAGS) fillFlag(name, f[name]);
 }
 
 let counting = null;
@@ -524,7 +568,7 @@ $('sim-rows').addEventListener('click', rowClick);
 function runFields(n) {
   const row = state.rows.find((r) => r.n === n);
   const fields = { ...state.fields, ...row.params };
-  if (fields.intraday === '0') delete fields.intraday;
+  for (const key of ['intraday', 'inverse', 'trailProfit']) if (fields[key] === '0') delete fields[key];
   for (const key of Object.keys(fields)) if (fields[key] === '') delete fields[key];
   return fields;
 }

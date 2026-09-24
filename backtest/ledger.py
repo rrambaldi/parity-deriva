@@ -115,7 +115,7 @@ def load_strategy(name):
 
 def moneyManager(units=1, setup=None, risk=None, balance=None,
 				 maxStopPips=None, session=None, calendar=None, slScale=None,
-				 tpScale=None):
+				 tpScale=None, inverse=False, trailing=None, trailProfit=False):
 	"""
 	A MoneyManager that remembers nothing from a previous run.
 
@@ -128,7 +128,8 @@ def moneyManager(units=1, setup=None, risk=None, balance=None,
 	mm = MoneyManager(setup=setup if setup is not None else settings, units=units,
 					  risk=risk, balance=balance, maxStopPips=maxStopPips,
 					  session=session, calendar=calendar, slScale=slScale,
-					  tpScale=tpScale)
+					  tpScale=tpScale, inverse=inverse, trailing=trailing,
+					  trailProfit=trailProfit)
 	mm.signals = {}
 	mm.processed = []
 	mm.onTrade = False
@@ -532,7 +533,8 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 		units=1, setup=None, source=None, balance=None, risk=None, fine=True,
 		maxStopPips=None, progress=None, session=None, intraday=False,
 		closeAt=None, news=None, newsImpacts=None, maxBars=None,
-		strategyArgs=None, slScale=None, tpScale=None):
+		strategyArgs=None, slScale=None, tpScale=None, inverse=False,
+		trailing=None, trailProfit=False):
 	"""
 	Replay stored candles through the whole offline stack and collect trades.
 
@@ -603,6 +605,11 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 	`slScale` and `tpScale` multiply the distance of the initial stop and
 	target from the entry (MoneyManager.scaleLevels); None leaves them.
 
+	`inverse` turns every order round, `trailing` is None for the strategy's
+	own stop, 0 for one that never moves and 1 for one that follows, and
+	`trailProfit` makes the target a floor the stop follows from: see
+	MoneyManager.turnRound and MoneyManager.trail.
+
 	`strategyArgs` are keyword arguments for the strategy's constructor -
 	the numbers it reads through _set() - or None for its own defaults.
 	"""
@@ -626,7 +633,9 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 	diary = _calendar(instrument, news, newsImpacts, cfg)
 	manager = moneyManager(units=units, setup=cfg, risk=risk, balance=balance,
 						   maxStopPips=maxStopPips, session=session,
-						   calendar=diary, slScale=slScale, tpScale=tpScale)
+						   calendar=diary, slScale=slScale, tpScale=tpScale,
+						   inverse=inverse, trailing=trailing,
+						   trailProfit=trailProfit)
 	# the cut the day ends at: what was asked for, the session's own end, or
 	# the end of the UTC day. Nothing here invents an hour of its own
 	closer = None
