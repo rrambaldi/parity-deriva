@@ -94,7 +94,6 @@
       <label>risk % <input type="number" id="new-risk" value="1" min="0.01" max="100" step="0.01"></label>
       <label title="lo stesso numero su ogni conto: un conto in USD (eToro) lo prende 1:1">capitale
         <input type="number" id="new-capital" min="1" step="any" required></label>
-      <label>capitale di riferimento <input type="number" id="new-capital" min="1" step="1" placeholder="tutto il saldo del conto" title="nella valuta del conto: il risk % è calcolato su questa cifra, non sul saldo, e ogni mese si aggiorna col P&L di questa sessione, come in simulazione. Vuoto = il saldo del conto"></label>
       <fieldset id="new-accounts"><legend>accounts</legend><p class="hint">reading the accounts&hellip;</p></fieldset>
       <button type="submit" id="new-start">start</button>
     </form>
