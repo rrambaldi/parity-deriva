@@ -1711,9 +1711,6 @@ function show(data) {
   state.sweepRef = where.get('sweep')
     ? { sweep: where.get('sweep'), run: Number(where.get('run')) } : null;
   renderStar();
-  const about = state.about[data.strategy] || '';
-  $('chart-about').textContent = about;
-  $('chart-about').hidden = !about;
   $('chart-title').textContent = (id ? `[${id}] ` : '')
     + `${data.strategy} on ${data.instrument} ${data.granularity}`
     // which bars the orders rested on, when they were not these ones: a run
@@ -2015,6 +2012,11 @@ async function start() {
     message('no run to show: open one from a simulation set', 'info');
     return;
   }
+  // by the strategy's name as the menus spell it: the payload's is the
+  // label, parameters and all
+  const about = state.about[unalias(saved.fields).strategy] || '';
+  $('chart-about').textContent = about;
+  $('chart-about').hidden = !about;
   let data = await post('api/backtest',
                         JSON.stringify({ ...saved.fields, cachedOnly: true }));
   if (data.cached === false && saved.sweep) {
