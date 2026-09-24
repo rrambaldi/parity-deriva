@@ -102,6 +102,8 @@ class Trailer(ExecutionHandler):
 			'timeStopBars': int(getattr(event, 'timeStopBars', 0) or 0),
 			'timeStopOffset': _float(getattr(event, 'timeStopOffset', None)),
 			'distance': distance,
+			#: the follower counts only once it reaches the entry (trailPips)
+			'fromEntry': bool(getattr(event, 'trailFromEntry', False)),
 			'target': target,
 			#: how far the stop follows once the target is reached: the
 			#: initial stop's distance, as the order was placed
@@ -215,13 +217,18 @@ class Trailer(ExecutionHandler):
 		goes to the target and follows `risk` behind from there, so a trade
 		that reached its target never gives it back and one that runs on is
 		followed. onCandle's ratchet keeps the stop from ever loosening.
+		A follower from break even (trailPips) starts once it reaches the
+		entry: until then the order's own stop holds.
 		"""
 		long = trade['units'] > 0
 		sign = 1 if long else -1
 		best = candle.bid['h'] if long else candle.ask['l']
 		levels = [self.ladder(trade, candle)]
 		if trade['distance']:
-			levels.append(best - sign * trade['distance'])
+			follower = best - sign * trade['distance']
+			if not trade.get('fromEntry') or trade.get('entry') is None \
+					or (follower - trade['entry']) * sign >= 0:
+				levels.append(follower)
 		if trade['target'] is not None:
 			if (best - trade['target']) * sign >= 0:
 				trade['floored'] = True

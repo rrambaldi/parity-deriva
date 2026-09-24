@@ -73,6 +73,22 @@ class TestStraddle(unittest.TestCase):
         self.assertEqual([round(e.price, 5) for e in sink.of('STOPMODIFY')], [1.2900])
 
 
+class TestFromEntry(TrailerCase):
+
+    def test_the_follower_starts_at_break_even_not_on_the_first_bar(self):
+        # entry 1.3000, stop 1.2900, following 40 pips from break even: a high
+        # of 1.3030 would put it at 1.2990, under the entry, so nothing moves;
+        # 1.3050 puts it at 1.3010, and from there it follows
+        stops = self.walk([(1.3030, 1.2990), (1.3050, 1.3020), (1.3100, 1.3060)],
+                          trailDistance=0.0040, trailFromEntry=True)
+        self.assertEqual(stops, [1.3010, 1.3060])
+
+    def test_a_short_from_break_even(self):
+        stops = self.walk([(1.3010, 1.2970), (1.2980, 1.2950)], units=-1,
+                          trailDistance=0.0040, trailFromEntry=True)
+        self.assertEqual(stops, [1.2990])
+
+
 class TestFloor(TrailerCase):
 
     def test_nothing_moves_before_the_target(self):

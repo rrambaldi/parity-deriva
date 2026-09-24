@@ -53,6 +53,7 @@
           <label><input type="checkbox" id="g-trailing-n" checked> N</label></span></span>
         <span class="yn" title="the target does not close the trade: once touched the stop goes there and follows. Y and N: both">trailing profit <span><label><input type="checkbox" id="g-trailProfit-y"> Y</label>
           <label><input type="checkbox" id="g-trailProfit-n" checked> N</label></span></span>
+        <label title="the stop follows the price this many pips behind, starting once that level reaches the entry (break even); until then the strategy's stop holds. Ignored when trailing stop is N only">trail (pips) <input type="text" id="g-trailPips" placeholder="none" size="10"></label>
         <label>max bars <input type="text" id="g-maxBars" placeholder="none"></label>
         <label title="initial stop distance x this: 1 as the strategy, 1.5 half as far again">SL &times; <input type="text" id="g-slScale" placeholder="1" size="10"></label>
         <label title="initial target distance x this">TP &times; <input type="text" id="g-tpScale" placeholder="1" size="10"></label>

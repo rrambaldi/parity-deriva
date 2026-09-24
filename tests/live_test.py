@@ -31,6 +31,18 @@ MOVING_STOP = ('parity_deriva.tests.helpers', 'MovingStopStrategy',
                ('bid_ask_candles', 'stop_modify'), 'pairs')
 
 
+class LiveStrategyTest(unittest.TestCase):
+    """A stop that follows needs a provider that can move one."""
+
+    def test_trail_pips_asks_for_stop_modify_unless_trailing_is_off(self):
+        base = {'strategy': 'AG01', 'inverse': False, 'trailing': None,
+                'trailProfit': False, 'trailPips': None}
+        self.assertNotIn('stop_modify', live.liveStrategy(base)[1])
+        self.assertIn('stop_modify', live.liveStrategy(dict(base, trailPips=40.0))[1])
+        self.assertNotIn('stop_modify',
+                         live.liveStrategy(dict(base, trailPips=40.0, trailing=0))[1])
+
+
 class FakeEngine(object):
 
     def __init__(self):

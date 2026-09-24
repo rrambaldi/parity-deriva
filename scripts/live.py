@@ -154,7 +154,8 @@ def fromForm(text):
         # its engine moves its stops inside the walk (ftw_ab/live.py) and
         # nothing sends those moves to the account
         for name, label in (('trailing', 'trailing stop'),
-                            ('trailProfit', 'trailing profit')):
+                            ('trailProfit', 'trailing profit'),
+                            ('trailPips', 'trail pips')):
             if spec.get(name):
                 raise SystemExit("%s runs its own engine, and live its stop "
                                  "does not move: leave %s empty"
@@ -177,8 +178,9 @@ def liveStrategy(spec):
     if name not in STRATEGIES:
         return name, None
     needs = tuple(STRATEGIES[name][2])
-    if (spec.get('trailing') == 1 or spec.get('trailProfit')) \
-            and 'stop_modify' not in needs:
+    follows = spec.get('trailing') == 1 or spec.get('trailProfit') \
+        or (spec.get('trailPips') and spec.get('trailing') != 0)
+    if follows and 'stop_modify' not in needs:
         needs += ('stop_modify',)
     return name, needs
 
@@ -412,7 +414,7 @@ def wire(engine, provider, spec, args, strategy_class, style, pairs, granularity
         kwargs = spec['strategyArgs'] or {}
         scales = {'slScale': spec['slScale'], 'tpScale': spec['tpScale'],
                   'inverse': spec['inverse'], 'trailing': spec['trailing'],
-                  'trailProfit': spec['trailProfit']}
+                  'trailProfit': spec['trailProfit'], 'trailPips': spec['trailPips']}
         # the same two handlers backtest/ledger.py registers
         if spec['intraday']:
             rules.append(SessionCloser(

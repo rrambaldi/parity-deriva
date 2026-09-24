@@ -115,7 +115,8 @@ def load_strategy(name):
 
 def moneyManager(units=1, setup=None, risk=None, balance=None,
 				 maxStopPips=None, session=None, calendar=None, slScale=None,
-				 tpScale=None, inverse=False, trailing=None, trailProfit=False):
+				 tpScale=None, inverse=False, trailing=None, trailProfit=False,
+				 trailPips=None):
 	"""
 	A MoneyManager that remembers nothing from a previous run.
 
@@ -129,7 +130,7 @@ def moneyManager(units=1, setup=None, risk=None, balance=None,
 					  risk=risk, balance=balance, maxStopPips=maxStopPips,
 					  session=session, calendar=calendar, slScale=slScale,
 					  tpScale=tpScale, inverse=inverse, trailing=trailing,
-					  trailProfit=trailProfit)
+					  trailProfit=trailProfit, trailPips=trailPips)
 	mm.signals = {}
 	mm.processed = []
 	mm.onTrade = False
@@ -534,7 +535,7 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 		maxStopPips=None, progress=None, session=None, intraday=False,
 		closeAt=None, news=None, newsImpacts=None, maxBars=None,
 		strategyArgs=None, slScale=None, tpScale=None, inverse=False,
-		trailing=None, trailProfit=False):
+		trailing=None, trailProfit=False, trailPips=None):
 	"""
 	Replay stored candles through the whole offline stack and collect trades.
 
@@ -608,7 +609,8 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 	`inverse` turns every order round, `trailing` is None for the strategy's
 	own stop, 0 for one that never moves and 1 for one that follows, and
 	`trailProfit` makes the target a floor the stop follows from: see
-	MoneyManager.turnRound and MoneyManager.trail.
+	MoneyManager.turnRound and MoneyManager.trail. `trailPips` is how far
+	behind the stop follows, in pips, instead of the initial stop's distance.
 
 	`strategyArgs` are keyword arguments for the strategy's constructor -
 	the numbers it reads through _set() - or None for its own defaults.
@@ -635,7 +637,7 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 						   maxStopPips=maxStopPips, session=session,
 						   calendar=diary, slScale=slScale, tpScale=tpScale,
 						   inverse=inverse, trailing=trailing,
-						   trailProfit=trailProfit)
+						   trailProfit=trailProfit, trailPips=trailPips)
 	# the cut the day ends at: what was asked for, the session's own end, or
 	# the end of the UTC day. Nothing here invents an hour of its own
 	closer = None

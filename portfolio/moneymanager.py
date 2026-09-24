@@ -146,6 +146,11 @@ class MoneyManager(ExecutionHandler):
 		self._set(args,'trailing')
 		self.trailProfit = False
 		self._set(args,'trailProfit')
+		# how far behind the price the stop follows, in pips, or None for the
+		# initial stop's distance. Apart from the initial stop: that one says
+		# when the trade was wrong, this one how much of a move to give back
+		self.trailPips = None
+		self._set(args,'trailPips')
 		#: the capital the risk is taken from, and the month it belongs to
 		self.capital = self.balance
 		self.month = _NEVER
@@ -324,6 +329,10 @@ class MoneyManager(ExecutionHandler):
 		leaves it alone; 1 gives an order that has none a stop that follows
 		the market at its initial distance.
 
+		trailPips: the stop follows that many pips behind instead, whatever
+		the initial stop's distance, from the bar that follower reaches the
+		entry (break even) on; with trailing 0 it does not follow.
+
 		trailProfit: the target is not sent - the broker holds no target -
 		and rides on the order as trailTarget, which the trailer raises the
 		stop to once the market gets there, following from then on.
@@ -335,6 +344,15 @@ class MoneyManager(ExecutionHandler):
 		if self.trailing == 0:
 			for key in LADDER:
 				ev.pop(key, None)
+		elif self.trailPips and price is not None:
+			# a distance of its own: it follows whatever else the order
+			# carries, the strategy's ladder included (Trailer.rung takes the
+			# tighter), and whatever `trailing` is short of 0
+			ev['trailDistance'] = self.trailPips * pipSize(ev.get('instrument'), self.setup)
+			# from break even: until the follower reaches the entry the
+			# strategy's own stop holds, or a 40 pip follower behind a 269
+			# pip stop would simply be a 40 pip stop from the first bar
+			ev['trailFromEntry'] = True
 		elif self.trailing == 1 and ev.get('trailStep') is None \
 				and price is not None and stop is not None:
 			ev['trailDistance'] = abs(float(price) - float(stop))

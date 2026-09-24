@@ -648,6 +648,22 @@ class TestOrderShape(TestLevelScale):
         signal.trailStep = 5.0
         self.assertIsNone(getattr(self.shaped(signal, trailing=1), 'trailDistance', None))
 
+    def test_trail_pips_is_a_distance_of_its_own_off_only_with_trailing_0(self):
+        from parity_deriva.lib.utils import pipSize
+        pip = pipSize('DE30_EUR', self.settings)
+        # the initial stop is 10 away; the stop follows 4 pips behind instead
+        order = self.shaped(trailPips=4)
+        self.assertAlmostEqual(order.trailDistance, 4 * pip)
+        self.assertTrue(order.trailFromEntry)
+        self.sink.events[:] = []
+        self.assertAlmostEqual(self.shaped(trailPips=4, trailing=1, slScale=2).trailDistance, 4 * pip)
+        self.sink.events[:] = []
+        signal = self.signal()
+        signal.trailStep = 5.0
+        self.assertAlmostEqual(self.shaped(signal, trailPips=4).trailDistance, 4 * pip)
+        self.sink.events[:] = []
+        self.assertIsNone(getattr(self.shaped(trailPips=4, trailing=0), 'trailDistance', None))
+
     def test_trail_profit_sends_no_target_and_carries_it(self):
         order = self.shaped(trailProfit=True, tpScale=0.5)
         self.assertIsNone(order.takeProfit)

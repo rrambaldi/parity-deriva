@@ -936,7 +936,7 @@ class Service(object):
 			params=None, balance=None, risk=None, maxStopPips=None,
 			session=None, intraday=False, news=None, newsImpacts=None,
 			maxBars=None, strategyArgs=None, slScale=None, tpScale=None,
-			inverse=False, trailing=None, trailProfit=False):
+			inverse=False, trailing=None, trailProfit=False, trailPips=None):
 		# a plugin's parameters are part of the question, so they are part of
 		# the key. Leaving them out would serve the first combination asked
 		# for to every later request for a different one - and the same goes
@@ -947,7 +947,7 @@ class Service(object):
 				maxStopPips, session, bool(intraday), news,
 				tuple(newsImpacts) if newsImpacts else None, maxBars,
 				tuple(sorted(strategyArgs.items())) if strategyArgs else None,
-				slScale, tpScale, bool(inverse), trailing, bool(trailProfit))
+				slScale, tpScale, bool(inverse), trailing, bool(trailProfit), trailPips)
 
 	def window(self, known, granularity):
 		for row in known['granularities']:
@@ -961,7 +961,7 @@ class Service(object):
 				 maxStopPips=None, session=None, intraday=False, news=None,
 				 newsImpacts=None, maxBars=None, strategyArgs=None,
 				 slScale=None, tpScale=None, inverse=False, trailing=None,
-				 trailProfit=False, cachedOnly=False, confirmed=False):
+				 trailProfit=False, trailPips=None, cachedOnly=False, confirmed=False):
 		"""
 		Run one backtest and return the payload the page reads. cachedOnly
 		answers from the cache or with None, and never starts a run: it is
@@ -989,7 +989,7 @@ class Service(object):
 		key = self.key(instrument, granularity, strategy, dtfrom, dtto, units,
 					   params, balance, risk, maxStopPips, session, intraday,
 					   news, newsImpacts, maxBars, strategyArgs, slScale, tpScale,
-				   inverse, trailing, trailProfit)
+				   inverse, trailing, trailProfit, trailPips)
 		if key in self._cache or cachedOnly:
 			return self._cache.get(key)
 
@@ -1054,7 +1054,8 @@ class Service(object):
 							('maxBars', 'max bars', maxBars), ('news', 'news', news),
 						('inverse', 'inverse', inverse),
 						('trailing', 'trailing stop', trailing),
-						('trailProfit', 'trailing profit', trailProfit)):
+						('trailProfit', 'trailing profit', trailProfit),
+						('trailPips', 'trail pips', trailPips)):
 						if not value:
 							continue
 						if name not in takes:
@@ -1077,6 +1078,7 @@ class Service(object):
 										slScale=slScale, tpScale=tpScale,
 										inverse=inverse, trailing=trailing,
 										trailProfit=trailProfit,
+										trailPips=trailPips,
 										progress=report)
 			except Cancelled as stopped:
 				# nothing is kept and nothing is cached: half a run drawn as a
@@ -1948,7 +1950,7 @@ NOT_PARAMS = ('pairs', 'granularity', 'pipSize')
 FORM_FIELDS = ('instrument', 'granularity', 'strategy', 'from', 'to', 'units',
 			   'balance', 'risk', 'maxStop', 'maxBars', 'slScale', 'tpScale',
 			   'session', 'intraday', 'inverse', 'trailing', 'trailProfit',
-			   'newsBefore', 'newsAfter', 'newsImpacts')
+			   'trailPips', 'newsBefore', 'newsAfter', 'newsImpacts')
 
 
 @functools.lru_cache(maxsize=None)
@@ -2104,6 +2106,7 @@ def backtestArgs(get):
 		inverse=inverse,
 		trailing=parseSwitch(get('trailing'), 'trailing'),
 		trailProfit=get('trailProfit') in ('1', 'true', 'on'),
+		trailPips=parsePips(get('trailPips'), 'trailPips'),
 		news=parseNews(get('newsBefore'), get('newsAfter')),
 		newsImpacts=parseImpacts(get('newsImpacts')),
 		params=pluginParams(strategy, get),

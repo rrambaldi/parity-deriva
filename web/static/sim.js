@@ -232,7 +232,7 @@ function gridFields() {
   for (const input of $('grid-strategy').querySelectorAll('input')) {
     grid[input.dataset.name] = input.value;
   }
-  for (const name of ['maxStop', 'session', 'maxBars', 'slScale', 'tpScale']) {
+  for (const name of ['maxStop', 'session', 'maxBars', 'slScale', 'tpScale', 'trailPips']) {
     grid[name] = $('g-' + name).value;
   }
   for (const name of FLAGS) grid[name] = flagGrid(name);
@@ -267,7 +267,7 @@ function fillForm(f) {
   for (const input of $('grid-strategy').querySelectorAll('input')) {
     if (f[input.dataset.name] !== undefined) input.value = f[input.dataset.name];
   }
-  for (const name of ['maxStop', 'session', 'maxBars', 'slScale', 'tpScale']) {
+  for (const name of ['maxStop', 'session', 'maxBars', 'slScale', 'tpScale', 'trailPips']) {
     if (f[name]) $('g-' + name).value = f[name];
   }
   for (const name of FLAGS) fillFlag(name, f[name]);

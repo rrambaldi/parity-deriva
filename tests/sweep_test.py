@@ -65,6 +65,12 @@ class TestOrderRules(unittest.TestCase):
                          (True, 0, True))
         self.assertEqual(self.args(trailing='1')['trailing'], 1)
 
+    def test_trail_pips_is_a_distance_or_nothing(self):
+        self.assertIsNone(self.args()['trailPips'])
+        self.assertEqual(self.args(trailPips='40')['trailPips'], 40.0)
+        with self.assertRaises(ServiceError):
+            self.args(trailPips='0')
+
     def test_trailing_is_empty_0_or_1(self):
         with self.assertRaises(ServiceError):
             self.args(trailing='2')
