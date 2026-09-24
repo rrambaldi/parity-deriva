@@ -50,10 +50,12 @@ the thanks.
   that looks fine and is not. `scripts/live.py` is one wiring for all of
   them. None of the four is a subset of another, which is why they are
   declared rather than ranked.
-* **Backtest viewer** - `scripts/web.py` serves a local page: the candles on
-  top, the trades under them in the order they opened, and clicking a trade
-  zooms the chart onto it with its entry, exit, stop and target drawn in. It
-  runs the offline stack on the local warehouse and contacts no broker.
+* **Simulation viewer** - `scripts/web.py` serves a local page: a strategy and
+  the values to try, one backtest per combination (one value in every field is
+  one backtest). Each run opens on its own page: the candles on top, the
+  trades under them in the order they opened, and clicking a trade zooms the
+  chart onto it with its entry, exit, stop and target drawn in. It runs the
+  offline stack on the local warehouse and contacts no broker.
 * **Audit trail** - every event is written to a JSONL log and can be replayed.
 * **Performance** - `performance/analyze.py` reports win/loss statistics,
   consecutive runs and three flavours of optimal *f* over the closed trades
@@ -844,10 +846,14 @@ that moves through a level, not a test.
 python scripts/web.py
 ```
 
-and open <http://127.0.0.1:8731>. Pick an instrument and a granularity - the
-dates default to what that store actually holds - and press run.
+and open <http://127.0.0.1:8731>: the simulate page. Pick a strategy, an
+instrument and a granularity - the dates default to what that store actually
+holds - and press simulate. With one value in every field that is one
+backtest; a list in a field is one backtest per value. `view` on a run's row
+opens it in full, `page` on a page of its own (`/run`). The data - stores,
+CSV imports, the economic calendar - is on the settings page (`/settings`).
 
-The chart is on top with the whole range on it. The trades are under it in the
+On the run's page the chart is on top with the whole range on it. The trades are under it in the
 order they opened, with the signal that produced each one, where it went in,
 where it came out, its stop, its target, and what it made. Click a row and the
 chart zooms onto that trade:
@@ -868,11 +874,12 @@ the same bar also reached the other one, which is the case
 `backtest/resolution.py` says a bar cannot settle and which
 `scripts/divergence_band.py` counts.
 
-The address bar holds the backtest, so a reload runs the same one and a link
-opens on the same trade:
+The address bar holds the run - its fields, and its set and number - so a
+reload shows the same one, from the service's cache or from the set on disk,
+and runs it again only when neither has it:
 
 ```
-http://127.0.0.1:8731/?instrument=EUR_USD&granularity=H1&strategy=AG01&from=2018-01-01&to=2018-03-03&trade=21
+http://127.0.0.1:8731/run?sweep=20260924-101500-a1b2c3&run=3&instrument=EUR_USD&granularity=H1&strategy=AG01&from=2018-01-01&to=2018-03-03
 ```
 
 Arrow keys (or `j` and `k`) walk through the trades, and `escape` goes back to
@@ -890,12 +897,10 @@ those. A plugin is a strategy that brings its own bar loop rather than riding
 the live stack's - because it opens several positions per signal, say, or
 moves a stop on a rule `MoneyManager` is not shaped for - and it is drawn the
 same way regardless: the same chart, the same trade table, the same report. A
-plugin may declare free parameters, and selecting it then reveals a form built
+plugin may declare free parameters, and selecting it then reveals fields built
 from what the strategy itself says they are, so the ranges stay where they
 belong instead of in a copy in the page; they are part of the cache key and of
-the deep link. Anything heavier than one run - a grid search, a walk-forward -
-stays on the plugin's own command line, because a few thousand runs behind an
-HTTP request is not a page, it is a timeout.
+the run's address. A walk-forward stays on the plugin's own command line.
 
 Not every strategy is published with this repository. `strategy/plugins.py` is
 the whole bridge: with nothing installed the engine runs the strategies above
@@ -1124,9 +1129,10 @@ per change of what is breached), so the page can show them. Nothing on the
 board is judged: there is no skew threshold to set until the numbers have
 been looked at.
 
-What goes live is a form somebody looked at the result of. A saved backtest
-(the star next to the chart title, or in the saved-runs dialog) and a run of
-a sweep (the star on its row of the simulate page) can be marked as a
+What goes live is a form somebody looked at the result of. A run of a sweep
+(the star on its row of the simulate page, or next to the title of its own
+page) and a backtest saved before the simulation was the home page can be
+marked as a
 **favourite**: `DATA_DIR/favourites.json` keeps the form, where it came from
 and a snapshot of what the simulation made (`/api/favourites`). The live
 page's strategy list is the favourites first, with that summary beside the

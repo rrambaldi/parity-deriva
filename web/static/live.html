@@ -65,20 +65,20 @@
       <th>started (UTC)</th><th>status</th><th>last bar</th>
       <th class="num">signals</th><th class="num">orders</th><th class="num">open</th>
       <th class="num">closed</th><th class="num">net</th><th></th></tr></thead>
-    <tbody id="live-rows"><tr class="empty"><td colspan="13">no session yet: start one below, or from the backtest page</td></tr></tbody>
+    <tbody id="live-rows"><tr class="empty"><td colspan="13">no session yet: start one below</td></tr></tbody>
     <tfoot id="live-foot"></tfoot>
   </table>
 </section>
 
 <!--
-  A session started from here rather than from a backtest: the strategy with
+  A session started from here: the strategy with
   its own default parameters, on every account ticked - one process per
   account, all in parallel (web/livesessions.start).
 -->
 <!--
   What goes live is a form somebody looked at the result of: the strategy
-  list is the favourites - saved backtests and sweep runs starred on their
-  own pages (api/favourites) - and the aside shows what that simulation
+  list is the favourites - sweep runs, and the saved backtests of before,
+  starred (api/favourites) - and the aside shows what that simulation
   made. The plain strategies, with their defaults and no simulation behind
   them, stay in a second group. "scegli tra le simulate" opens every saved
   run and sweep to pick from, starred or not.
@@ -111,8 +111,8 @@
     <button type="submit" aria-label="close">close</button>
   </form>
   <div id="sim-tabs">
-    <button type="button" data-tab="runs" aria-pressed="true">backtest salvati</button>
-    <button type="button" data-tab="sweeps" aria-pressed="false">simulazioni (sweep)</button>
+    <button type="button" data-tab="sweeps" aria-pressed="true">simulazioni (sweep)</button>
+    <button type="button" data-tab="runs" aria-pressed="false">backtest salvati</button>
   </div>
   <div id="sim-list"><p class="hint">leggo&hellip;</p></div>
   <p id="sim-message" class="hint" hidden></p>

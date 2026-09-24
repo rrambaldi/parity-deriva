@@ -283,23 +283,18 @@ assert.ok(!run(`progressLine({ instrument: 'X', granularity: 'H4',
   strategy: 'S', bars: 0, total: 0, at: null, balance: null })`).includes('NaN'),
   'a run that has not reported yet says nothing rather than NaN%');
 
-/*
- * The warning before a long run. It is asked in bars the simulator walks, not
- * in candles the chart draws, because that is what the wait is made of.
- */
-const ASK = run(`estimateQuestion({ instrument: 'EUR_USD', granularity: 'H4',
-  fine: 'M5', bars: 18873, ticks: 894875, seconds: 596.6, rate: 1500 })`);
-assert.ok(ASK.includes('894,875') && ASK.includes('M5') && ASK.includes('10 minutes'),
-  'how many bars, which fine series, and how long that is');
-assert.strictEqual(run('howLong(45)'), '45 seconds');
-assert.strictEqual(run('howLong(600)'), '10 minutes');
-assert.strictEqual(run('howLong(7200)'), '2.0 hours');
-
-/* the calendar line in the data dialog: what the file holds, or that there
-   is none. The collecting happens in another tab, on the site's own page. */
-assert.strictEqual(run('calendarLine(null)'), 'no calendar imported');
-assert.strictEqual(run('calendarLine({ events: 0 })'), 'no calendar imported');
-const CAL = run(`calendarLine({ events: 24310, from: 1420761600000,
+/* the calendar line on the settings page: what the file holds, or that there
+   is none. The collecting happens in another tab, on the site's own page.
+   settings.js is a page of its own, so it gets a context of its own */
+const settings = vm.createContext({ console, Math, Number, String, Array, JSON, Date, Object,
+  Promise, document: sandbox.document, fetch: sandbox.fetch, setTimeout: sandbox.setTimeout,
+  location: sandbox.location });
+vm.runInContext(fs.readFileSync(
+  path.join(__dirname, '..', 'web', 'static', 'settings.js'), 'utf8'), settings);
+const inSettings = (code) => vm.runInContext(code, settings);
+assert.strictEqual(inSettings('calendarLine(null)'), 'no calendar imported');
+assert.strictEqual(inSettings('calendarLine({ events: 0 })'), 'no calendar imported');
+const CAL = inSettings(`calendarLine({ events: 24310, from: 1420761600000,
   to: 1789689600000, impacts: { low: 12000, high: 4000, medium: 8310 } })`);
 assert.ok(CAL.includes('24,310 events') && CAL.includes('12000 low')
           && CAL.indexOf('12000 low') < CAL.indexOf('4000 high'),

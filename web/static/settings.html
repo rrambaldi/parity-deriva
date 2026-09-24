@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>parity-deriva settings</title>
+<!-- relative, like the other pages: see run.html -->
+<link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+
+<header>
+  <div id="brand">
+    <h1>parity-deriva &middot; settings</h1>
+  </div>
+</header>
+
+<!--
+  The candle exports waiting in IMPORT_DIR, a way to add one, and a way to
+  merge them all into the stores. The import is scripts/import_csv.py run by
+  the service, so its report here is what it prints on the command line.
+-->
+<section id="data-panel">
+  <!-- what the stores hold now: the series each one keeps, and the ones the
+       viewer builds from them (data/store.py) -->
+  <div id="data-loaded"></div>
+  <div id="data-dir"></div>
+  <table id="data-files">
+    <thead><tr><th><input type="checkbox" id="data-all" aria-label="select every set"></th><th>import set</th><th>instrument</th><th>tf</th><th>ASK</th><th>BID</th></tr></thead>
+    <tbody id="data-rows"></tbody>
+  </table>
+  <div id="data-actions">
+    <label>upload CSV
+      <input type="file" id="data-file" accept=".csv,text/csv" multiple>
+    </label>
+    <button type="button" id="data-upload">upload</button>
+    <button type="button" id="data-import">import selected</button>
+  </div>
+  <!--
+    The economic calendar. Collected by the browser and not by the service:
+    the site refuses a datacentre address after a handful of requests, and
+    your own browser on the calendar page is already allowed to read it -
+    see static/ff-calendar.js, which is what "copy the collector" copies.
+    Nothing is sent to forexfactory from here.
+  -->
+  <div id="calendar-box">
+    <strong>economic calendar</strong>
+    <div id="calendar-state">no calendar imported</div>
+    <ol id="calendar-how">
+      <li>open <a href="https://www.forexfactory.com/calendar" target="_blank"
+                  rel="noopener">forexfactory.com/calendar</a></li>
+      <li>press F12, open the console, paste the collector, press enter</li>
+      <li>leave the tab alone: the weeks arrive here as they are read</li>
+      <li>if the push is refused it downloads <code>calendar.csv</code>
+          instead - choose it below and import it by hand</li>
+    </ol>
+    <div id="calendar-actions">
+      <!--
+        Which week the collector starts at. Filled in with the day the stores
+        start while the history is missing, and with the day after the last
+        event once it is there, so pasting the script a second time reads the
+        weeks since rather than the years again.
+      -->
+      <label>from <input type="date" id="calendar-from"></label>
+      <button type="button" id="calendar-copy">copy the collector</button>
+      <label>calendar CSV
+        <input type="file" id="calendar-file" accept=".csv,text/csv">
+      </label>
+      <button type="button" id="calendar-import">import calendar</button>
+    </div>
+  </div>
+  <div id="data-progress-box" hidden>
+    <progress id="data-progress" max="1" value="0"></progress>
+    <span id="data-progress-text"></span>
+  </div>
+  <pre id="data-log" hidden></pre>
+</section>
+
+<script src="static/menu.js"></script>
+<script src="static/settings.js"></script>
+</body>
+</html>

@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>parity-deriva run</title>
+<!--
+  Relative, not absolute. Served at the root this resolves to /static/app.css;
+  served behind a reverse proxy at /parity/ it resolves to /parity/static/app.css
+  and needs no configuration on either side. The one thing it does need is the
+  trailing slash on the prefix, which is why the nginx block redirects /parity
+  to /parity/ - without it the browser resolves these against / and asks the
+  wrong server for them.
+-->
+<link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+
+<!--
+  One run in full: a run of a simulation set, opened from the simulate page
+  (in its dialog with ?embed=1, or on its own), or a live form. What it is
+  comes in the address - the fields, and the set and number when it is one -
+  and nothing here starts a run of its own: see start() in app.js.
+-->
+<header>
+  <div id="brand">
+    <h1>parity-deriva &middot; run</h1>
+  </div>
+</header>
+
+<dialog id="help-dialog">
+  <form method="dialog" class="dialog-head">
+    <strong>reading the chart</strong>
+    <button type="submit" aria-label="close">close</button>
+  </form>
+  <ul id="help-list">
+    <li>every trade is marked with an arrow saying which way it was taken, and a click anywhere on the chart zooms onto the nearest one - as does a click on the capital curve, which goes to the trade that made that step</li>
+    <li>hovering a bar reads out its four prices and how far it travelled, high to low, in pips</li>
+    <li>the wheel zooms and dragging moves sideways once the chart is zoomed</li>
+    <li>the selected trade gets an arrow from its entry to its exit, coloured by what it made, and a box around the candles its entry rule read</li>
+    <li>support and resistance are bands, not lines: the width is what decides that two swings are one level and that a bar touched it, and each is drawn from the bar that confirmed it and never from the swing itself</li>
+    <li>the strip right under the candles has the curves that are not on the price axis, and the one below it has the levels on their own</li>
+    <li>times are UTC</li>
+    <li>zooming in past a point redraws the same window on a finer series - the candles change timeframe, the trades and the curves do not: they stay the strategy's, placed by time and stepped across the finer bars</li>
+    <li>the orders were already filled on the finest series the store holds, whatever the strategy read</li>
+    <li>the thin whiskers on a zoomed chart are the ask high and the bid low, which are the prices the fill rule reads</li>
+  </ul>
+</dialog>
+
+<p id="message" hidden></p>
+
+<section id="chart-panel">
+  <!--
+    The title is a title: what was run, on what, over what, and nothing else
+    on its line. Everything that is a control or a readout lives in the row
+    under it, which is free to wrap without pushing the title around.
+  -->
+  <div id="chart-head">
+    <span id="chart-title">no run yet</span>
+    <!-- the run starred as a favourite: one of the forms the live page trades.
+         Hidden until what is on show is something saved, see renderStar() -->
+    <button type="button" id="fav-star" class="fav-star" aria-pressed="false" title="segna come preferita" hidden>&#9734;</button>
+  </div>
+  <div id="chart-tools">
+    <span id="chart-zoom"></span>
+    <span id="slope-note"></span>
+    <!--
+      What the chart is drawn at, which is not what the run was made on. The
+      backtest keeps the strategy's own bars; this only changes how finely the
+      same stretch of market is drawn, so zooming in opens a four hour candle
+      into the five minute bars the order actually rested in. `auto` follows
+      the zoom and never goes coarser than the run.
+    -->
+    <label id="detail-box" hidden>detail <select id="detail"></select></label>
+    <button type="button" id="levels" aria-pressed="true">support &amp; resistance</button>
+    <!--
+      RG2 - the slope reading, shaded onto the candles. The button cycles the
+      threshold rather than switching one on: the threshold is what is being
+      decided, and the only way to decide it is to see the same bars under
+      each of them. Hidden for a run too short for SMA(100) to warm up.
+    -->
+    <button type="button" id="slope" aria-pressed="false" hidden>slope</button>
+    <!-- walk the trades one at a time; each press zooms the chart onto it -->
+    <button type="button" id="trade-prev" hidden title="previous trade">&#9664; trade</button>
+    <button type="button" id="trade-next" hidden title="next trade">trade &#9654;</button>
+    <button type="button" id="reset" hidden>show the whole range</button>
+  </div>
+  <!--
+    What the run's strategy says it does, from its own DESCRIPTION rather
+    than from a copy kept here - see web/service.py.
+  -->
+  <p id="chart-about" hidden></p>
+  <!--
+    The selected trade, spelled out: the same figures as its row in the table
+    below, over the chart they are drawn on. It has its own line rather than
+    sharing the header's readout because that one follows the cursor - a
+    trade's numbers would be wiped by the first bar hovered after it.
+  -->
+  <p id="chart-trade" hidden></p>
+  <canvas id="chart" height="420"></canvas>
+
+  <!--
+    The curves that are not on the price axis, on the same bars as the chart
+    above and under it. An ATR of 0.004 drawn next to a price of 1.2 does not
+    read as a low line - it drags the price scale down to zero and flattens
+    every candle into a hair, which is why the strategy's declaration says which
+    axis a curve is on and this strip exists to hold the other one.
+  -->
+  <section id="curve-panel" hidden>
+    <details id="curve-box" open>
+      <summary id="curve-head">
+        <span id="curve-title">indicators on their own scale</span>
+        <span id="curve-note"></span>
+      </summary>
+      <canvas id="curve-chart" height="110"></canvas>
+    </details>
+  </section>
+
+  <!--
+    The levels on their own: the same confirmed swings the chart draws, over the
+    whole run and without candles on top of them, with the price each one sits
+    at and how many bars came back to it. Closed until asked for - it answers a
+    different question from the one the chart above answers.
+  -->
+  <section id="levels-panel" hidden>
+    <details id="levels-box">
+      <summary id="levels-head">
+        <span id="levels-title">support &amp; resistance</span>
+        <span id="levels-note"></span>
+      </summary>
+      <canvas id="levels-chart" height="240"></canvas>
+    </details>
+  </section>
+
+  <details id="legend-box" open>
+  <summary>legend</summary>
+  <!-- the curves this strategy declared, named and coloured by app.js -->
+  <p class="legend" id="curves" hidden></p>
+  <p class="legend">
+    <span class="k buy">buy</span>
+    <span class="k sell">sell</span>
+    <span class="k entry">entry</span>
+    <span class="k exit">exit</span>
+    <span class="k tp">take profit</span>
+    <span class="k sl">stop loss</span>
+    <span class="k trail">stop moved to</span>
+    <span class="k resistance">resistance</span>
+    <span class="k won">trade won</span>
+    <span class="k lost">trade lost</span>
+    <span class="k setup">setup bars</span>
+    <span class="k support">support</span>
+    <span class="k up">slope up</span>
+    <span class="k down">slope down</span>
+    <button type="button" id="help-open" aria-label="how to read the chart">?</button>
+  </p>
+  </details>
+</section>
+
+<section id="report-panel" hidden>
+  <div id="report"></div>
+  <div id="counts"></div>
+</section>
+
+<!--
+  The capital over the run: the account balance after each trade that closed,
+  drawn as a step because that is when the balance actually moves. Its own
+  panel under the report rather than a second series on the price chart - the
+  two have nothing in common on the y axis.
+-->
+<section id="equity-panel" hidden>
+  <!--
+    Opened and closed by the browser rather than by a listener of our own:
+    <details> is already a disclosure button, and the only thing app.js has to
+    add is a redraw when it opens - a canvas measured while it is hidden has
+    no width to draw into.
+  -->
+  <details id="equity-box" open>
+    <summary id="equity-head">
+      <span id="equity-title">capital</span>
+      <span id="equity-note"></span>
+    </summary>
+    <canvas id="equity" height="200"></canvas>
+  </details>
+</section>
+
+<section id="trades-panel">
+  <table id="trades">
+    <thead>
+      <tr>
+        <th>#</th><th>signal</th><th>side</th><th class="num">size</th>
+        <th>entry</th><th class="num">at</th>
+        <th>exit</th><th class="num">at</th>
+        <th class="num">stop</th><th class="num">target</th>
+        <th>outcome</th><th class="num">P&amp;L</th><th class="num">cumulative</th>
+      </tr>
+    </thead>
+    <tbody id="trade-rows">
+      <tr class="empty"><td colspan="13">open a run from the simulate page to see its trades</td></tr>
+    </tbody>
+  </table>
+  <!-- a page of rows at a time: thousands of rows rebuilt on every click
+       is what froze the page -->
+  <div id="trade-pager" hidden>
+    <button type="button" id="page-prev">&lsaquo; prev</button>
+    <span id="page-info"></span>
+    <button type="button" id="page-next">next &rsaquo;</button>
+  </div>
+</section>
+
+<script src="static/menu.js"></script>
+<script src="static/app.js"></script>
+</body>
+</html>

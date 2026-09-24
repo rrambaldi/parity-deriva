@@ -99,7 +99,7 @@ function renderTable() {
   if (!state.sessions.length) {
     const td = body.insertRow().insertCell();
     td.colSpan = 13;
-    td.textContent = 'no session yet: start one below, or from the backtest page';
+    td.textContent = 'no session yet: start one below';
     return;
   }
   let running = 0;
@@ -532,7 +532,7 @@ function newSay(text) {
  * picked from the "simulate" dialog whether starred or not, or a plain
  * strategy's name.
  */
-const pick = { stores: null, favourites: [], chosen: null, tab: 'runs', job: null };
+const pick = { stores: null, favourites: [], chosen: null, tab: 'sweeps', job: null };
 
 const num = (v, d = 2) => (v === null || v === undefined || Number.isNaN(Number(v))) ? '—' : Number(v).toFixed(d);
 const pct = (v) => v === null || v === undefined ? '—' : `${Number(v).toFixed(1)}%`;
@@ -581,7 +581,7 @@ function fillStrategies() {
   }
   const plain = document.createElement('optgroup');
   plain.label = pick.favourites.length ? 'tutte le strategie (senza simulazione)'
-    : 'strategie (nessuna preferita: segna un backtest o una simulazione con ★)';
+    : 'strategie (nessuna preferita: segna un run di una simulazione con ★)';
   for (const name of pick.stores.strategies) plain.appendChild(new Option(name, 'plain:' + name));
   select.appendChild(plain);
   select.value = !c ? select.options[0].value
@@ -631,7 +631,7 @@ function renderSummary() {
     const p = document.createElement('p');
     p.className = 'hint';
     p.textContent = 'nessuna simulazione dietro questa scelta: la strategia parte con i suoi '
-      + 'default. Per andare live su un form provato, segna un backtest o una simulazione con ★, '
+      + 'default. Per andare live su un form provato, segna un run di una simulazione con ★, '
       + 'oppure scegli tra le simulate.';
     box.appendChild(p);
     box.appendChild(paramsBlock(c.fields));
@@ -673,11 +673,14 @@ function renderSummary() {
   box.appendChild(paramsBlock(c.fields));
   const link = document.createElement('a');
   link.className = 'open-backtest';
-  link.href = './?' + new URLSearchParams(Object.fromEntries(
-    Object.entries(c.fields).filter(([, v]) => v !== null && v !== undefined && v !== ''))).toString();
+  // a run of a set is found on disk by set and number; a saved run by its fields
+  link.href = 'run?' + new URLSearchParams({
+    ...(c.source.kind === 'sweep' ? { sweep: c.source.id, run: c.source.n } : {}),
+    ...Object.fromEntries(Object.entries(c.fields)
+      .filter(([, v]) => v !== null && v !== undefined && v !== '')) }).toString();
   link.target = '_blank';   // the live page stays where it was
   link.rel = 'noopener';
-  link.textContent = 'apri nel backtest ↗';
+  link.textContent = 'apri il run ↗';
   const foot = document.createElement('p');
   foot.className = 'hint';
   foot.textContent = 'il form va live com\'è stato simulato; strumento, timeframe e rischio qui sopra restano tuoi da cambiare';

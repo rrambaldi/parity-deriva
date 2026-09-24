@@ -234,15 +234,10 @@ canvas {
 #legend-box > summary { cursor: pointer; width: max-content; }
 #help-open { padding: 0 7px; border-radius: 50%; line-height: 18px; }
 #help-dialog { width: min(640px, calc(100vw - 32px)); }
+#data-panel { margin: 16px auto; }
 #help-list { margin: 0; padding-left: 18px; line-height: 1.5; }
 #help-list li + li { margin-top: 6px; }
 
-#runs-table { width: 100%; border-collapse: collapse; }
-#runs-table th, #runs-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
-#runs-table th { color: var(--dim); font-weight: normal; }
-#runs-table .num { text-align: right; }
-#runs-rows tr[data-id] { cursor: pointer; }
-#runs-rows tr[data-id]:hover td { background: #1d222b; }
 #trade-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 8px; color: var(--dim); }
 #report-panel { display: flex; flex-wrap: wrap; gap: 24px; padding-top: 0; }
 #report, #counts { display: flex; flex-wrap: wrap; gap: 18px; }
@@ -288,8 +283,9 @@ tbody tr.empty:hover { background: none; }
 .pl.good { color: var(--up); }
 .pl.bad { color: var(--down); }
 
-/* the data dialog: the exports waiting, and the import's own report */
-#data-dialog, #help-dialog, #runs-dialog, #ask-dialog, #sets-dialog, #analysis-dialog, #live-dialog, #sim-dialog {
+/* the dialogs, and the settings page's data panel that looks like one:
+   the exports waiting, and the import's own report */
+#data-panel, #help-dialog, #ask-dialog, #sets-dialog, #analysis-dialog, #sim-dialog {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
@@ -297,7 +293,7 @@ tbody tr.empty:hover { background: none; }
   padding: 12px 16px;
   width: min(760px, calc(100vw - 32px));
 }
-#data-dialog::backdrop, #help-dialog::backdrop, #runs-dialog::backdrop, #ask-dialog::backdrop, #sets-dialog::backdrop, #analysis-dialog::backdrop, #live-dialog::backdrop, #sim-dialog::backdrop { background: rgba(0, 0, 0, .55); }
+#help-dialog::backdrop, #ask-dialog::backdrop, #sets-dialog::backdrop, #analysis-dialog::backdrop, #sim-dialog::backdrop { background: rgba(0, 0, 0, .55); }
 .dialog-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
 .dialog-head button { margin-left: auto; }
 /* the yes or no asked before a long run, see askUser() */
@@ -318,7 +314,6 @@ tbody tr.empty:hover { background: none; }
 /* the title row: the name on the left, the page's own buttons on the
    right, short of the menu; the controls on the row under it */
 #brand { display: flex; align-items: center; width: 100%; }
-#runs-open { margin-left: auto; }
 #data-files { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
 #data-files th, #data-files td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
 #data-files th { color: var(--dim); font-weight: normal; }
@@ -342,14 +337,14 @@ tbody tr.empty:hover { background: none; }
 
 /* ------------------------------------------------------------ simulate */
 
-/* the strategy's own parameters on the backtest page, and the values to try
+/* the values to try
    on the simulate page: a box of fields on a line of their own */
-#params, #grid {
+#grid {
   display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
   flex-basis: 100%;
   border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px 10px;
 }
-#params legend, #grid legend { color: var(--dim); font-size: 11px; padding: 0 4px; }
+#grid legend { color: var(--dim); font-size: 11px; padding: 0 4px; }
 #grid-strategy, #grid-account { display: flex; flex-wrap: wrap; gap: 12px; }
 #grid-account { border-left: 1px solid var(--line); padding-left: 12px; }
 .hint { text-transform: none; letter-spacing: 0; }
@@ -370,7 +365,6 @@ tbody tr.empty:hover { background: none; }
   #grid-account { border-left: 0; padding-left: 0; }
   #sim-table-panel { overflow-x: auto; }
 }
-#params[hidden] { display: none; }
 /* the results alone, inside the simulate page's run dialog */
 .embed header { display: none; }
 #sim-table-panel { overflow-x: auto; }
@@ -389,15 +383,15 @@ tbody tr.empty:hover { background: none; }
 .set-delete:hover { border-color: var(--down); }
 #sets-open { margin-left: auto; }
 
-/* one run of a set, full page, with the backtest page inside */
+/* one run of a set, full page, with the run page inside */
 #run-dialog { width: calc(100vw - 24px); height: calc(100vh - 24px); max-width: none;
   max-height: none; padding: 8px 12px 12px; display: none; flex-direction: column;
   background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
 #run-dialog[open] { display: flex; }
 #run-dialog::backdrop { background: rgba(0, 0, 0, .6); }
 #run-dialog .dialog-head { margin-bottom: 8px; }
-#run-backtest { margin-left: auto; }
-#run-backtest + button { margin-left: 0; }
+#run-page { margin-left: auto; }
+#run-page + button { margin-left: 0; }
 #run-frame { flex: 1; width: 100%; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); }
 
 /* the KPI comparison: a verdict colour always comes with its mark */
@@ -423,15 +417,6 @@ tbody tr.empty:hover { background: none; }
 #analysis-body ul { margin: 2px 0 6px; padding-left: 20px; }
 .analysis-summary { font-weight: bold; }
 
-/* going live, from the backtest page */
-.nav-link { color: var(--dim); text-decoration: none; border: 1px solid var(--line);
-  border-radius: 4px; padding: 3px 8px; margin-left: 8px; }
-.nav-link:hover { border-color: var(--entry); color: var(--text); }
-#live-targets fieldset { border: 1px solid var(--line); border-radius: 4px; margin: 6px 0; padding: 4px 10px 8px; }
-#live-targets legend { color: var(--dim); padding: 0 4px; }
-#live-targets label { display: block; padding: 2px 0; cursor: pointer; }
-#live-targets .hint, #live-dialog .hint { color: var(--dim); margin: 2px 0; }
-#live-message { color: var(--down); }
 
 /* the live page */
 #live-clock { margin-left: 12px; }
@@ -530,13 +515,13 @@ tbody tr.empty:hover { background: none; }
 #new-summary .hint { margin-top: 8px; }
 #new-summary h5 { margin: 10px 0 4px; font-size: inherit; }
 #new-summary dd.hint { margin-top: 0; }
-/* the way back to the backtest this form came from: a button, not a word in the hint */
+/* the way back to the run this form came from: a button, not a word in the hint */
 #new-summary a.open-backtest { display: inline-block; margin-top: 10px; padding: 5px 10px; color: var(--entry);
   border: 1px solid var(--entry); border-radius: 4px; text-decoration: none; }
 #new-summary a.open-backtest:hover { background: var(--entry); color: var(--bg); }
 #new-summary a.open-backtest:focus-visible { outline: 2px solid var(--entry); outline-offset: 2px; }
 #sim-dialog td.params { font-size: 0.85em; color: var(--dim); max-width: 360px; }
-/* the favourites dialog on the live page: the runs table's look, see #runs-table */
+/* the favourites dialog on the live page: the sets table's look */
 #sim-dialog { width: min(980px, calc(100vw - 32px)); }
 #sim-dialog table { width: 100%; border-collapse: collapse; }
 #sim-dialog th, #sim-dialog td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }

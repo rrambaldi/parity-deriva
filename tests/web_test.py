@@ -1859,11 +1859,17 @@ class CollectorTest(HTTPCase):
 class HTTPTest(HTTPCase):
     """The routes."""
 
-    def test_the_page_is_served(self):
-        status, body, headers = self.get('/')
-        self.assertEqual(status, 200)
-        self.assertIn('text/html', headers['Content-Type'])
-        self.assertIn(b'<canvas id="chart"', body)
+    def test_the_pages_are_served(self):
+        # the simulation is the home page; one run has a page of its own
+        for path, mark in (('/', b'<canvas id="sim-equity"'),
+                           ('/sim', b'<canvas id="sim-equity"'),
+                           ('/run', b'<canvas id="chart"'),
+                           ('/settings', b'<table id="data-files"'),
+                           ('/live', b'<table id="live-table"')):
+            status, body, headers = self.get(path)
+            self.assertEqual(status, 200, path)
+            self.assertIn('text/html', headers['Content-Type'])
+            self.assertIn(mark, body, path)
 
     def test_the_assets_are_served(self):
         for path, kind in (('/static/app.js', 'javascript'),

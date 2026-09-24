@@ -15,7 +15,6 @@ const PROGRESS_MS = 600;
 // the same threshold app.js warns at, times the number of runs
 const TICK_WARNING = 25000;
 const AXIS = { left: 92, right: 14, top: 12, bottom: 22 };
-const RUN_KEY = 'parity-deriva.run';   // app.js's saved form, see saveRun()
 // the columns after the parameters, as report fields
 const STATS = [
   ['trades', (r) => r.report.closedTrades, String],
@@ -220,6 +219,8 @@ function fixedFields() {
     strategy: $('strategy').value, instrument: $('instrument').value,
     granularity: $('granularity').value, from: $('from').value,
     to: $('to').value, risk: $('risk').value, balance: $('balance').value,
+    newsBefore: $('newsBefore').value, newsAfter: $('newsAfter').value,
+    newsImpacts: $('newsImpacts').value,
   };
 }
 
@@ -235,16 +236,7 @@ function gridFields() {
   return grid;
 }
 
-// the main page's last form, when this tab has one: the sweep usually
-// starts from the run just looked at
-function fromMainPage() {
-  let saved = null;
-  try { saved = JSON.parse(sessionStorage.getItem(RUN_KEY) || 'null'); } catch (e) { /* none */ }
-  if (saved && saved.fields) fillForm(saved.fields);
-}
-
-// the form from a set of fields: the main page's saved ones, or a sweep's
-// fixed fields with its grid over them
+// the form from a sweep's fixed fields with its grid over them
 function fillForm(f) {
   // AB-INVERSA and the FTW ones were strategies before `inverse` was an
   // option: an old set comes back as its strategy turned round
@@ -265,6 +257,10 @@ function fillForm(f) {
     onGranularity();
   }
   for (const id of ['from', 'to', 'risk', 'balance']) if (f[id]) $(id).value = f[id];
+  // a set made before these were on this page had no news rule
+  $('newsBefore').value = f.newsBefore || '';
+  $('newsAfter').value = f.newsAfter || '';
+  $('newsImpacts').value = f.newsImpacts || 'high';
   for (const input of $('grid-strategy').querySelectorAll('input')) {
     if (f[input.dataset.name] !== undefined) input.value = f[input.dataset.name];
   }
@@ -541,7 +537,7 @@ function actions(more = []) {
   const td = document.createElement('td');
   td.className = 'run-actions';
   for (const [name, title] of [['view', 'this run in full, here'],
-                               ['backtest', 'this run on the backtest page'], ...more]) {
+                               ['page', 'this run on a page of its own'], ...more]) {
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.action = name;
@@ -563,7 +559,7 @@ function rowClick(event) {
   }
   const action = event.target.dataset.action;
   if (action === 'view') return openRun(n);
-  if (action === 'backtest') return openBacktest(n);
+  if (action === 'page') return openPage(n);
   if (action === 'analisi') return openAnalysis(n);
   state.pinned = state.pinned === n ? null : n;
   state.pick = n;
@@ -581,7 +577,7 @@ $('sim-thead').addEventListener('click', (event) => {
 
 $('sim-rows').addEventListener('click', rowClick);
 
-// one run's fields, as the backtest page's form spells them
+// one run's fields, as the run page reads them from its address
 function runFields(n) {
   const row = state.rows.find((r) => r.n === n);
   const fields = { ...state.fields, ...row.params };
@@ -590,31 +586,30 @@ function runFields(n) {
   return fields;
 }
 
-// the run on the backtest page itself, with the page's saved form set to it
-function openBacktest(n) {
-  try {
-    // sweep and run: see start() in app.js
-    sessionStorage.setItem(RUN_KEY, JSON.stringify({
-      fields: runFields(n), trade: null, sweep: state.job.id, run: n }));
-  } catch (e) { /* none */ }
-  location.href = './';
+// where one run is drawn: the run page, with the set and number that find it
+// on disk once the service has let its cache go, instead of running it again
+function runAddress(n, extra = {}) {
+  return 'run?' + new URLSearchParams({
+    ...extra, ...(state.job.id ? { sweep: state.job.id, run: n } : {}), ...runFields(n) });
 }
 
-// the run in a full page dialog: the backtest page, results only
+// the run on a page of its own
+function openPage(n) {
+  location.href = runAddress(n);
+}
+
+// the run in a full page dialog: the run page, results only
 function openRun(n) {
   const row = state.rows.find((r) => r.n === n);
   if (!row || row.error) return;
   const dialog = $('run-dialog');
   dialog.dataset.n = n;
   $('run-title').textContent = `${runId(n)} ${paramsText(row.params)}`;
-  // sweep and run: where the page finds it on disk once the service has
-  // let its cache go, instead of running it again
-  $('run-frame').src = './?' + new URLSearchParams({
-    embed: '1', ...(state.job.id ? { sweep: state.job.id, run: n } : {}), ...runFields(n) });
+  $('run-frame').src = runAddress(n, { embed: '1' });
   dialog.showModal();
 }
 
-$('run-backtest').addEventListener('click', () => openBacktest(Number($('run-dialog').dataset.n)));
+$('run-page').addEventListener('click', () => openPage(Number($('run-dialog').dataset.n)));
 // an emptied frame stops drawing, and a run reopened starts from its top
 $('run-dialog').addEventListener('close', () => { $('run-frame').src = 'about:blank'; });
 
@@ -1110,7 +1105,6 @@ async function start() {
   fill($('strategy'), stores.strategies || []);
   fill($('instrument'), state.instruments.map((r) => r.instrument));
   onStrategy();
-  fromMainPage();
   countLater();
   // not awaited: the stars can wait, the table cannot wait on them
   loadFavourites().catch((error) => message(String(error.message || error)));

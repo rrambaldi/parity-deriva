@@ -1447,7 +1447,7 @@ class Service(object):
 	# share the candles between runs if the disk ever minds
 	def saveSweepRun(self, sweep, n, payload):
 		"""
-		One run of a sweep as the backtest page draws it, in the sweep's own
+		One run of a sweep as the run page draws it, in the sweep's own
 		folder: its dialog reopens it after a restart, instead of running it
 		again. Goes with the sweep when it is deleted.
 		"""
@@ -2186,10 +2186,14 @@ class Handler(BaseHTTPRequestHandler):
 		query = urllib.parse.parse_qs(parsed.query)
 
 		try:
-			if route in ('/', '/index.html'):
-				return self.sendFile('index.html')
-			if route == '/sim':
+			# the simulation is the home page: one run is a set of one. /sim
+			# is kept for the links made before it was
+			if route in ('/', '/sim'):
 				return self.sendFile('sim.html')
+			if route == '/run':
+				return self.sendFile('run.html')
+			if route == '/settings':
+				return self.sendFile('settings.html')
 			if route == '/live':
 				return self.sendFile('live.html')
 			if route == '/api/live':
@@ -2364,8 +2368,6 @@ class Handler(BaseHTTPRequestHandler):
 				# the id the run is saved under: the runs dialog lists it
 				return self.sendJSON(dict(payload, runId=self.service.runId(form))
 									 if payload is not None else {'cached': False})
-			if route == '/api/backtest/stop':
-				return self.sendJSON(self.service.stop())
 			if route == '/api/sweep':
 				try:
 					length = int(self.headers.get('Content-Length') or 0)

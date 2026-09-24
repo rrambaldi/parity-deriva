@@ -34,9 +34,7 @@ const state = {
   selected: null,    // index into data.trades
   hover: null,       // index into data.candles
   decimals: 5,
-  forms: {},         // strategy -> its parameter fields, from /api/stores
   about: {},         // strategy -> what it says it does, from /api/stores
-  defaults: {},      // strategy -> {instrument, granularity} it is written for
   levels: true,      // draw the swing levels, toggled by the button
   slope: 0,          // 0 = no shading, else the threshold's place in the list
   detail: 'auto',    // the granularity the chart draws at, or 'auto'
@@ -46,17 +44,16 @@ const state = {
   swings: [],        // the levels of the current payload, see levelsOf()
   swingsFor: null,   // the payload they were computed from
   runId: null,       // the saved run on show, if it is one
-  sweepRef: null,    // {sweep, run} when embedded from the simulate page
+  sweepRef: null,    // {sweep, run} when it is a run of a simulation set
   favourites: [],    // the forms starred to trade live, from /api/favourites
 };
 
 const $ = (id) => document.getElementById(id);
 
 /*
- * The results alone, for the simulate page: it opens one run of a sweep in a
- * full page dialog with this page inside it (?embed=1&<fields>), so the
- * chart, the report and the trades are one mask and not two copies of it.
- * The form is still here - hidden - because it is what a run is made from.
+ * Inside the simulate page's run dialog (?embed=1): the same page without
+ * its header and menu, so the chart, the report and the trades are one mask
+ * and not two copies of it.
  */
 const EMBED = new URLSearchParams(location.search).has('embed');
 if (EMBED) document.documentElement.classList.add('embed');
@@ -1541,7 +1538,6 @@ function select(index) {
   renderTrades();
   draw();
   drawEquity();
-  saveRun();
   // and the page stays where it is. It used to scroll the table's row into
   // view, which took the chart that had just zoomed onto the trade off the
   // screen - the row is marked where it is, and the figures are over the
@@ -1593,7 +1589,6 @@ function resetView() {
   renderTrades();
   draw();
   drawEquity();
-  saveRun();
 }
 
 function message(text, kind) {
@@ -1615,54 +1610,6 @@ function message(text, kind) {
  * run is what matters.
  */
 const PROGRESS_MS = 600;
-
-/*
- * Runs worth warning about before they are started.
- *
- * Counted in bars the simulator will walk and not in candles the chart will
- * draw: a year of H4 is 1 616 candles and 75 000 M5 bars under them, and it
- * is the second number that decides whether the answer is back in ten
- * seconds or in ten minutes. Twenty-five thousand of them is a few seconds
- * today, which is about where a wait stops being free.
- */
-const TICK_WARNING = 25000;
-
-function howLong(seconds) {
-  if (seconds < 90) return `${Math.round(seconds)} seconds`;
-  if (seconds < 5400) return `${Math.round(seconds / 60)} minutes`;
-  return `${(seconds / 3600).toFixed(1)} hours`;
-}
-
-function estimateQuestion(ahead) {
-  const chart = ahead.limit && ahead.bars > ahead.limit
-    ? `\n\nThe chart will hold ${ahead.bars.toLocaleString()} ${ahead.granularity}`
-      + ` candles, over the ${ahead.limit.toLocaleString()} it is meant for:`
-      + ` the page will be slow to load and to draw.`
-    : '';
-  return `This run walks ${ahead.ticks.toLocaleString()} bars`
-    + (ahead.fine
-        ? ` - ${ahead.bars.toLocaleString()} ${ahead.granularity} candles and the`
-          + ` ${ahead.fine} bars its orders rest on`
-        : ` of ${ahead.granularity}`)
-    + `.\n\nAt the ${ahead.rate.toLocaleString()} bars a second the last run`
-    + ` managed, that is about ${howLong(ahead.seconds)}.`
-    + chart
-    + `\n\nRun it anyway?`;
-}
-
-/*
- * A yes or no asked on the page. confirm() is the browser's own box, which
- * cannot be styled, blocks the tab, and some browsers offer to silence.
- */
-function askUser(text) {
-  const dialog = $('ask-dialog');
-  $('ask-text').textContent = text;
-  dialog.returnValue = '';
-  dialog.showModal();
-  $('ask-yes').focus();
-  return new Promise((resolve) => dialog.addEventListener('close',
-    () => resolve(dialog.returnValue === 'yes'), { once: true }));
-}
 
 function progressLine(p) {
   const share = p.total ? Math.min(100, 100 * p.bars / p.total) : null;
@@ -1714,255 +1661,42 @@ async function ask(url) {
   return payload;
 }
 
-// The strategies the service will run, read from it rather than listed here:
-// a list in this file is a list that is wrong the day one is added.
-function fill(select, values) {
-  select.textContent = '';
-  for (const value of values) {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = value;
-    select.appendChild(option);
-  }
-}
-
 /*
- * Some strategies have free parameters of their own. The controls for them
- * are built from what the service sends rather than written out here: the
- * ranges live in the strategy's own configuration, and a second copy in this
- * file is a copy that is wrong the first time one of them changes. This page
- * does not know which strategy has parameters, or what any of them mean.
+ * The stores and what each strategy says it does: the first for the ladder
+ * of timeframes the chart can zoom through, the second for the line over
+ * it. Read from the service rather than listed here, where they would drift.
  */
-function buildForms(forms) {
-  state.forms = forms || {};
-  onStrategy();
-}
-
-function currentForm() {
-  return state.forms[$('strategy').value] || null;
-}
-
-function strategyDefault() {
-  return state.defaults[$('strategy').value] || {};
-}
-
-/* The account's flags, each a Y box and an N box (index.html). One run has
-   one value, so ticking one clears the other, and clearing the one ticked
-   puts the default back. The trailing stop's default is the strategy's:
-   on for those with a climbing stop of their own (api/stores defaults). */
-const FLAGS = ['intraday', 'inverse', 'trailing', 'trailProfit'];
-
-function flagDefault(name) {
-  return name === 'trailing' && strategyDefault().trailing === 1 ? '1' : '0';
-}
-
-function flag(name) {
-  return $(name + '-y').checked ? '1' : '0';
-}
-
-function setFlag(name, value) {
-  $(name + '-y').checked = value === '1';
-  $(name + '-n').checked = value !== '1';
-}
-
-for (const name of FLAGS) {
-  for (const [side, other] of [['y', 'n'], ['n', 'y']]) {
-    $(`${name}-${side}`).addEventListener('change', (event) => {
-      if (event.target.checked) $(`${name}-${other}`).checked = false;
-      else setFlag(name, flagDefault(name));
-    });
-  }
-}
-
-// Picking a strategy selects the instrument it is written for, when there is
-// a store for it, and onInstrument() then selects its timeframe.
-function applyDefaults() {
-  setFlag('trailing', flagDefault('trailing'));
-  const select = $('instrument');
-  const { instrument } = strategyDefault();
-  if (instrument && Array.from(select.options).some((o) => o.value === instrument)) {
-    select.value = instrument;
-  }
-  onInstrument();
-}
-
-function onStrategy() {
-  // what the strategy says it does, from /api/stores. Shown on the menu
-  // rather than on the run, so it can be read before deciding to run it.
-  const about = $('chart-about');
-  const text = state.about[$('strategy').value] || '';
-  about.textContent = text;
-  about.hidden = !text;
-
-  const form = currentForm();
-  const box = $('params');
-  box.textContent = '';
-  box.hidden = !form;
-  if (!form) return;
-  const legend = document.createElement('legend');
-  legend.textContent = 'parameters';
-  box.appendChild(legend);
-  for (const field of form) box.appendChild(control(field));
-}
-
-/*
- * A menu when the strategy named the values it accepts, a number box when it
- * gave a range instead - a bit field with thirty-one useful values is a range,
- * and a menu of thirty-one entries is unreadable.
- */
-function control(field) {
-  const label = document.createElement('label');
-  label.textContent = field.label + ' ';
-  let input;
-  if (field.choices) {
-    input = document.createElement('select');
-    fill(input, field.choices);
-  } else {
-    input = document.createElement('input');
-    input.type = 'number';
-    for (const bound of ['min', 'max', 'step']) {
-      if (field[bound] !== undefined) input[bound] = String(field[bound]);
-    }
-  }
-  input.id = field.name;
-  input.value = String(field.value);
-  label.appendChild(input);
-  return label;
-}
-
-function formParams(params) {
-  const form = currentForm();
-  if (!form) return params;
-  for (const field of form) params.set(field.name, $(field.name).value);
-  return params;
-}
-
 async function loadStores() {
-  const { instruments, strategies, params, equity, descriptions, defaults }
-    = await ask('api/stores');
-  state.instruments = instruments;
-  if (equity !== undefined && equity !== null) $('balance').value = equity;
+  const { instruments, descriptions } = await ask('api/stores');
+  state.instruments = instruments || [];
   state.about = descriptions || {};
-  state.defaults = defaults || {};
-  fill($('strategy'), strategies || []);
-  buildForms(params);
-  const select = $('instrument');
-  select.textContent = '';
-  if (!instruments.length) {
-    message(`No stores in the data directory. data/bulksaver.py fills it.`);
-    return;
-  }
-  for (const row of instruments) {
-    const option = document.createElement('option');
-    option.value = row.instrument;
-    option.textContent = row.instrument;
-    option.dataset.granularities = JSON.stringify(row.granularities);
-    select.appendChild(option);
-  }
-  select.onchange = onInstrument;
-  applyDefaults();
 }
 
-function onInstrument() {
-  const option = $('instrument').selectedOptions[0];
-  if (!option) return;
-  const rows = JSON.parse(option.dataset.granularities);
-  const select = $('granularity');
-  select.textContent = '';
-  for (const row of rows) {
-    const item = document.createElement('option');
-    item.value = row.granularity;
-    item.textContent = `${row.granularity} (${row.bars} bars, ${day(row.from)} .. ${day(row.to)}${row.derivedFrom ? `, built from ${row.derivedFrom}` : ''})`;
-    item.dataset.from = row.from;
-    item.dataset.to = row.to;
-    select.appendChild(item);
-  }
-  // The timeframe the strategy is written for when this store offers it,
-  // H1 otherwise: the coarsest series that is not a daily one, whose bar
-  // count fits a chart.
-  const options = Array.from(select.options);
-  const preferred = options.find((o) => o.value === strategyDefault().granularity)
-    || options.find((o) => o.value === 'H1');
-  if (preferred) preferred.selected = true;
-  select.onchange = onGranularity;
-  onGranularity();
+// AB-INVERSA and the FTW ones were strategies before `inverse` was an
+// option: an old run is run again as its strategy turned round
+function unalias(fields) {
+  const alias = /^(.+)-INVERSA$/.exec(fields.strategy || '');
+  return alias ? { ...fields, strategy: alias[1], inverse: '1' } : fields;
 }
 
-function onGranularity() {
-  const option = $('granularity').selectedOptions[0];
-  if (!option) return;
-  $('from').value = day(Number(option.dataset.from));
-  $('to').value = day(Number(option.dataset.to));
-}
-
-/* The form as the service reads it, plugin parameters included. */
-function formFields() {
-  return Object.fromEntries(formParams(new URLSearchParams({
-    instrument: $('instrument').value,
-    granularity: $('granularity').value,
-    strategy: $('strategy').value,
-    from: $('from').value,
-    to: $('to').value,
-    risk: $('risk').value,
-    balance: $('balance').value,
-    maxStop: $('maxStop').value,
-    maxBars: $('maxBars').value,
-    slScale: $('slScale').value,
-    tpScale: $('tpScale').value,
-    inverse: flag('inverse'),
-    trailing: flag('trailing'),
-    trailProfit: flag('trailProfit'),
-    // when this account trades: the hours a signal may be taken in, whether
-    // it holds overnight, and how wide a hole the calendar makes
-    session: $('session').value,
-    intraday: flag('intraday'),
-    newsBefore: $('newsBefore').value,
-    newsAfter: $('newsAfter').value,
-    newsImpacts: $('newsImpacts').value,
-  })));
-}
-
-async function run(event, extra) {
-  if (event) event.preventDefault();
-  const fields = formFields();
-  // how big the job is, before anybody waits for it. A failure here is not
-  // a reason not to run: the estimate is a courtesy, the run is the point.
-  // Embedded, the sweep already asked and ran it, so it is not asked again
-  if (EMBED) fields.confirmed = true;
-  else try {
-    const ahead = await ask('api/estimate?' + new URLSearchParams({
-      instrument: fields.instrument, granularity: fields.granularity,
-      from: fields.from, to: fields.to }).toString());
-    const wide = ahead.limit && ahead.bars > ahead.limit;
-    if (ahead.ticks > TICK_WARNING || wide) {
-      if (!await askUser(estimateQuestion(ahead))) { message(''); return; }
-      // said yes to the size, so the service is not to refuse it after all
-      if (wide) fields.confirmed = true;
-    }
-  } catch (error) { /* no estimate, no warning, still a run */ }
-
-  $('run').disabled = true;
-  $('stop').hidden = false;
-  $('stop').disabled = false;
+async function run(fields, extra) {
   message('running the backtest…', 'info');
   const stop = watchProgress();
   try {
-    // extra: a run of a set being made again, see start()
-    show(await post('api/backtest', JSON.stringify({ ...fields, ...extra })), fields);
+    // extra: a run of a set being made again, kept with the set this time
+    show(await post('api/backtest', JSON.stringify(
+      { ...unalias(fields), ...extra, confirmed: true })));
     message('');
   } catch (error) {
     message(String(error.message || error));
   } finally {
     stop();
-    $('stop').hidden = true;
-    $('run').disabled = false;
   }
 }
 
 /* A backtest's payload on the page, whether just run or redrawn. */
-function show(data, fields) {
+function show(data) {
   state.data = data;
-  state.fields = fields;
   state.decimals = decimalsOf(data.candles);
   state.view = null;
   state.selected = null;
@@ -1972,11 +1706,14 @@ function show(data, fields) {
   $('chart-trade').hidden = true;
   // the run's id: a set's run as set/number, any other as the saved run's
   const where = new URLSearchParams(location.search);
-  const id = EMBED && where.get('sweep') ? `${where.get('sweep')}/${where.get('run')}` : data.runId;
+  const id = where.get('sweep') ? `${where.get('sweep')}/${where.get('run')}` : data.runId;
   state.runId = data.runId || null;
-  state.sweepRef = EMBED && where.get('sweep')
+  state.sweepRef = where.get('sweep')
     ? { sweep: where.get('sweep'), run: Number(where.get('run')) } : null;
   renderStar();
+  const about = state.about[data.strategy] || '';
+  $('chart-about').textContent = about;
+  $('chart-about').hidden = !about;
   $('chart-title').textContent = (id ? `[${id}] ` : '')
     + `${data.strategy} on ${data.instrument} ${data.granularity}`
     // which bars the orders rested on, when they were not these ones: a run
@@ -1995,93 +1732,25 @@ function show(data, fields) {
   draw();
   drawEquity();
   drawLevels();
-  saveRun();
 }
 
-/* ---------------------------------------------------------------- reload */
+/* ------------------------------------------------------------- address */
 
 /*
- * The last run lives in this tab's sessionStorage, not in the address bar.
- * A reload refills the form with it and asks the service for the payload it
- * still has cached (cachedOnly), so a refresh redraws the run and never
- * starts one. Storage can be missing or refuse (a private window): then a
- * reload is an empty page, which is what it was before there was a run.
+ * The run on show is the address: its fields, and the set and number when it
+ * is a run of a simulation set (the simulate page's links). A reload is the
+ * same run, asked of the service's cache or of the disk, never a new form.
  */
-const RUN_KEY = 'parity-deriva.run';
-
-function saveRun() {
-  if (!state.data || !state.fields) return;
-  const trade = state.selected === null ? null : state.data.trades[state.selected].n;
-  // embedded, this tab's saved form belongs to the page around it
-  if (EMBED) return;
-  try {
-    sessionStorage.setItem(RUN_KEY, JSON.stringify({ fields: state.fields, trade }));
-  } catch (error) { /* no storage, no reload - the run itself is unaffected */ }
-}
-
-function savedRun() {
-  if (EMBED) {
-    const params = new URLSearchParams(location.search);
-    const { sweep, run } = Object.fromEntries(params);
-    for (const key of ['embed', 'sweep', 'run']) params.delete(key);
-    return { fields: Object.fromEntries(params), trade: null, sweep, run };
-  }
-  try {
-    const saved = JSON.parse(sessionStorage.getItem(RUN_KEY) || 'null');
-    if (saved && saved.fields && saved.fields.instrument) return saved;
-  } catch (error) { /* nothing usable */ }
-  // a link from before the page kept its state here: read once, then the
-  // address bar is cleaned so the next reload does not see it again
+function fromAddress() {
   const params = new URLSearchParams(location.search);
+  const { sweep, run } = Object.fromEntries(params);
+  for (const key of ['embed', 'sweep', 'run', 'trade']) params.delete(key);
   if (!params.get('instrument')) return null;
-  history.replaceState(null, '', location.pathname);
-  const trade = Number(params.get('trade'));
-  params.delete('trade');
-  return { fields: Object.fromEntries(params), trade: trade > 0 ? trade : null };
-}
-
-/* The form, refilled in its own order: the strategy's defaults first, then
-   the saved values instead. */
-function fillForm(fields) {
-  const set = (id, value) => {
-    if (!value) return;
-    const field = $(id);
-    if (field.tagName === 'SELECT'
-        && !Array.from(field.options).some((o) => o.value === value)) return;
-    field.value = value;
-  };
-  // AB-INVERSA and the FTW ones were strategies before `inverse` was an
-  // option: an old run comes back as its strategy turned round
-  const alias = /^(.+)-INVERSA$/.exec(fields.strategy || '');
-  if (alias && Array.from($('strategy').options).some((o) => o.value === alias[1])) {
-    fields = { ...fields, strategy: alias[1], inverse: '1' };
-  }
-  set('strategy', fields.strategy);
-  onStrategy();
-  applyDefaults();
-  set('instrument', fields.instrument);
-  onInstrument();
-  set('granularity', fields.granularity);
-  onGranularity();
-  const form = currentForm();
-  if (form) for (const field of form) set(field.name, fields[field.name]);
-  for (const id of ['from', 'to', 'risk', 'balance', 'maxStop', 'maxBars', 'slScale', 'tpScale', 'session',
-                    'newsBefore', 'newsAfter', 'newsImpacts']) {
-    set(id, fields[id]);
-  }
-  // a flag that is absent or empty is the default, which is what a run that
-  // was never asked for it has to come back as
-  for (const name of FLAGS) {
-    const value = String(fields[name] ?? '');
-    setFlag(name, value === '1' || value === 'true' ? '1'
-      : value === '0' || value === 'false' ? '0' : flagDefault(name));
-  }
+  return { fields: Object.fromEntries(params), sweep, run };
 }
 
 /* -------------------------------------------------------------- listeners */
 
-$('controls').addEventListener('submit', run);
-$('strategy').addEventListener('change', () => { onStrategy(); applyDefaults(); });
 $('reset').addEventListener('click', resetView);
 
 // set by a drag that moved the chart, read and cleared by the click that
@@ -2271,73 +1940,7 @@ canvas.addEventListener('mouseleave', () => {
 
 window.addEventListener('resize', () => { draw(); drawEquity(); drawLevels(); });
 
-/* ------------------------------------------------------------------- live */
-
-// The form as it is now, trading on the accounts ticked: see web/livesessions.py
-$('live-open').addEventListener('click', async () => {
-  const fields = formFields();
-  const say = (text) => { $('live-message').textContent = text; $('live-message').hidden = !text; };
-  say('');
-  $('live-what').textContent = `${fields.strategy} on ${fields.instrument} ${fields.granularity}`
-    + (fields.risk ? `, risk ${fields.risk}% of a capital of ${fields.balance || 'the default'}, the same on every account`
-                   + ' (one in USD takes it 1:1)' : '')
-    + ' - one session per account, on the bars from now on.';
-  const box = $('live-targets');
-  box.innerHTML = '<p class="hint">reading the accounts…</p>';
-  $('live-start').disabled = true;
-  $('live-dialog').showModal();
-  let targets;
-  try { ({ targets } = await ask('api/live/targets')); }
-  catch (error) { box.textContent = ''; say(String(error.message || error)); return; }
-  box.textContent = '';
-  for (const row of targets) {
-    const group = document.createElement('fieldset');
-    const legend = document.createElement('legend');
-    legend.textContent = row.provider;
-    group.appendChild(legend);
-    const note = !row.configured ? 'no credentials in .env'
-      : row.error ? row.error : row.accounts.length ? '' : 'no account';
-    if (note) {
-      const p = document.createElement('p');
-      p.className = 'hint';
-      p.textContent = note;
-      group.appendChild(p);
-    }
-    for (const account of row.accounts) {
-      const label = document.createElement('label');
-      const tick = document.createElement('input');
-      tick.type = 'checkbox';
-      tick.dataset.provider = row.provider;
-      tick.dataset.account = account.id;
-      // a real-money account is never ticked for you
-      tick.checked = !!account.demo;
-      label.append(tick, ` ${account.id} ${account.name || ''} · ${account.currency || ''} `
-        + `${account.balance === null ? '' : account.balance.toFixed(2)}`
-        + (account.demo ? ' · demo' : ' · REAL MONEY'));
-      group.appendChild(label);
-    }
-    box.appendChild(group);
-  }
-  $('live-start').disabled = false;
-  $('live-start').onclick = async () => {
-    const picked = [...box.querySelectorAll('input:checked')]
-      .map((tick) => ({ provider: tick.dataset.provider, account: tick.dataset.account }));
-    if (!picked.length) { say('tick at least one account'); return; }
-    const real = [...box.querySelectorAll('input:checked')].some((tick) => tick.parentNode.textContent.includes('REAL MONEY'));
-    if (real && !await askUser('One of these is a REAL MONEY account. Trade real money?')) return;
-    $('live-start').disabled = true;
-    say('starting…');
-    try {
-      await post('api/live', JSON.stringify({ fields, targets: picked }));
-      location.href = 'live';
-    } catch (error) {
-      say(String(error.message || error));
-      $('live-start').disabled = false;
-    }
-  };
-});
-
-/* ------------------------------------------------------------------- data */
+/* ------------------------------------------------------------------ write */
 
 // The two writes need this header; see do_POST in web/service.py.
 async function post(url, body) {
@@ -2354,316 +1957,7 @@ async function post(url, body) {
   return payload;
 }
 
-/*
- * Stopping a run. The button goes dead the moment it is pressed - there is
- * nothing to press twice - and the run's own request is what reports the
- * outcome, because it is the one that knows where it got to.
- */
-$('stop').addEventListener('click', async () => {
-  $('stop').disabled = true;
-  try {
-    const where = await post('api/backtest/stop');
-    message(where.bars
-      ? `stopping after ${where.bars} of ${where.total} bars…`
-      : 'stopping while the candles are being read…', 'info');
-  } catch (error) {
-    message(String(error.message || error));
-  }
-});
-
-/* --------------------------------------------------------- the calendar */
-
-/*
- * The economic calendar is collected by the browser, not by the service: the
- * site refuses a datacentre address after a handful of requests. This page
- * cannot read forexfactory either - one site may not read another's pages,
- * which is the rule working as intended - so the collector runs on their
- * calendar page, where the weeks are same-origin, and hands back a file.
- *
- * All this end does is say what the file holds and take the one that comes
- * back. Nothing here talks to forexfactory.
- */
-function calendarLine(state) {
-  if (!state || !state.events) {
-    return state && state.start
-      ? `no calendar imported - the collector would start at ${state.start}`
-      : 'no calendar imported';
-  }
-  const impacts = Object.keys(state.impacts || {})
-    .sort((a, b) => state.impacts[b] - state.impacts[a])
-    .map((name) => `${state.impacts[name]} ${name}`)
-    .join(', ');
-  return `${state.events.toLocaleString()} events, `
-    + `${day(state.from)} .. ${day(state.to)}`
-    + (impacts ? ` \u00b7 ${impacts}` : '')
-    + (state.start ? ` \u00b7 collect from ${state.start}` : '');
-}
-
-async function showCalendar() {
-  try {
-    const state = await ask('api/calendar');
-    $('calendar-state').textContent = calendarLine(state);
-    // the service's suggestion, which the field is free to override: the
-    // history first, and the weeks since once the history is there
-    if (state.start && !$('calendar-from').value) {
-      $('calendar-from').value = state.start;
-    }
-  } catch (error) {
-    $('calendar-state').textContent = String(error.message || error);
-  }
-}
-
-$('calendar-copy').addEventListener('click', async () => {
-  const button = $('calendar-copy');
-  try {
-    // from the service and not from /static: the copy carries this service's
-    // address and its token, so the weeks are pushed here as they are read
-    // instead of being downloaded and imported by hand
-    const source = await (await fetch(`api/collector`
-      + `?origin=${encodeURIComponent(location.origin)}`
-      + `&from=${encodeURIComponent($('calendar-from').value || '')}`)).text();
-    await navigator.clipboard.writeText(source);
-    button.textContent = 'copied - paste it in the console';
-  } catch (error) {
-    // the clipboard is refused on some browsers over plain http; the script
-    // is still a page you can open and copy by hand
-    window.open('api/collector?origin=' + encodeURIComponent(location.origin)
-                + '&from=' + encodeURIComponent($('calendar-from').value || ''),
-                '_blank');
-    button.textContent = 'opened it - copy it by hand';
-  }
-  setTimeout(() => { button.textContent = 'copy the collector'; }, 6000);
-});
-
-$('calendar-import').addEventListener('click', () => dataAction(async () => {
-  const file = ($('calendar-file').files || [])[0];
-  if (!file) { dataLog(['choose the calendar.csv the collector downloaded']); return; }
-  dataLog([`importing ${file.name} ...`]);
-  const done = await post('api/calendar', await file.text());
-  dataLog([`${done.read} rows read, ${done.added} new, `
-           + `${done.events} in ${done.path}`]);
-  showCalendar();
-}));
-
-function dataLog(lines) {
-  const log = $('data-log');
-  log.hidden = !lines.length;
-  log.textContent = lines.join('\n');
-}
-
-function fileSize(bytes) {
-  return bytes >= 1 << 20 ? `${(bytes / (1 << 20)).toFixed(1)} MB`
-                          : `${Math.ceil(bytes / 1024)} KB`;
-}
-
-// the dialog's head: one line per store, the series it keeps and, dimmer,
-// the ones built from them on request
-function showLoaded() {
-  const box = $('data-loaded');
-  box.textContent = '';
-  const rows = state.instruments || [];
-  if (!rows.length) { box.textContent = 'nothing loaded: the stores are empty'; return; }
-  for (const row of rows) {
-    const line = document.createElement('div');
-    const kept = row.granularities.filter((g) => !g.derivedFrom);
-    const built = row.granularities.filter((g) => g.derivedFrom);
-    line.textContent = `${row.instrument}  ` + kept.map((g) =>
-      `${g.granularity} ${g.bars} bars ${day(g.from)} .. ${day(g.to)}`).join(' · ');
-    if (built.length) {
-      const dim = document.createElement('span');
-      dim.className = 'dim';
-      dim.textContent = `  + ${built.map((g) => g.granularity).join(' ')} built from ${built[0].derivedFrom}`;
-      line.appendChild(dim);
-    }
-    box.appendChild(line);
-  }
-}
-
-async function loadImports() {
-  showLoaded();
-  const { directory, sets } = await ask('api/imports');
-  $('data-dir').textContent = `import folder: ${directory}`;
-  const body = $('data-rows');
-  body.textContent = '';
-  $('data-all').checked = false;
-  // one row per -ASK/-BID pair, the unit the import reads; a side that is
-  // not there is named, since the import skips a set without both
-  for (const s of sets) {
-    const row = document.createElement('tr');
-    // a set is picked here and imported by name; one missing a side cannot
-    // be imported, so it has no box to tick
-    const pick = document.createElement('td');
-    if (s.complete) {
-      const box = document.createElement('input');
-      box.type = 'checkbox';
-      box.className = 'data-pick';
-      box.value = s.set;
-      box.setAttribute('aria-label', `import ${s.set}`);
-      pick.appendChild(box);
-    }
-    row.appendChild(pick);
-    // a click anywhere on the row ticks its box, the way a list is used
-    row.addEventListener('click', (event) => {
-      const box = row.querySelector('input.data-pick');
-      if (box && event.target !== box) box.checked = !box.checked;
-    });
-    for (const side of [null, 'instrument', 'granularity', 'ASK', 'BID']) {
-      const cell = document.createElement('td');
-      if (side === null) cell.textContent = s.set;
-      else if (side === 'instrument' || side === 'granularity') cell.textContent = s[side];
-      else if (s.sides[side] !== undefined) cell.textContent = fileSize(s.sides[side]);
-      else { cell.textContent = 'missing'; cell.className = 'missing'; }
-      row.appendChild(cell);
-    }
-    body.appendChild(row);
-  }
-  if (!sets.length) {
-    const row = document.createElement('tr');
-    const cell = document.createElement('td');
-    cell.colSpan = 6;
-    cell.textContent = 'no import sets here yet';
-    row.appendChild(cell);
-    body.appendChild(row);
-  }
-}
-
-// busy for the length of one action, so a second press cannot start another
-async function dataAction(work) {
-  const buttons = [$('data-upload'), $('data-import'), $('calendar-import')];
-  for (const b of buttons) b.disabled = true;
-  try {
-    await work();
-  } catch (error) {
-    dataLog([String(error.message || error)]);
-  } finally {
-    for (const b of buttons) b.disabled = false;
-  }
-}
-
-// Follow the background import until it ends: the bar is bytes of CSV read
-// of the bytes the sets still to import hold. Sets already imported are not
-// read at all, so a run of nothing new finishes at once.
-async function followImport(status) {
-  const box = $('data-progress-box');
-  box.hidden = false;
-  while (status.running) {
-    const share = status.total ? status.done / status.total : 0;
-    $('data-progress').value = share;
-    $('data-progress-text').textContent = `${Math.round(share * 100)}%  ${status.text}`;
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    status = await ask('api/imports/status');
-  }
-  box.hidden = true;
-  dataLog(status.lines.concat(status.ok ? [] : ['import reported a problem, see above']));
-  // the stores may hold new series or a longer range now
-  await loadStores();
-  showLoaded();
-}
-
-$('data-all').addEventListener('change', () => {
-  for (const box of document.querySelectorAll('#data-rows input.data-pick')) {
-    box.checked = $('data-all').checked;
-  }
-});
-
 $('help-open').addEventListener('click', () => $('help-dialog').showModal());
-$('data-open').addEventListener('click', () => {
-  showCalendar();
-  dataLog([]);
-  $('data-dialog').showModal();
-  loadImports().catch((error) => dataLog([String(error.message || error)]));
-  // an import started earlier, from this page or another, is picked up
-  ask('api/imports/status').then((status) => {
-    if (status.running) dataAction(() => followImport(status));
-  }).catch(() => {});
-});
-
-$('data-upload').addEventListener('click', () => dataAction(async () => {
-  const files = Array.from($('data-file').files || []);
-  if (!files.length) { dataLog(['choose a CSV on this computer to upload first']); return; }
-  const lines = [];
-  for (const file of files) {
-    dataLog(lines.concat([`uploading ${file.name} ...`]));
-    try {
-      const done = await post(`api/imports/upload?name=${encodeURIComponent(file.name)}`, file);
-      lines.push(`${done.name}: ${fileSize(done.bytes)} uploaded`);
-    } catch (error) {
-      lines.push(`${file.name}: ${error.message || error}`);
-    }
-  }
-  $('data-file').value = '';
-  dataLog(lines);
-  await loadImports();
-}));
-
-$('data-import').addEventListener('click', () => dataAction(async () => {
-  const sets = Array.from(document.querySelectorAll('#data-rows input.data-pick:checked'))
-    .map((box) => box.value);
-  if (!sets.length) { dataLog(['tick at least one import set in the table']); return; }
-  dataLog([]);
-  await followImport(await post('api/imports/run', JSON.stringify({ sets })));
-}));
-
-/* ---------------------------------------------------------------- runs */
-
-async function openRuns() {
-  const body = $('runs-rows');
-  body.textContent = '';
-  $('runs-dialog').showModal();
-  const { runs } = await ask('api/runs');
-  if (!runs.length) {
-    const row = body.insertRow();
-    const cell = row.insertCell();
-    cell.colSpan = 10;
-    cell.textContent = 'no run saved yet';
-    return;
-  }
-  for (const run of runs) {
-    const row = body.insertRow();
-    row.dataset.id = run.id;
-    const star = document.createElement('button');
-    star.type = 'button';
-    star.className = 'fav-star';
-    star.dataset.favRun = run.id;
-    star.title = 'segna come preferita';
-    paintStar(star, !!favouriteOf({ kind: 'run', id: run.id }));
-    row.insertCell().appendChild(star);
-    const cells = [run.id, stamp(run.saved), run.strategy, run.instrument,
-      run.granularity + (run.fine ? ` (${run.fine})` : ''), day(run.from),
-      day(run.to), String(run.trades),
-      run.balance === null ? '' : run.balance.toFixed(2)];
-    cells.forEach((text, i) => {
-      const cell = row.insertCell();
-      cell.textContent = text;
-      if (i >= 7) cell.className = 'num';
-    });
-  }
-}
-
-async function loadRun(id) {
-  const saved = await ask('api/runs/' + id);
-  $('runs-dialog').close();
-  fillForm(saved.fields);
-  show(saved.payload, saved.fields);
-  // the payload kept on disk predates runId: the row it was opened from knows
-  state.runId = id;
-  renderStar();
-  message('');
-}
-
-$('runs-open').addEventListener('click', () =>
-  openRuns().catch((error) => message(String(error.message || error))));
-$('runs-rows').addEventListener('click', (event) => {
-  const star = event.target.closest('.fav-star');
-  if (star) {
-    // the star is on the row but is not the row: no loadRun
-    toggleFavourite({ kind: 'run', id: star.dataset.favRun })
-      .catch((error) => message(String(error.message || error)));
-    return;
-  }
-  const row = event.target.closest('tr[data-id]');
-  if (row) loadRun(row.dataset.id).catch((error) => message(String(error.message || error)));
-});
 
 /* ----------------------------------------------------------- favourites */
 
@@ -2693,9 +1987,6 @@ function renderStar() {
   const source = currentSource();
   $('fav-star').hidden = !source;
   if (source) paintStar($('fav-star'), !!favouriteOf(source));
-  for (const star of document.querySelectorAll('#runs-rows .fav-star')) {
-    paintStar(star, !!favouriteOf({ kind: 'run', id: star.dataset.favRun }));
-  }
 }
 
 async function loadFavourites() {
@@ -2719,31 +2010,24 @@ async function start() {
   await loadStores();
   // not awaited: the stars can wait, the run cannot wait on them
   loadFavourites().catch((error) => message(String(error.message || error)));
-  const saved = savedRun();
-  if (!saved) return;
-  fillForm(saved.fields);
+  const saved = fromAddress();
+  if (!saved) {
+    message('no run to show: open one from a simulation set', 'info');
+    return;
+  }
   let data = await post('api/backtest',
                         JSON.stringify({ ...saved.fields, cachedOnly: true }));
   if (data.cached === false && saved.sweep) {
     // a run of a simulation set, kept on disk with it
     data = await ask(`api/sweeps/${saved.sweep}/${saved.run}`);
   }
-  if (data.cached === false && (EMBED || saved.sweep)) {
+  if (data.cached === false) {
     // not kept any more (a set older than its runs on disk): run it again,
     // which is what asking to look at it means; and kept with the set this time
-    await run(null, saved.sweep ? { sweep: saved.sweep, sweepRun: saved.run } : {});
+    await run(saved.fields, saved.sweep ? { sweep: saved.sweep, sweepRun: saved.run } : {});
     return;
   }
-  if (data.cached === false) {
-    message('the form is the last run\'s; the service no longer holds its '
-            + 'result - press run to run it again', 'info');
-    return;
-  }
-  show(data, saved.fields);
-  if (saved.trade !== null) {
-    const index = data.trades.findIndex((t) => t.n === saved.trade);
-    if (index >= 0) select(index);
-  }
+  show(data);
 }
 
 start().catch((error) => message(String(error.message || error)));

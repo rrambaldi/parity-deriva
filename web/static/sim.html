@@ -16,8 +16,9 @@
     <button type="button" id="sets-open" title="the sets of simulations already made">sets</button>
   </div>
   <!--
-    One backtest per combination of the values below. The first row is
-    held fixed for every run; the second is what varies. Every field of the
+    One backtest per combination of the values below - one value in every
+    field is one backtest, which is how a single run is made. The first row
+    is held fixed for every run; the second is what varies. Every field of the
     second row is a list: comma separated, `a..b/step` for a range with both
     ends in, `none` for the field left empty (no ceiling, all day, no limit).
   -->
@@ -29,6 +30,15 @@
     <label>to <input type="date" id="to"></label>
     <label>risk % <input type="number" id="risk" value="1" min="0.01" max="100" step="0.01"></label>
     <label>capital <input type="number" id="balance" min="0" step="any"></label>
+    <!-- stand aside this many minutes either side of a calendar event on the
+         instrument's own currencies; both zero, or no calendar, is no rule -->
+    <label>news -min <input type="number" id="newsBefore" min="0" step="1" placeholder="0"></label>
+    <label>+min <input type="number" id="newsAfter" min="0" step="1" placeholder="0"></label>
+    <label>on <select id="newsImpacts">
+      <option value="high">high impact</option>
+      <option value="high,medium">high and medium</option>
+      <option value="high,medium,low">every release</option>
+    </select></label>
     <fieldset id="grid">
       <legend>values to try &middot; <span class="hint">1, 2, 3 &middot; 10..50/10 &middot; none</span></legend>
       <div id="grid-strategy"></div>
@@ -82,12 +92,12 @@
   </table>
 </dialog>
 
-<!-- one run of the set, drawn by the backtest page itself (?embed=1): the
-     same mask on both pages, see EMBED in app.js -->
+<!-- one run of the set, drawn by the run page itself (run?embed=1): the
+     same mask in the dialog and on its own, see EMBED in app.js -->
 <dialog id="run-dialog">
   <form method="dialog" class="dialog-head">
     <strong id="run-title"></strong>
-    <button type="button" id="run-backtest" title="open this run on the backtest page">backtest page</button>
+    <button type="button" id="run-page" title="open this run on a page of its own">own page</button>
     <button type="submit" aria-label="close">close</button>
   </form>
   <iframe id="run-frame" title="the run"></iframe>
