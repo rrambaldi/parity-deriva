@@ -1343,6 +1343,14 @@ function outcomeCell(trade) {
 
 const PAGE_SIZE = 100;   // trade rows drawn at once
 
+// The run's bars a trade was held, from the entry's to the exit's: 0 is in
+// and out on one bar. The same count max bars closes on (TradeTimer in
+// portfolio/session.py). null for one still open.
+function barsHeld(trade) {
+  const a = trade.entryIndex, b = trade.exitIndex;
+  return a === null || a === undefined || b === null || b === undefined ? null : b - a;
+}
+
 function renderTrades() {
   const body = $('trade-rows');
   body.textContent = '';
@@ -1363,7 +1371,7 @@ function renderTrades() {
     const row = document.createElement('tr');
     row.className = 'empty';
     const cell = document.createElement('td');
-    cell.colSpan = 13;
+    cell.colSpan = 14;
     cell.textContent = state.data
       ? 'this run entered no trades'
       : 'run a backtest to see its trades';
@@ -1394,6 +1402,7 @@ function renderTrades() {
       ['num', price(trade.entryPrice)],
       ['', stamp(trade.exitTime)],
       ['num', price(trade.exitPrice)],
+      ['num', barsHeld(trade) === null ? '' : String(barsHeld(trade))],
       ['num', stopCell(trade)],
       ['num', price(trade.takeProfit)],
       ['outcome-cell', null],
@@ -1465,6 +1474,17 @@ function renderCurves() {
   });
 }
 
+// how long the trades were held, in the run's bars: shortest, mean, longest
+function heldStats() {
+  const held = state.data.trades.map(barsHeld).filter((v) => v !== null);
+  const show = (v) => held.length ? v : 'n/a';
+  return [
+    stat('bars min', show(String(held.reduce((a, b) => Math.min(a, b), Infinity)))),
+    stat('bars avg', show((held.reduce((a, b) => a + b, 0) / held.length).toFixed(1))),
+    stat('bars max', show(String(held.reduce((a, b) => Math.max(a, b), -Infinity)))),
+  ];
+}
+
 function renderReport() {
   const panel = $('report-panel');
   if (!state.data) { panel.hidden = true; return; }
@@ -1491,6 +1511,7 @@ function renderReport() {
     stat('max drawdown', pl(r.maxDrawdown), 'bad'),
     stat('run of wins', String(r.maxConsecutiveWins)),
     stat('run of losses', String(r.maxConsecutiveLosses)),
+    ...heldStats(),
   );
 
   const counts = $('counts');

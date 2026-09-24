@@ -488,5 +488,15 @@ assert.strictEqual(run('state.selected'), 231, 'next goes to the next trade');
 run('$("trade-prev").on.click(); $("trade-prev").on.click()');
 assert.strictEqual(run('state.selected'), 229, 'prev goes back');
 
+// how long a trade was held, in the run's bars, and the report's min, avg, max
+assert.strictEqual(run('barsHeld({ entryIndex: 3, exitIndex: 7 })'), 4, 'entry bar to exit bar');
+assert.strictEqual(run('barsHeld({ entryIndex: 3, exitIndex: null })'), null, 'none while open');
+run(`state.data.trades = [{ entryIndex: 0, exitIndex: 0 }, { entryIndex: 2, exitIndex: 7 },
+  { entryIndex: 9, exitIndex: null }]; stat = (label, value) => label + ' ' + value;`);
+assert.strictEqual(run('heldStats().join(", ")'), 'bars min 0, bars avg 2.5, bars max 5',
+  'the open trade is left out');
+run('state.data.trades = []');
+assert.strictEqual(run('heldStats().join(", ")'), 'bars min n/a, bars avg n/a, bars max n/a');
+
 console.log('app.js: loaded, curve drawn, arrows, clicks, swings, panels and '
   + 'outcomes checked, %d canvas calls', calls.length);
