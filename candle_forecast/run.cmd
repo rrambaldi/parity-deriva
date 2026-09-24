@@ -71,6 +71,9 @@ if not errorlevel 1 (
 )
 git commit -m "Training livello 0 su EURUSD M5 (%COMPUTERNAME%)"
 if errorlevel 1 goto :fail
+rem se intanto qualcuno ha spinto sul branch, prima si mette in pari
+git pull --rebase --autostash
+if errorlevel 1 goto :fail
 git push
 if errorlevel 1 goto :fail
 
