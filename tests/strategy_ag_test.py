@@ -14,6 +14,7 @@ import unittest
 from parity_deriva.event.event import CandleEvent, StatusEvent, TickEvent
 from parity_deriva.strategy.AG01 import AG01
 from parity_deriva.strategy.AG02 import AG02
+from parity_deriva.strategy.AG01MOD import AG01MOD
 from parity_deriva.tests.helpers import (T0, bull_candle, bear_candle, Recorder,
                                    candle_dict)
 
@@ -24,6 +25,11 @@ class AGCase(unittest.TestCase):
 
     def make(self, **kw):
         kw.setdefault('pairs', ["DE30_EUR"])
+        # the candles below are stamped M1, and a strategy reads one stream:
+        # a backtest can now put two granularities of one instrument on the
+        # bus, so a handler whose granularity does not match the candle's is
+        # a handler watching the other one.
+        kw.setdefault('granularity', "M1")
         s = self.strategy(**kw)
         self.sink = Recorder()
         s.set_queue(self.sink)
@@ -50,7 +56,7 @@ class TestAG01Breakout(AGCase):
     strategy = AG01
 
     def test_defaults(self):
-        s = self.make()
+        s = self.strategy(pairs=["DE30_EUR"])
         self.assertEqual(s.pairs, ["DE30_EUR"])
         self.assertEqual(s.granularity, 'M5')
         self.assertEqual(s.gtdTime, ['23', '59', '59'])
@@ -135,7 +141,7 @@ class TestAG01Breakout(AGCase):
         s = self.make()
         first, second = self.reversal(s)
         self.assertEqual(self.sink.events[0].signalNumber,
-                         "AG01:DE30_EUR:M5:%s" % second.time.strftime('%Y%m%dT%H%M%S'))
+                         "AG01:DE30_EUR:M1:%s" % second.time.strftime('%Y%m%dT%H%M%S'))
 
     def test_replaying_the_same_candles_gives_the_same_key(self):
         first = self.make()
@@ -169,7 +175,7 @@ class TestAG01Breakout(AGCase):
         self.reversal(s)
         ext = self.sink.events[0].clientExtension
         self.assertEqual(ext['tag'], 'AG01')
-        self.assertEqual(ext['comment'], 'M5')
+        self.assertEqual(ext['comment'], 'M1')
         self.assertEqual(ext['id'], self.sink.events[0].signalNumber)
 
     def test_signal_type_is_exclusive(self):
@@ -221,7 +227,7 @@ class TestAG01Breakout(AGCase):
         self.assertEqual(self.sink.events, [])
 
     def test_without_a_queue_nothing_is_emitted_but_state_still_advances(self):
-        s = self.strategy(pairs=["DE30_EUR"])
+        s = self.strategy(pairs=["DE30_EUR"], granularity="M1")
         first, second = self.reversal(s)
         self.assertIs(s.prev["DE30_EUR"], second)
 
@@ -246,6 +252,56 @@ class TestAG01Breakout(AGCase):
         flat.instrument, flat.granularity = "DE30_EUR", "M1"
         s.execute_event(flat)
         self.assertEqual(len(self.sink.of('SIGNAL')), 2)
+
+
+class TestExpiryComesFromTheCandle(AGCase):
+    """
+    The expiry is a function of the data, like the signal's own key is.
+
+    Was: datetime.today().replace(hour=23, ...), the machine's clock. Live
+         that is roughly the candle's day; replaying 2022 in 2026 it is four
+         years in the future, so no order could ever expire and the simulator
+         filled one four months after it was placed.
+    """
+
+    strategy = AG01
+
+    def test_the_expiry_is_the_candle_s_day_and_not_the_clock_s(self):
+        s = self.make()
+        _first, second = self.reversal(s)
+        expiry = self.sink.events[0].gtdTime
+        # T0 is 2017, the machine's clock is not
+        self.assertEqual(expiry.date(), second.time.date())
+        self.assertEqual((expiry.hour, expiry.minute, expiry.second),
+                         (23, 59, 59))
+
+    def test_replaying_the_same_candles_gives_the_same_expiry(self):
+        # make() hands out a fresh sink, so each run is read before the next
+        self.reversal(self.make())
+        first = [e.gtdTime for e in self.sink.events]
+        self.reversal(self.make())
+        self.assertEqual([e.gtdTime for e in self.sink.events], first)
+
+    def test_a_daily_bar_expires_at_the_end_of_the_day_it_closes_in(self):
+        """
+        A daily candle's signal is made at its close, which is midnight of the
+        next day. Measured from the open the order would be born expired, and
+        a daily backtest would enter nothing at all.
+        """
+        s = self.make(granularity="D")
+        first = self.candle(True, T0)
+        second = self.candle(False, T0 + datetime.timedelta(days=1))
+        for candle in (first, second):
+            candle.granularity = "D"
+            s.execute_event(candle)
+        self.assertEqual(self.sink.events[0].gtdTime.date(),
+                         (second.time + datetime.timedelta(days=1)).date())
+
+    def test_both_legs_carry_the_same_expiry(self):
+        s = self.make()
+        self.reversal(s)
+        buy, sell = self.sink.events
+        self.assertEqual(buy.gtdTime, sell.gtdTime)
 
 
 class TestPerInstrumentPrecision(AGCase):
@@ -391,3 +447,150 @@ class TestAG02MeanReversion(AGCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AG01MODCase(AGCase):
+    """
+    AG01 with the leg that would trade into a level dropped.
+
+    The fixture is eleven bars that go nowhere but for one spike, so exactly
+    one swing is confirmed and the test is about the filter rather than about
+    which levels the finder found. All of them rise, so no colour change fires
+    while the level is being built: the first one is the pair at the end, and
+    it is the pair the filter is asked about.
+    """
+
+    strategy = AG01MOD
+
+    def bar(self, i, o, h, l, c):
+        ev = CandleEvent(candle_dict(T0 + datetime.timedelta(minutes=i),
+                                     o=o, h=h, l=l, c=c))
+        ev.instrument, ev.granularity = "DE30_EUR", "M1"
+        return ev
+
+    def build(self, s, dip=None, spike=None):
+        """Eleven rising bars, one of them reaching further than the rest."""
+        for i in range(11):
+            low, high = 11694.0, 11706.0
+            if dip is not None and i == 5:
+                low = dip
+            if spike is not None and i == 5:
+                high = spike
+            s.execute_event(self.bar(i, o=11698.0, h=high, l=low, c=11702.0))
+
+    def pair(self, s, low, high, close, first=11):
+        """A rise then a fall: AG01's colour change, with these extremes."""
+        s.execute_event(self.bar(first, o=11698.0, h=high, l=low, c=11702.0))
+        s.execute_event(self.bar(first + 1, o=11702.0, h=high, l=low,
+                                 c=close))
+
+    def levels(self, s):
+        return [(l['kind'], l['price'])
+                for l in s.swings["DE30_EUR"].levels()]
+
+
+class TestAG01MODLevels(AG01MODCase):
+    """What it takes to be a level here."""
+
+    def test_a_swing_is_not_confirmed_until_the_bars_after_it_have_printed(self):
+        """
+        Five bars either side. Before the fifth one after it, the strategy
+        does not know the dip was a low - and must not, or it would be reading
+        a bar it had not seen.
+        """
+        s = self.make()
+        for i in range(10):
+            low = 11650.0 if i == 5 else 11694.0
+            s.execute_event(self.bar(i, o=11698.0, h=11706.0, l=low, c=11702.0))
+        self.assertEqual(self.levels(s), [])
+        s.execute_event(self.bar(10, o=11698.0, h=11706.0, l=11694.0, c=11702.0))
+        self.assertEqual(self.levels(s), [('support', 11650.0)])
+
+    def test_a_flat_run_has_no_swings_at_all(self):
+        """The test of an extreme is strict: equal bars are not levels."""
+        s = self.make()
+        self.build(s)
+        self.assertEqual(self.levels(s), [])
+
+    def test_the_band_is_a_share_of_the_window(self):
+        s = self.make()
+        self.build(s, dip=11650.0)
+        # the window runs 11650 to 11706, and one per cent of that is 0.56
+        self.assertAlmostEqual(s.swings["DE30_EUR"].levels()[0]['near'], 0.56)
+
+    def test_a_level_is_forgotten_once_its_bars_have_gone(self):
+        s = self.make(keepBars=20)
+        self.build(s, dip=11650.0)
+        self.assertEqual(len(self.levels(s)), 1)
+        for i in range(30):
+            s.execute_event(self.bar(20 + i, o=11698.0, h=11706.0,
+                                     l=11694.0, c=11702.0))
+        self.assertEqual(self.levels(s), [])
+
+
+class TestAG01MODFilter(AG01MODCase):
+    """Which leg survives."""
+
+    def sides(self):
+        return sorted(e.units for e in self.sink.of('SIGNAL'))
+
+    def test_without_a_level_both_legs_go_out_as_in_ag01(self):
+        s = self.make()
+        self.build(s)
+        self.pair(s, low=11650.4, high=11706.0, close=11695.0)
+        self.assertEqual(self.sides(), [-1, 1])
+
+    def test_a_sell_into_a_support_is_dropped_and_the_buy_is_not(self):
+        """
+        The pair's low is 0.4 from a support 0.56 wide and both bars closed
+        above it: the sell stop would be a short into the level.
+        """
+        s = self.make()
+        self.build(s, dip=11650.0)
+        self.pair(s, low=11650.4, high=11706.0, close=11700.0)
+        self.assertEqual(self.sides(), [1])
+
+    def test_a_pair_that_closed_through_the_support_still_sells(self):
+        """Below it, the support is broken and this is not a short into one."""
+        s = self.make()
+        self.build(s, dip=11650.0)
+        self.pair(s, low=11650.4, high=11706.0, close=11649.0)
+        self.assertEqual(self.sides(), [-1, 1])
+
+    def test_a_buy_under_a_resistance_is_dropped_and_the_sell_is_not(self):
+        s = self.make()
+        self.build(s, spike=11750.0)
+        self.pair(s, low=11694.0, high=11749.6, close=11700.0)
+        self.assertEqual(self.sides(), [-1])
+
+    def test_a_low_outside_the_band_is_not_at_the_level(self):
+        s = self.make()
+        self.build(s, dip=11650.0)
+        self.pair(s, low=11651.0, high=11706.0, close=11700.0)
+        self.assertEqual(self.sides(), [-1, 1])
+
+    def test_the_signal_says_which_strategy_it_came_from(self):
+        """
+        AG01-MOD and not AG01MOD: the key is what a live run and its replay
+        are joined on, and it is the name the menu offers.
+        """
+        s = self.make()
+        self.build(s)
+        self.pair(s, low=11694.0, high=11706.0, close=11695.0)
+        signal = self.sink.of('SIGNAL')[0]
+        self.assertTrue(signal.signalNumber.startswith('AG01-MOD:DE30_EUR:M1:'))
+        self.assertEqual(signal.clientExtension['tag'], 'AG01-MOD')
+
+    def test_the_prices_are_still_ag01s(self):
+        """Only the filter is new: a leg that goes out is AG01's leg."""
+        mod, plain = self.make(), AG01(pairs=["DE30_EUR"], granularity="M1")
+        plain_sink = Recorder()
+        plain.set_queue(plain_sink)
+        for s in (mod, plain):
+            self.build(s)
+            self.pair(s, low=11694.0, high=11706.0, close=11695.0)
+        for one, two in zip(self.sink.of('SIGNAL'), plain_sink.of('SIGNAL')):
+            self.assertEqual((one.units, one.price, one.stopLoss,
+                              one.takeProfit),
+                             (two.units, two.price, two.stopLoss,
+                              two.takeProfit))

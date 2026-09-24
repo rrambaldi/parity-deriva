@@ -47,13 +47,16 @@ ignored.
 
 import datetime
 import logging
+import time
 
-from parity_deriva.backtest.driver import ReplayEngine
+from parity_deriva.backtest.driver import Cancelled, ReplayEngine
 from parity_deriva.backtest.oanda import OANDABacktester
 from parity_deriva.backtest.offline import SimulatedBroker
-from parity_deriva.data.replay import ForexCandles
+from parity_deriva.backtest import shadow
+from parity_deriva.data import calendar as calendar_module
 from parity_deriva.etc import settings
 from parity_deriva.portfolio.moneymanager import MoneyManager
+from parity_deriva.portfolio.session import SESSION_CLOSE, SessionCloser, TradeTimer
 from parity_deriva.portfolio.trailer import Trailer
 from parity_deriva.strategy import plugins
 from parity_deriva.trading.handler import ExecutionHandler
@@ -71,6 +74,17 @@ from parity_deriva.trading.handler import ExecutionHandler
 STRATEGIES = {
 	'AG01': ('parity_deriva.strategy.AG01', 'AG01'),
 	'AG02': ('parity_deriva.strategy.AG02', 'AG02'),
+	# AG01 with the leg that would trade into a support or a resistance
+	# dropped. Its own entry because it is its own backtest, not a setting
+	# of AG01's: the two answer different questions about the same candles.
+	'AG01-MOD': ('parity_deriva.strategy.AG01MOD', 'AG01MOD'),
+	# the five of strategy/5-STRATEGIE.md, which enter at the close of a bar
+	# with a market order rather than by leaving one resting
+	'H401-PULLBACK-EMA': ('parity_deriva.strategy.H401', 'H401'),
+	'H402-BREAKOUT': ('parity_deriva.strategy.H402', 'H402'),
+	'H403-BOLLINGER': ('parity_deriva.strategy.H403', 'H403'),
+	'H404-LIVELLI-DAILY': ('parity_deriva.strategy.H404', 'H404'),
+	'H405-MOMENTUM-RSI': ('parity_deriva.strategy.H405', 'H405'),
 }
 STRATEGIES.update(plugins.backtest())
 
@@ -99,7 +113,9 @@ def load_strategy(name):
 	return getattr(sys.modules[module], attr)
 
 
-def moneyManager(units=1, setup=None, risk=None, balance=None):
+def moneyManager(units=1, setup=None, risk=None, balance=None,
+				 maxStopPips=None, session=None, calendar=None, slScale=None,
+				 tpScale=None):
 	"""
 	A MoneyManager that remembers nothing from a previous run.
 
@@ -110,12 +126,107 @@ def moneyManager(units=1, setup=None, risk=None, balance=None):
 	without touching a component the live path depends on.
 	"""
 	mm = MoneyManager(setup=setup if setup is not None else settings, units=units,
-					  risk=risk, balance=balance)
+					  risk=risk, balance=balance, maxStopPips=maxStopPips,
+					  session=session, calendar=calendar, slScale=slScale,
+					  tpScale=tpScale)
 	mm.signals = {}
 	mm.processed = []
 	mm.onTrade = False
 	mm.orderIssued = False
 	return mm
+
+
+#: how often Progress speaks, in seconds of wall clock. Not every bar: a
+#: million fine bars would be a million calls into whatever is listening, to
+#: report a line nobody can read more than a few times a second anyway.
+PROGRESS_EVERY = 0.25
+
+
+class Progress(ExecutionHandler):
+	"""
+	Says where a replay has got to, for a caller that has to wait for it.
+
+	A run over eleven years of M5 is a million bars through the bus and a
+	page that shows nothing until it ends is a page that looks broken. This
+	rides the same bus and reports the two things worth seeing: which bar the
+	simulator is on, and what the account is worth at that bar.
+
+	It counts the strategy's own candles and not the fine ones the orders
+	rest on - `otherStream` is the same guard every handler that counts bars
+	uses - so "bar 4000 of 18878" is a share of the run and not of a stream
+	the reader never asked about. The balance is read off the money manager
+	rather than recomputed here: it is the account, and a second opinion
+	about the account is a bug waiting for a screenshot.
+	"""
+
+	def __init__(self, report, account=None, ledger=None, instrument=None,
+				 granularity=None, every=PROGRESS_EVERY):
+		self.logger = logging.getLogger('parity_deriva.trading.trading')
+		self.report = report
+		self.account = account
+		self.ledger = ledger
+		self.instrument = instrument
+		self.granularity = granularity
+		self.every = every
+		self.bars = 0
+		self.at = None
+		self._spoke = 0.0
+
+	def execute_event(self, event):
+		if str(event) != 'CANDLE':
+			return
+		if self.instrument is not None and event.instrument != self.instrument:
+			return
+		if self.otherStream(event):
+			return
+		self.bars += 1
+		self.at = getattr(event, 'time', None)
+		now = time.time()
+		if now - self._spoke < self.every:
+			return
+		self._spoke = now
+		self.say()
+
+	def tally(self):
+		"""
+		The trades closed so far, won and lost.
+
+		Counted the way performance/report.py counts them - profit above zero
+		is a win, below it a loss - so the line that runs during the backtest
+		and the report that lands at the end of it cannot disagree. A trade
+		still open is in neither: it has not gone anywhere yet.
+		"""
+		if self.ledger is None:
+			return {}
+		done = [one for one in self.ledger.trades()
+				if one.get('exitTime') is not None]
+		won = sum(1 for one in done if (one.get('pl') or 0) > 0)
+		lost = sum(1 for one in done if (one.get('pl') or 0) < 0)
+		# the balance after each close, in the order they closed: the capital
+		# curve so far, for a page that draws it while the run is going
+		curve = sorted(((one['exitTime'], one['balance']) for one in done
+						if one.get('balance') is not None),
+					   key=lambda point: point[0])
+		return {'trades': len(done), 'won': won, 'lost': lost, 'curve': curve}
+
+	def say(self):
+		"""
+		The report itself, also called once at the end so the last bar is not
+		left out by the clock.
+
+		The listener answers: anything but False and the replay carries on,
+		False and it stops here. That is how a run is cancelled - there is no
+		second channel and no flag on the engine, because the thing that knows
+		a run should stop is the thing being told where it has got to.
+		"""
+		balance = getattr(self.account, 'balance', None)
+		where = {'bars': self.bars, 'at': self.at,
+				 'balance': None if balance is None else float(balance)}
+		where.update(self.tally())
+		answer = self.report(where)
+		if answer is False:
+			raise Cancelled("stopped after %d bars, at %s"
+							% (self.bars, self.at))
 
 
 class Ledger(ExecutionHandler):
@@ -389,7 +500,8 @@ class Result(object):
 	"""What one backtest produced, with nothing computed from it yet."""
 
 	def __init__(self, instrument, granularity, strategy, dtfrom, dtto,
-				 candles, trades, counts, balance=None, risk=None):
+				 candles, trades, counts, balance=None, risk=None, fine=None,
+				 maxStopPips=None):
 		self.instrument = instrument
 		self.granularity = granularity
 		self.strategy = strategy
@@ -405,10 +517,22 @@ class Result(object):
 		#: the fraction of capital risked per trade, or None when the size
 		#: was a fixed number of units
 		self.risk = risk
+		#: the finer granularity the orders were filled against, or None when
+		#: they were filled against the strategy's own bars. Reported because
+		#: two runs of the same strategy over the same window are not the same
+		#: measurement when one of them resolved its exits a minute at a time.
+		self.fine = fine
+		#: the widest stop a signal was allowed to carry, in pips, or None.
+		#: Reported for the same reason as the risk: it decides which trades
+		#: are in the list, not only how they were sized.
+		self.maxStopPips = maxStopPips
 
 
 def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
-		units=1, setup=None, source=None, balance=None, risk=None):
+		units=1, setup=None, source=None, balance=None, risk=None, fine=True,
+		maxStopPips=None, progress=None, session=None, intraday=False,
+		closeAt=None, news=None, newsImpacts=None, maxBars=None,
+		strategyArgs=None, slScale=None, tpScale=None):
 	"""
 	Replay stored candles through the whole offline stack and collect trades.
 
@@ -435,6 +559,52 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 	  the start of each calendar month. `units` is ignored. A signal carrying
 	  no stop cannot be sized and is not sent, so a strategy that sets none
 	  trades nothing at all this way.
+
+	`fine` chooses the bars the orders are filled against, which is not the
+	same question as the bars the strategy reads:
+
+	* True, the default - the finest series the store holds that covers this
+	  window, and the strategy's own bars when it holds nothing finer. See
+	  backtest/shadow.py: a day's candle cannot say whether the stop or the
+	  target came first and a minute's usually can.
+	* a granularity - that one, whether or not it is the finest.
+	* False - the strategy's own bars, which is what this did before the
+	  choice existed.
+
+	It changes the answer, not only its precision: a trade whose stop and
+	target both sat inside one daily bar was decided by the simulator's
+	tie-break and is now decided by the market.
+
+	`session`, `intraday` and `news` are when this account trades, and they
+	are rules about the account rather than about a setup - which is why they
+	are arguments here and not edits to five strategies:
+
+	* `session` - ('07:00', '16:00') in UTC, or None for the whole day. It
+	  refuses the *signal* and not the order: an order placed inside the
+	  window rests until it fills or expires.
+	* `intraday` - close whatever is open when the day ends, at the close of
+	  the bar the cut falls inside. The cut is `closeAt`, or the session's
+	  own end, or the end of the UTC day. See portfolio/session.py.
+	* `news` - (minutes before, minutes after) around each event of the
+	  calendar in DATA_DIR, on the instrument's own currencies. A signal
+	  inside one of those windows is refused. `newsImpacts` says which events
+	  count and defaults to the high impact ones. No calendar file, or no
+	  minutes: no rule, and the run is what it was before.
+
+	`maxStopPips` is the widest stop a signal may carry and still be traded,
+	in pips, or None for no ceiling. It applies to every strategy, because it
+	is a rule about the account rather than about a setup - see
+	MoneyManager.tooWide, which refuses the signal rather than pulling its
+	stop in.
+
+	`maxBars` closes a trade that has been open that many of the strategy's
+	own bars (portfolio/session.TradeTimer), or None for no limit.
+
+	`slScale` and `tpScale` multiply the distance of the initial stop and
+	target from the entry (MoneyManager.scaleLevels); None leaves them.
+
+	`strategyArgs` are keyword arguments for the strategy's constructor -
+	the numbers it reads through _set() - or None for its own defaults.
 	"""
 	cfg = setup if setup is not None else settings
 	balance = float(cfg.EQUITY) if balance is None else float(balance)
@@ -442,11 +612,40 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 	dtfrom = dtfrom if dtfrom is not None else datetime.datetime(1970, 1, 1)
 	dtto = dtto if dtto is not None else datetime.datetime.today()
 
+	# the stream the orders rest on, which is the strategy's own unless the
+	# store holds something finer. Given a source, a caller brought its own
+	# candles and there is no store to look in.
+	if source is not None:
+		fine = None
+	elif fine is True:
+		fine = shadow.finer(instrument, granularity, dtfrom, dtto, cfg)
+	elif not fine:
+		fine = None
+
 	ledger = Ledger(instrument=instrument, granularity=granularity)
+	diary = _calendar(instrument, news, newsImpacts, cfg)
+	manager = moneyManager(units=units, setup=cfg, risk=risk, balance=balance,
+						   maxStopPips=maxStopPips, session=session,
+						   calendar=diary, slScale=slScale, tpScale=tpScale)
+	# the cut the day ends at: what was asked for, the session's own end, or
+	# the end of the UTC day. Nothing here invents an hour of its own
+	closer = None
+	if intraday:
+		closer = SessionCloser(
+			at=closeAt or (session[1] if session else '23:59'),
+			granularity=granularity, instrument=instrument)
+	timer = TradeTimer(maxBars, granularity=granularity,
+					   instrument=instrument) if maxBars else None
+	# `progress` is a callback and not a flag: this module says where the
+	# replay is and what the account holds, and whoever asked decides whether
+	# that is a line on a page, a log, or nothing at all
+	watcher = None if progress is None else Progress(
+		progress, account=manager, ledger=ledger, instrument=instrument,
+		granularity=granularity)
 	engine = ReplayEngine()
-	for handler in (strategy_class(pairs=[instrument], granularity=granularity),
-					moneyManager(units=units, setup=cfg, risk=risk,
-								 balance=balance),
+	for handler in (strategy_class(pairs=[instrument], granularity=granularity,
+								   **(strategyArgs or {})),
+					manager,
 					# Before the simulator, so that a stop moved on this bar
 					# applies from the next one: the ladder is read off a bar
 					# that has closed, and a stop that could be moved and
@@ -457,21 +656,72 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 					# named: with two granularities of one instrument on the
 					# bus the simulator has no way to tell which stream it
 					# should fill against
-					OANDABacktester(setup=cfg, granularity=granularity,
+					OANDABacktester(setup=cfg, granularity=fine or granularity,
 									balance=balance),
 					SimulatedBroker(),
-					ledger):
+					ledger) \
+				+ ((closer,) if closer is not None else ()) \
+				+ ((timer,) if timer is not None else ()) \
+				+ ((watcher,) if watcher is not None else ()):
 		engine.add_handler(handler)
 
 	if source is None:
-		source = ForexCandles(setup=cfg, pairs=[instrument],
-							  granularity=granularity,
-							  dtfrom=dtfrom, dtto=dtto)
+		source = shadow.source(instrument, granularity, fine, dtfrom, dtto,
+							   cfg, progress=_reading(progress))
 	engine.run(source)
+	if watcher is not None:
+		# the clock may have swallowed the last few thousand bars, and a run
+		# that ends at 97% reads as a run that stopped
+		watcher.say()
 
 	return Result(instrument, granularity, strategy, dtfrom, dtto,
 				  ledger.candles, ledger.trades(), ledger.counts(), balance,
-				  risk)
+				  risk, fine, maxStopPips)
+
+
+def _calendar(instrument, news, impacts, cfg):
+	"""
+	The events this run stands aside for, or None.
+
+	Loaded here rather than handed in, so that a backtest from the command
+	line and one from the page read the same file the same way. No minutes
+	means no rule, and no rule means no file is read at all: a run that was
+	not asked to watch the news does not depend on whether a calendar has
+	ever been imported.
+	"""
+	if not news:
+		return None
+	before, after = news
+	if not before and not after:
+		return None
+	frame = calendar_module.load(setup=cfg)
+	if not len(frame):
+		return None
+	return calendar_module.Calendar(
+		frame, currencies=calendar_module.currencies(instrument),
+		impacts=tuple(impacts) if impacts else (calendar_module.HIGH,),
+		before=before, after=after)
+
+
+def _reading(report):
+	"""
+	The reading phase, in the shape the rest of a run's progress arrives in.
+
+	data/replay.py knows how many rows it has read and nothing about who
+	wants to know; this turns its three arguments into the same dictionary
+	ledger.Progress sends, marked as the phase it is, and turns a listener's
+	refusal into the same Cancelled a refusal during the replay raises.
+	"""
+	if report is None:
+		return None
+
+	def reading(stage, done, total):
+		answer = report({'loading': True, 'stage': stage, 'read': done,
+						 'toRead': total})
+		if answer is False:
+			raise Cancelled("stopped while %s, after %d of %d candles"
+							% (stage, done, total))
+	return reading
 
 
 def _float(value):

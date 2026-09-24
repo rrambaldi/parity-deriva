@@ -7,6 +7,7 @@ from unittest import mock
 
 import pandas as pd
 
+from parity_deriva.lib import indicators
 from parity_deriva.lib.candle import Candle
 from parity_deriva.lib.oanda import (OANDAObject, OANDAOrder, OANDATrade,
                                OANDAPosition, OANDAPositionSize)
@@ -14,7 +15,7 @@ from parity_deriva.lib.ohlc import ohlc
 from parity_deriva.lib.utils import (datetimeToString, timestampFromString,
                                granularityToTimedelta, dctFromOanda,
                                serieToDict, getLogger, pricePrecision,
-                               roundPrice)
+                               roundPrice, expiryAt)
 from parity_deriva.tests.helpers import T0, oanda_time
 
 
@@ -354,3 +355,236 @@ class TestOANDAObjects(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExpiryTest(unittest.TestCase):
+    """
+    lib/utils.expiryAt: when an order issued on a candle stops being an order.
+
+    It used to be datetime.today(), the machine's clock, which in a replay is
+    years away from the candles - so nothing ever expired.
+    """
+
+    CLOCK = ('23', '59', '59')
+
+    def test_a_five_minute_bar_expires_that_evening(self):
+        self.assertEqual(
+            expiryAt(datetime.datetime(2018, 1, 15, 10, 0), 'M5',
+                           self.CLOCK),
+            datetime.datetime(2018, 1, 15, 23, 59, 59))
+
+    def test_a_daily_bar_expires_at_the_end_of_the_day_it_closes_in(self):
+        """
+        Not the day it opens in. A daily candle stamped the 3rd closes at
+        midnight on the 4th, and the signal is made at that close: measured
+        from the open, the order would be issued after its own expiry and
+        could never fill at all.
+        """
+        self.assertEqual(
+            expiryAt(datetime.datetime(2022, 7, 3), 'D', self.CLOCK),
+            datetime.datetime(2022, 7, 4, 23, 59, 59))
+
+    def test_the_last_bar_of_a_day_belongs_to_the_next_one(self):
+        """An H1 bar at 23:00 closes at midnight, so its order rests a day."""
+        self.assertEqual(
+            expiryAt(datetime.datetime(2018, 1, 15, 23, 0), 'H1',
+                           self.CLOCK),
+            datetime.datetime(2018, 1, 16, 23, 59, 59))
+
+    def test_a_granularity_nobody_can_read_leaves_the_candle_alone(self):
+        """No bar width to add, so the candle's own day is the day."""
+        self.assertEqual(
+            expiryAt(datetime.datetime(2018, 1, 15, 10, 0), 'X9',
+                           self.CLOCK),
+            datetime.datetime(2018, 1, 15, 23, 59, 59))
+
+    def test_the_hour_is_the_one_asked_for(self):
+        self.assertEqual(
+            expiryAt(datetime.datetime(2018, 1, 15, 10, 0), 'M5',
+                           ('17', '30', '0')),
+            datetime.datetime(2018, 1, 15, 17, 30, 0))
+
+
+class IndicatorCase(unittest.TestCase):
+    """
+    lib/indicators.py. A ramp is the fixture: on 1, 2, 3, ... every average is
+    a number that can be checked without a second implementation to check it
+    against.
+    """
+
+    RAMP = [float(i) for i in range(1, 21)]
+
+    def test_an_average_is_absent_until_it_is_warm(self):
+        """
+        None, not a mean of whatever bars exist so far. A chart that drew one
+        would show an SMA(100) that is really an SMA(3) for its first
+        ninety-seven bars, over exactly the trades a backtest starts with.
+        """
+        values = indicators.sma(self.RAMP, 5)
+        self.assertEqual(values[:4], [None] * 4)
+        self.assertEqual(values[4], 3.0)
+
+    def test_the_simple_average_is_the_mean_of_its_window(self):
+        self.assertEqual(indicators.sma(self.RAMP, 3)[2:5], [2.0, 3.0, 4.0])
+
+    #: a straight line of 0.1 a bar, drawn with a 0.05 wick either side. Every
+    #: true range on it is 0.15 - the high against the bar before's close -
+    #: so the slope measure is 0.1 / 0.15 whatever window it is read over
+    SLOPE_STEP = 0.1
+    SLOPE_TR = 0.15
+
+    def ramp(self, n=160):
+        closes = [100.0 + self.SLOPE_STEP * i for i in range(n)]
+        return (closes, [c + 0.05 for c in closes], [c - 0.05 for c in closes])
+
+    def test_the_slope_is_the_move_per_bar_in_atr(self):
+        closes, highs, lows = self.ramp()
+        values = indicators.slope(closes, highs, lows, period=20, window=10,
+                                  atrPeriod=14)
+        self.assertAlmostEqual(values[-1], self.SLOPE_STEP / self.SLOPE_TR, 6)
+
+    def test_the_window_divides_out_of_the_reading(self):
+        """
+        The whole point of dividing by N: the same market has to read the same
+        over ten bars and over twenty, or a threshold on it means a different
+        thing for every window and cannot be carried between them.
+        """
+        closes, highs, lows = self.ramp()
+        short = indicators.slope(closes, highs, lows, period=20, window=10)
+        long_ = indicators.slope(closes, highs, lows, period=20, window=20)
+        self.assertAlmostEqual(short[-1], long_[-1], 6)
+
+    def test_the_slope_is_absent_until_both_averages_are_warm(self):
+        closes, highs, lows = self.ramp(n=40)
+        values = indicators.slope(closes, highs, lows, period=30, window=10)
+        self.assertEqual(values[:38], [None] * 38)
+        self.assertIsNotNone(values[-1])
+
+    def test_a_falling_line_reads_negative(self):
+        closes, highs, lows = self.ramp()
+        closes = list(reversed(closes))
+        highs = [c + 0.05 for c in closes]
+        lows = [c - 0.05 for c in closes]
+        values = indicators.slope(closes, highs, lows, period=20, window=10)
+        self.assertLess(values[-1], 0)
+
+    def test_a_percentile_lands_between_its_two_neighbours(self):
+        self.assertEqual(indicators.percentile([0, 1, 2, 3, 4], 50), 2)
+        self.assertEqual(indicators.percentile([1.0, 2.0], 75), 1.75)
+        self.assertEqual(indicators.percentile([5.0], 90), 5.0)
+        self.assertIsNone(indicators.percentile([], 90))
+
+    def test_a_period_longer_than_the_data_is_all_absent(self):
+        self.assertEqual(indicators.sma([1.0, 2.0], 5), [None, None])
+
+    def test_the_exponential_average_is_seeded_with_a_simple_one(self):
+        """
+        Not started from the first close. This is what the strategies here do,
+        so the line on the chart is the line that was traded; the two
+        disagree for dozens of bars otherwise, which is where the early trades
+        of every backtest are.
+        """
+        values = indicators.ema(self.RAMP, 4)
+        self.assertEqual(values[:3], [None] * 3)
+        self.assertAlmostEqual(values[3], 2.5)          # (1+2+3+4)/4
+        self.assertAlmostEqual(values[4], 5 * 0.4 + 2.5 * 0.6)
+
+    def test_the_bands_sit_either_side_of_their_middle(self):
+        middle, upper, lower = indicators.bollinger(self.RAMP, 5, 2.0)
+        self.assertEqual(middle[4], 3.0)
+        # population deviation of 1..5 is sqrt(2)
+        self.assertAlmostEqual(upper[4], 3.0 + 2 * (2 ** 0.5))
+        self.assertAlmostEqual(lower[4], 3.0 - 2 * (2 ** 0.5))
+        self.assertEqual(middle[:4], [None] * 4)
+
+    def test_a_flat_series_has_no_width(self):
+        _, upper, lower = indicators.bollinger([5.0] * 10, 4, 2.0)
+        self.assertEqual(upper[5], 5.0)
+        self.assertEqual(lower[5], 5.0)
+
+    def test_nothing_reads_a_later_bar(self):
+        """
+        The rule the whole module rests on: a curve computed over the run
+        agrees at every point with one computed over the run cut there. A
+        chart that broke it would draw a line the strategy could not have
+        seen.
+        """
+        for kind in ('sma', 'ema'):
+            whole = getattr(indicators, kind)(self.RAMP, 4)
+            for cut in range(4, len(self.RAMP) + 1):
+                part = getattr(indicators, kind)(self.RAMP[:cut], 4)
+                self.assertAlmostEqual(part[cut - 1], whole[cut - 1],
+                                       msg="%s at %d" % (kind, cut - 1))
+
+    def test_the_true_range_of_the_first_bar_is_its_own_range(self):
+        """No previous close to reach for, which is Wilder's own handling."""
+        ranges = indicators.true_range([3.0, 4.0], [1.0, 2.0], [2.0, 3.0])
+        self.assertEqual(ranges[0], 2.0)
+
+    def test_the_true_range_reaches_across_a_gap(self):
+        """
+        A bar that opened above the last close is a 3-wide move even if its
+        own high minus its own low is 1. Reading the bar alone would call a
+        gap quiet.
+        """
+        ranges = indicators.true_range([10.0, 14.0], [9.0, 13.0], [9.5, 13.5])
+        self.assertEqual(ranges[1], 4.5)          # 14 - 9.5
+
+    def test_the_atr_is_seeded_with_the_mean_of_its_first_ranges(self):
+        highs = [2.0, 3.0, 4.0, 5.0]
+        lows = [1.0, 2.0, 3.0, 4.0]
+        closes = [1.5, 2.5, 3.5, 4.5]
+        # ranges: 1.0, then 3 - 1.5 = 1.5 each
+        values = indicators.atr(highs, lows, closes, 3)
+        self.assertEqual(values[:2], [None, None])
+        self.assertAlmostEqual(values[2], (1.0 + 1.5 + 1.5) / 3)
+        # Wilder's step: previous + (range - previous) / period
+        self.assertAlmostEqual(values[3],
+                               values[2] + (1.5 - values[2]) / 3)
+
+    def test_the_atr_is_drawn_on_its_own_axis(self):
+        """
+        An ATR of 0.004 on the price axis of a chart at 1.2 does not read as a
+        low line: it drags the scale to zero and flattens every candle. The
+        page is told which axis a curve is on rather than guessing from the
+        size of the numbers.
+        """
+        highs = [float(i) + 1 for i in range(1, 21)]
+        curve = indicators.curve({'kind': 'atr', 'period': 3}, self.RAMP,
+                                 highs, self.RAMP)
+        self.assertTrue(curve['panel'])
+        self.assertEqual(curve['label'], 'ATR 3')
+        self.assertFalse(indicators.curve({'kind': 'sma', 'period': 3},
+                                          self.RAMP)['panel'])
+
+    def test_an_atr_of_the_closes_is_refused_rather_than_computed(self):
+        """A different number with the same name, which is the worst kind."""
+        with self.assertRaises(ValueError) as caught:
+            indicators.curve({'kind': 'atr', 'period': 3}, self.RAMP)
+        self.assertIn('highs', str(caught.exception))
+
+    def test_a_declaration_becomes_a_drawable_curve(self):
+        curve = indicators.curve({'kind': 'sma', 'period': 3}, self.RAMP)
+        self.assertEqual(curve['label'], 'SMA 3')
+        self.assertEqual(curve['values'][2], 2.0)
+
+    def test_a_band_declares_its_three_series(self):
+        curve = indicators.curve(
+            {'kind': 'bollinger', 'period': 5, 'deviations': 1.5}, self.RAMP)
+        self.assertEqual(curve['label'], 'Bollinger 5 / 1.5')
+        for name in ('middle', 'upper', 'lower'):
+            self.assertEqual(len(curve[name]), len(self.RAMP))
+
+    def test_an_indicator_nobody_wrote_is_refused_by_name(self):
+        """
+        Rather than quietly missing from the chart: a strategy declaring one
+        has made a mistake, and a curve that is absent looks exactly like a
+        curve that was never asked for.
+        """
+        with self.assertRaises(ValueError) as caught:
+            indicators.curve({'kind': 'kagi', 'period': 3}, self.RAMP)
+        self.assertIn('kagi', str(caught.exception))
+
+    def test_declaring_nothing_draws_nothing(self):
+        self.assertEqual(indicators.curves(None, self.RAMP), [])
+        self.assertEqual(indicators.curves((), self.RAMP), [])

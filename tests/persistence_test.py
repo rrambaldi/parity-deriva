@@ -394,6 +394,22 @@ class TestEventLogRoundTrip(TempDirCase):
     def test_the_log_lands_in_the_log_dir(self):
         self.assertTrue(self.saver().getFileName().startswith(self.tmpdir))
 
+    def test_the_log_rolls_over_to_a_new_file_at_midnight(self):
+        """
+        Was: after midnight the file was closed and reopened, but under the
+             same name - getFileName() reads self.started, which nothing
+             updated - so every later event still went into day one's file.
+        Now: the date moves on with the file.
+        """
+        saver = self.saver()
+        saver.started = datetime.date.today() - datetime.timedelta(days=1)
+        saver.execute_event(self.candle())
+        today = datetime.date.today().strftime("%Y%m%d")
+        self.assertEqual(saver.started, datetime.date.today())
+        self.assertEqual(os.path.basename(saver.f.name), "RT-%s.log" % today)
+        with open(saver.getFileName()) as fh:
+            self.assertEqual(json.loads(fh.readline())['_type'], 'CANDLE')
+
     def test_append_is_the_default_mode(self):
         saver = EventSaver(setup=self.settings, logname='A')
         self.addCleanup(saver.quit)

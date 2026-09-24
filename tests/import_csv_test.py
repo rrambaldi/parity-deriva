@@ -9,6 +9,7 @@ of the two sides, and that a second run changes nothing.
 import os
 import sys
 import unittest
+from unittest import mock
 
 import pandas as pd
 
@@ -51,6 +52,9 @@ class ImportCase(TempDirCase):
 
 
 class TestNames(unittest.TestCase):
+
+    def test_an_exporters_name_for_the_dax_is_the_stacks(self):
+        self.assertEqual(import_csv.instrument_name('deuidxeur'), 'DE30_EUR')
 
     def test_instrument_gets_its_separator(self):
         self.assertEqual(import_csv.instrument_name('eurusd'), 'EUR_USD')
@@ -96,8 +100,23 @@ class TestImport(ImportCase):
         self.csv('BID', range(3))
         self.run_import()
         first = self.store_key(self.path("EUR_USD.hd5"))
+        size = os.path.getsize(self.path("EUR_USD.hd5"))
         self.run_import()
         pd.testing.assert_frame_equal(first, self.store_key(self.path("EUR_USD.hd5")))
+        # not rewritten either: HDF5 keeps a rewritten key's old blocks, and
+        # the page's import button would grow the store on every press
+        self.assertEqual(os.path.getsize(self.path("EUR_USD.hd5")), size)
+
+    def test_rows_after_the_series_are_appended_not_rewritten(self):
+        self.csv('ASK', range(3))
+        self.csv('BID', range(3))
+        self.run_import()
+        self.csv('ASK', range(3, 6), name="eurusd_d1_20160124_20160126")
+        self.csv('BID', range(3, 6), name="eurusd_d1_20160124_20160126")
+        self.run_import()
+        frame = self.store_key(self.path("EUR_USD.hd5"))
+        self.assertEqual(len(frame.index), 6)
+        self.assertTrue(frame.index.is_unique and frame.index.is_monotonic_increasing)
 
     def test_a_later_file_extends_the_key(self):
         self.csv('ASK', range(3))
@@ -112,6 +131,51 @@ class TestImport(ImportCase):
         frame = self.store_key(self.path("EUR_USD.hd5"))
         self.assertEqual(len(frame.index), 5)
         self.assertTrue(frame.index.is_monotonic_increasing)
+
+    def test_two_sets_of_one_series_are_both_imported(self):
+        """
+        Was: files were paired by instrument and timeframe, so a second export
+             of the same series replaced the first in the pairing unseen.
+        Now: a set is the -ASK/-BID pair sharing a name, and each is merged.
+        """
+        self.csv('ASK', range(3))
+        self.csv('BID', range(3))
+        self.csv('ASK', range(3, 6), name="eurusd_d1_20160124_20160126")
+        self.csv('BID', range(3, 6), name="eurusd_d1_20160124_20160126")
+        self.run_import()
+        self.assertEqual(len(self.store_key(self.path("EUR_USD.hd5")).index), 6)
+
+    def test_a_set_already_imported_is_not_read_again(self):
+        self.csv('ASK', range(3))
+        self.csv('BID', range(3))
+        self.run_import()
+        lines = []
+        with mock.patch.object(import_csv, 'read_side',
+                               side_effect=AssertionError("read again")):
+            self.assertEqual(import_csv.main(
+                [self.tmpdir, '--data-dir', self.tmpdir], report=lines.append), 0)
+        self.assertEqual(len(lines), 1)
+        self.assertIn('already imported', lines[0])
+
+    def test_a_set_whose_files_changed_is_imported_again(self):
+        self.csv('ASK', range(3))
+        self.csv('BID', range(3))
+        self.run_import()
+        self.csv('ASK', range(4))
+        self.csv('BID', range(4))
+        self.run_import()
+        self.assertEqual(len(self.store_key(self.path("EUR_USD.hd5")).index), 4)
+
+    def test_progress_runs_to_the_bytes_of_the_sets_read(self):
+        self.csv('ASK', range(3))
+        self.csv('BID', range(3))
+        seen = []
+        import_csv.main([self.tmpdir, '--data-dir', self.tmpdir], report=lambda line: None,
+                        progress=lambda done, total, text: seen.append((done, total)))
+        total = sum(os.path.getsize(self.path(n)) for n in os.listdir(self.tmpdir)
+                    if n.endswith('.csv'))
+        self.assertEqual(seen[-1], (total, total))
+        self.assertEqual([d for d, _ in seen], sorted(d for d, _ in seen))
 
     def test_a_lone_side_is_refused(self):
         self.csv('ASK', range(3))

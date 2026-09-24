@@ -81,6 +81,10 @@ class Capabilities(object):
 	close_reason = False
 	#: the broker accepts an expiry on a resting order
 	order_expiry = False
+	#: a resting order dies at its gtdTime, whoever kills it: the broker
+	#: (order_expiry) or this project's own poller cancelling it. What a
+	#: strategy whose orders live a fixed number of bars needs
+	expiring_orders = False
 	#: the order call returns the outcome, rather than only an acknowledgement
 	synchronous_orders = False
 	#: the stop of an open trade can be moved after the fact. Needed by any
@@ -93,6 +97,11 @@ class Capabilities(object):
 	#: trade a ladder and the account a fixed stop - the one failure this
 	#: project is built to make impossible.
 	stop_modify = False
+	#: the orders are filled by this stack's own simulator: there is no
+	#: broker behind the provider, only a price feed. A wiring reads this to
+	#: leave the shadow and the parity monitor out - they would be a second
+	#: simulator comparing itself to the first
+	paper = False
 
 	def __init__(self, **declared):
 		for key, value in declared.items():
@@ -154,6 +163,24 @@ class Provider(object):
 
 	# --------------------------------------------------------------- naming
 
+	def configured(self):
+		"""Are this provider's credentials there at all?"""
+		return False
+
+	def accounts(self):
+		"""
+		The accounts these credentials reach: [{id, name, type, currency,
+		balance, demo}]. A provider that cannot list them raises.
+		"""
+		raise CapabilityError("%s cannot list its accounts" % self.name)
+
+	def balance(self, account=None):
+		"""What `account` (or the configured one) holds, for the sizing."""
+		for row in self.accounts():
+			if account in (None, '', row['id']):
+				return row['balance']
+		raise ProviderError("%s has no account %r" % (self.name, account))
+
 	def precision(self, instrument):
 		"""Decimal places this provider accepts for an order price."""
 		from parity_deriva.lib.utils import pricePrecision
@@ -183,6 +210,7 @@ class OANDAProvider(Provider):
 		distinct_stop_limit=True,
 		close_reason=True,
 		order_expiry=True,
+		expiring_orders=True,
 		synchronous_orders=True,
 		# not an amend: PUT /trades/{id}/orders cancels the stop the trade
 		# carries and attaches the new one, in one transaction batch. The
@@ -191,6 +219,23 @@ class OANDAProvider(Provider):
 		# See execution/execution.OANDAExecutionHandler.modifyStop.
 		stop_modify=True,
 	)
+
+	def configured(self):
+		return bool(getattr(self.setup, 'ACCESS_TOKEN', ''))
+
+	def accounts(self):
+		import requests
+		base = "https://%s/v3/accounts" % self.setup.API_DOMAIN
+		headers = {'Authorization': 'Bearer ' + self.setup.ACCESS_TOKEN}
+		out = []
+		for row in requests.get(base, headers=headers, timeout=20).json().get('accounts', []):
+			summary = requests.get("%s/%s/summary" % (base, row['id']), headers=headers,
+								   timeout=20).json().get('account', {})
+			out.append({'id': row['id'], 'name': summary.get('alias') or row['id'],
+						'type': 'fxTrade', 'currency': summary.get('currency'),
+						'balance': float(summary.get('balance') or 0),
+						'demo': str(getattr(self.setup, 'DOMAIN', '')) != 'real'})
+		return out
 
 	def candles(self, **args):
 		from parity_deriva.data.candles import ForexCandles
@@ -245,15 +290,40 @@ class EToroProvider(Provider):
 
 	def __init__(self, setup=None):
 		Provider.__init__(self, setup)
+		# Copied before being changed: a spread model is configuration of
+		# this instance, and mutating the class attribute would have one
+		# configured session grant bid/ask to every other provider object
+		# in the process.
+		declared = dict((name, getattr(EToroProvider.capabilities, name))
+						for name in EToroProvider.capabilities.names())
 		if getattr(self.setup, 'ETORO_SPREAD', None) is not None:
-			# Copied before being changed: a spread model is configuration of
-			# this instance, and mutating the class attribute would have one
-			# configured session grant bid/ask to every other provider object
-			# in the process.
-			declared = dict((name, getattr(EToroProvider.capabilities, name))
-							for name in EToroProvider.capabilities.names())
 			declared['bid_ask_candles'] = True
-			self.capabilities = Capabilities(**declared)
+		# eToro does not expire an order, and data/etoro.EToroTransactions
+		# cancels one once its gtdTime has passed: the order still dies
+		if getattr(self.setup, 'ETORO_ENFORCE_EXPIRY', True):
+			declared['expiring_orders'] = True
+		self.capabilities = Capabilities(**declared)
+
+	def configured(self):
+		return bool(getattr(self.setup, 'ETORO_API_KEY', '')
+					and getattr(self.setup, 'ETORO_USER_KEY', ''))
+
+	def accounts(self):
+		"""
+		The one account the keys reach, demo or real as DOMAIN says. Its
+		balance is the portfolio's cash credit, in dollars: eToro keeps every
+		account in USD.
+		"""
+		from parity_deriva.lib.etoro import EToroAPI
+		api = EToroAPI(setup=self.setup)
+		status, payload = api.get('portfolio')
+		if status != 200:
+			raise ProviderError("eToro portfolio: status %s" % status)
+		portfolio = (payload or {}).get('clientPortfolio') or {}
+		return [{'id': 'demo' if api.demo else 'real',
+				 'name': 'virtual portfolio' if api.demo else 'real portfolio',
+				 'type': 'eToro', 'currency': 'USD',
+				 'balance': float(portfolio.get('credit') or 0), 'demo': api.demo}]
 
 	def candles(self, **args):
 		from parity_deriva.data.etoro import EToroCandles
@@ -317,10 +387,27 @@ class IGProvider(Provider):
 		# GOOD_TILL_DATE with a goodTillDate, so the strategies' end-of-day
 		# expiry is the broker's to enforce rather than ours.
 		order_expiry=True,
+		expiring_orders=True,
 		# POST answers with a dealReference. What happened has to be read from
 		# GET /confirms afterwards.
 		synchronous_orders=False,
 	)
+
+	def configured(self):
+		return bool(getattr(self.setup, 'IG_API_KEY', '')
+					and getattr(self.setup, 'IG_IDENTIFIER', ''))
+
+	def accounts(self):
+		from parity_deriva.lib.ig import IGAPI
+		api = IGAPI(setup=self.setup)
+		status, payload = api.get('accounts')
+		if status != 200:
+			raise ProviderError("IG accounts: status %s" % status)
+		return [{'id': row.get('accountId'), 'name': row.get('accountName'),
+				 'type': row.get('accountType'), 'currency': row.get('currency'),
+				 'balance': float((row.get('balance') or {}).get('balance') or 0),
+				 'demo': api.demo}
+				for row in (payload or {}).get('accounts', [])]
 
 	def candles(self, **args):
 		from parity_deriva.data.ig import IGCandles
@@ -349,6 +436,53 @@ class IGProvider(Provider):
 	def granularity(self, granularity):
 		from parity_deriva.lib.ig import resolution
 		return resolution(granularity)
+
+
+class CapitalProvider(IGProvider):
+	"""
+	Capital.com: IG's handlers, talking through lib/capital.CapitalAPI.
+
+	The same capabilities as IG, measured the same way: bid and ask on every
+	bar, history by date, a working order with a goodTillDate, no leg named on
+	a close. Unlike IG, nothing meters the history.
+	"""
+
+	name = 'capital'
+
+	def __init__(self, setup=None):
+		from parity_deriva.lib.capital import setupOf
+		IGProvider.__init__(self, setupOf(setup if setup is not None else settings))
+
+	def configured(self):
+		return bool(getattr(self.setup, 'IG_API_KEY', '')
+					and getattr(self.setup, 'IG_IDENTIFIER', ''))
+
+	def api(self):
+		from parity_deriva.lib.capital import CapitalAPI
+		return CapitalAPI(setup=self.setup)
+
+	def accounts(self):
+		api = self.api()
+		status, payload = api.get('accounts')
+		if status != 200:
+			raise ProviderError("Capital.com accounts: status %s" % status)
+		return [{'id': row.get('accountId'), 'name': row.get('accountName'),
+				 'type': row.get('accountType'), 'currency': row.get('currency'),
+				 'balance': float((row.get('balance') or {}).get('balance') or 0),
+				 'demo': api.demo}
+				for row in (payload or {}).get('accounts', [])]
+
+	def candles(self, **args):
+		args.setdefault('api', self.api())
+		return IGProvider.candles(self, **args)
+
+	def transactions(self, **args):
+		args.setdefault('api', self.api())
+		return IGProvider.transactions(self, **args)
+
+	def execution(self, **args):
+		args.setdefault('api', self.api())
+		return IGProvider.execution(self, **args)
 
 
 class IBProvider(Provider):
@@ -405,6 +539,9 @@ class IBProvider(Provider):
 			declared['bid_ask_candles'] = True
 			self.capabilities = Capabilities(**declared)
 
+	def configured(self):
+		return bool(getattr(self.setup, 'IB_ACCOUNT_ID', ''))
+
 	def candles(self, **args):
 		from parity_deriva.data.ib import IBCandles
 		args.setdefault('setup', self.setup)
@@ -434,13 +571,219 @@ class IBProvider(Provider):
 		return bar(granularity)
 
 
+class MT5Provider(Provider):
+	"""
+	MetaTrader 5, through the terminal running under Wine and the bridge
+	scripts/mt5_bridge.sh serves. Demo accounts only: see lib/mt5.py.
+	"""
+
+	name = 'mt5'
+	capabilities = Capabilities(
+		# Bars are bid with the bar's spread in points, so ask is derived
+		# from the broker's own figure rather than a configured one.
+		bid_ask_candles=True,
+		dated_history=True,
+		max_history_candles=None,
+		# The package has no push; data/mt5.py polls.
+		price_stream=False,
+		transaction_stream=False,
+		order_types=frozenset(['MARKET', 'STOP', 'LIMIT']),
+		distinct_stop_limit=True,
+		# A closing deal's reason is SL or TP when the broker's leg took it.
+		close_reason=True,
+		# ORDER_TIME_SPECIFIED where the symbol allows it, and our own
+		# cancel at gtdTime where it does not.
+		order_expiry=True,
+		expiring_orders=True,
+		# order_send answers with the outcome: DONE for a fill, PLACED for a
+		# resting order, a retcode for a refusal.
+		synchronous_orders=True,
+		# TRADE_ACTION_SLTP on the position, target sent again with it.
+		stop_modify=True,
+	)
+
+	def configured(self):
+		from parity_deriva.lib.mt5 import credentials, terminals, MT5Error
+		for entry in terminals(self.setup):
+			try:
+				credentials(self.setup, entry)
+				return True
+			except MT5Error:
+				continue
+		return False
+
+	def accounts(self):
+		"""
+		One row per terminal in MT5_TERMINALS - each is one account. A
+		terminal that cannot be reached is logged and left out, so one bridge
+		down does not hide the others; all of them down raises.
+		"""
+		from parity_deriva.lib.mt5 import connect, terminals, MT5Error
+		out, errors = [], []
+		for entry in terminals(self.setup):
+			try:
+				api = connect(self.setup, entry)
+				row, error = api.account_info()
+				if not row:
+					raise MT5Error("account_info: %s" % (error,))
+			except MT5Error as exc:
+				self.logger.error("MT5 terminal %s: %s" % (entry.get('bridge'), exc))
+				errors.append(str(exc))
+				continue
+			out.append({'id': str(row['login']), 'name': row.get('name') or str(row['login']),
+						'type': 'MT5', 'currency': row.get('currency'),
+						'balance': float(row.get('balance') or 0), 'demo': api.demo})
+		if not out and errors:
+			raise ProviderError("MT5: %s" % "; ".join(errors))
+		return out
+
+	def candles(self, **args):
+		from parity_deriva.data.mt5 import MT5Candles
+		args.setdefault('setup', self.setup)
+		return MT5Candles(**args)
+
+	def transactions(self, **args):
+		from parity_deriva.data.mt5 import MT5Transactions
+		args.setdefault('setup', self.setup)
+		return MT5Transactions(**args)
+
+	def execution(self, **args):
+		from parity_deriva.execution.mt5 import MT5ExecutionHandler
+		args.setdefault('setup', self.setup)
+		return MT5ExecutionHandler(**args)
+
+	def precision(self, instrument):
+		from parity_deriva.lib.mt5 import pricePrecision
+		return pricePrecision(instrument, self.setup)
+
+	def granularity(self, granularity):
+		from parity_deriva.lib.mt5 import timeframe
+		timeframe(granularity)
+		return granularity
+
+
+class TwelveDataProvider(Provider):
+	"""
+	Twelve Data's candles with this stack's simulator as the broker.
+
+	The paper session. Every broker session runs a shadow simulator on its
+	own broker's candles, which measures that broker against itself; this
+	one runs the same strategy on a third party's candles and fills its
+	orders itself, so every broker can be measured against the same series
+	nobody traded on. The execution handler IS backtest/oanda.OANDABacktester
+	and the "transaction stream" is backtest/offline.SimulatedBroker, which
+	promotes its fills to the events a broker would send - the wiring
+	scripts/live.py already knows, and the page reads it as any session.
+
+	The capabilities are the simulator's, not a broker's: it tells a STOP
+	from a LIMIT, names the leg that closed a trade, expires a resting order
+	at its gtdTime and moves a stop. What it cannot do is quote a bid and an
+	ask, because Twelve Data serves one series - so TWELVEDATA_SPREAD is a
+	model, off until set, exactly as ETORO_SPREAD is.
+	"""
+
+	name = 'twelvedata'
+	capabilities = Capabilities(
+		bid_ask_candles=False,
+		dated_history=True,
+		max_history_candles=5000,
+		price_stream=False,
+		transaction_stream=False,
+		order_types=frozenset(['MARKET', 'STOP', 'LIMIT']),
+		distinct_stop_limit=True,
+		close_reason=True,
+		order_expiry=True,
+		expiring_orders=True,
+		synchronous_orders=True,
+		stop_modify=True,
+		paper=True,
+	)
+
+	def __init__(self, setup=None):
+		Provider.__init__(self, setup)
+		if getattr(self.setup, 'TWELVEDATA_SPREAD', None) is not None:
+			# copied before being changed, for the reason the eToro provider
+			# copies its own
+			declared = dict((name, getattr(TwelveDataProvider.capabilities, name))
+							for name in TwelveDataProvider.capabilities.names())
+			declared['bid_ask_candles'] = True
+			self.capabilities = Capabilities(**declared)
+
+	def configured(self):
+		return bool(getattr(self.setup, 'TWELVEDATA_API_KEY', ''))
+
+	def accounts(self):
+		"""
+		The one account: the simulator's, opened with EQUITY. Its currency is
+		None on purpose - the simulator keeps its balance in the instrument's
+		quote currency, whichever that is, and scripts/live.quoteBalance
+		takes an account without a currency at face value.
+		"""
+		return [{'id': 'paper', 'name': 'Twelve Data · simulatore', 'type': 'paper',
+				 'currency': None, 'balance': float(getattr(self.setup, 'EQUITY', 100000)),
+				 'demo': True}]
+
+	def candles(self, **args):
+		from parity_deriva.data.twelvedata import TwelveDataCandles
+		args.setdefault('setup', self.setup)
+		return TwelveDataCandles(**args)
+
+	def execution(self, **args):
+		# float: EQUITY is a Decimal and the simulator adds floats to it
+		from parity_deriva.backtest.oanda import OANDABacktester
+		args.setdefault('setup', self.setup)
+		args.setdefault('balance', float(getattr(self.setup, 'EQUITY', 100000)))
+		args.pop('sized', None)
+		return OANDABacktester(**args)
+
+	def transactions(self, **args):
+		from parity_deriva.backtest.offline import SimulatedBroker
+		return SimulatedBroker(setup=self.setup)
+
+	def simulator(self, **args):
+		raise CapabilityError("%s is the paper account: its execution handler "
+							  "is the simulator, so there is no shadow to run "
+							  "beside it" % self.name)
+
+	def granularity(self, granularity):
+		from parity_deriva.lib.twelvedata import interval
+		interval(granularity)
+		return granularity
+
+
 #: every provider that can be named in settings.PROVIDER
 PROVIDERS = {
 	OANDAProvider.name: OANDAProvider,
 	EToroProvider.name: EToroProvider,
 	IGProvider.name: IGProvider,
+	CapitalProvider.name: CapitalProvider,
 	IBProvider.name: IBProvider,
+	MT5Provider.name: MT5Provider,
+	TwelveDataProvider.name: TwelveDataProvider,
 }
+
+
+def history(provider, instrument, granularity, since=None, bars=500):
+	"""
+	The provider's own complete bars after `since` (or the last `bars` of
+	them), read to the end: a warm-up or a price, not a stream.
+	"""
+	import datetime
+	from parity_deriva.lib.utils import granularityToTimedelta
+	period = granularityToTimedelta(granularity)
+	start = since + period if since is not None \
+		else datetime.datetime.utcnow() - bars * period
+	source = provider.candles(pairs=[instrument], granularity=granularity,
+							  dtfrom=start)
+	got = []
+
+	class Collect(object):
+		def put(self, event):
+			if str(event) == 'CANDLE':
+				got.append(event)
+	source.set_queue(Collect())
+	source.stream_to_queue()
+	return got
 
 
 def available():

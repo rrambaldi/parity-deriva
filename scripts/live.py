@@ -33,11 +33,19 @@ before letting it send anything.
 """
 
 import argparse
+import datetime
+import json
+import os
+import signal
 import sys
+import threading
+import time
 
+from parity_deriva.data.candledb import CandleRecorder
 from parity_deriva.etc import settings
+from parity_deriva.event.event import StatusEvent
 from parity_deriva.event.saver import EventSaver
-from parity_deriva.lib.utils import getLogger
+from parity_deriva.lib.utils import getLogger, granularityToTimedelta
 from parity_deriva.portfolio.moneymanager import MoneyManager
 from parity_deriva.portfolio.trailer import Trailer
 from parity_deriva.strategy import plugins
@@ -60,6 +68,18 @@ from parity_deriva.trading.parity import ParityMonitor
 STRATEGIES = {
     'AG01': ('parity_deriva.strategy.AG01', 'AG01', ('bid_ask_candles',), 'pairs'),
     'AG02': ('parity_deriva.strategy.AG02', 'AG02', ('bid_ask_candles',), 'pairs'),
+    'AG01-MOD': ('parity_deriva.strategy.AG01MOD', 'AG01MOD',
+                 ('bid_ask_candles',), 'pairs'),
+    'H401-PULLBACK-EMA':
+        ('parity_deriva.strategy.H401', 'H401', ('bid_ask_candles',), 'pairs'),
+    'H402-BREAKOUT':
+        ('parity_deriva.strategy.H402', 'H402', ('bid_ask_candles',), 'pairs'),
+    'H403-BOLLINGER':
+        ('parity_deriva.strategy.H403', 'H403', ('bid_ask_candles',), 'pairs'),
+    'H404-LIVELLI-DAILY':
+        ('parity_deriva.strategy.H404', 'H404', ('bid_ask_candles',), 'pairs'),
+    'H405-MOMENTUM-RSI':
+        ('parity_deriva.strategy.H405', 'H405', ('bid_ask_candles',), 'pairs'),
     'BO01': ('parity_deriva.strategy.BO01', 'BO01', (), 'pair'),
     'BO02': ('parity_deriva.strategy.BO02', 'BO02', (), 'pair'),
     'BO03': ('parity_deriva.strategy.BO03', 'BO03', (), 'pair'),
@@ -87,13 +107,51 @@ def load_strategy(name):
     return getattr(sys.modules[module], attr), needs, style
 
 
-def add_strategy(engine, strategy_class, style, pairs, granularity):
-    """Register the strategy the way its constructor expects to be called."""
+def add_strategy(engine, strategy_class, style, pairs, granularity,
+                 provider=None, **kwargs):
+    """
+    Register the strategy the way its constructor expects to be called.
+
+    One that can warm up is given its history first, off the bus: no order
+    comes out of bars that printed before the session started.
+    """
     if style == 'pairs':
-        engine.add_handler(strategy_class(pairs=pairs, granularity=granularity))
-        return
-    for pair in pairs:
-        engine.add_handler(strategy_class(pair=pair, granularity=granularity))
+        made = [strategy_class(pairs=pairs, granularity=granularity, **kwargs)]
+    else:
+        made = [strategy_class(pair=pair, granularity=granularity, **kwargs)
+                for pair in pairs]
+    for strategy in made:
+        if callable(getattr(strategy, 'warmup', None)):
+            strategy.warmup(provider)
+        engine.add_handler(strategy)
+
+
+def fromForm(text):
+    """
+    A backtest page's form as this run: read by web/service.backtestArgs,
+    the code the backtest itself was read with, so what goes live is what
+    was tested. Returns the service's keyword arguments.
+    """
+    from parity_deriva.web import service
+    fields = json.loads(text)
+    spec = service.backtestArgs(lambda key: service._text(fields.get(key)))
+    # live only: the capital the risk is a percentage of, in the account's
+    # currency. None sizes on the account's balance (quoteBalance)
+    spec['capital'] = service.parseAmount(service._text(fields.get('capital')),
+                                          'capital', None)
+    # a plugin's own engine refuses in the backtest what it does not apply
+    # (web/service.Service.backtest); live refuses the same, or the account
+    # would trade a rule the backtest never had
+    plugin = plugins.viewers().get(spec['strategy'])
+    if plugin is not None:
+        import inspect
+        takes = inspect.signature(plugin['run']).parameters
+        for name, label in (('maxStopPips', 'max stop'), ('session', 'hours'),
+                            ('news', 'news')):
+            if spec.get(name) and name not in takes:
+                raise SystemExit("%s runs its own engine, which has no %s: "
+                                 "leave it empty" % (spec['strategy'], label))
+    return spec
 
 
 def parse(argv):
@@ -124,6 +182,20 @@ def parse(argv):
     parser.add_argument('--dry-run', action='store_true',
                         help="print the plan and the provider's capabilities, "
                              "register nothing, touch no network")
+    parser.add_argument('--form', default=None,
+                        help="a backtest page's fields, as JSON: strategy, "
+                             "instrument, timeframe, parameters, risk and the "
+                             "account's rules, read the way the backtest read them")
+    parser.add_argument('--account', default=None,
+                        help="the account traded, for its balance; the "
+                             "provider's own setting decides which one deals")
+    parser.add_argument('--events', default=None,
+                        help="path prefix of the event log (a file a day), "
+                             "for a page to follow")
+    parser.add_argument('--candle-db', default=None, dest='candle_db',
+                        help="the SQLite file every session writes its candles "
+                             "to, one row per provider and bar (default: "
+                             "settings.CANDLE_DB)")
     parser.add_argument('--live', action='store_true',
                         help="required when settings.DOMAIN is 'real'. Without "
                              "it a real-money account is refused")
@@ -133,7 +205,8 @@ def parse(argv):
 def plan(args, provider, pairs, granularity, needs):
     lines = [
         "provider      %s" % provider.name,
-        "account       %s" % ("REAL MONEY" if str(
+        "account       %s" % ("PAPER (the simulator fills the orders)"
+                              if provider.capabilities.paper else "REAL MONEY" if str(
             getattr(settings, 'DOMAIN', 'practice')) == 'real' else "practice"),
         "instruments   %s" % ", ".join(pairs),
         "granularity   %s" % granularity,
@@ -151,6 +224,20 @@ def main(argv=None):
     args = parse(argv)
 
     provider = providers.get_provider(args.provider)
+    if provider.capabilities.paper:
+        # the execution handler IS the simulator: a shadow beside it would be
+        # a second simulator filling the same orders, and the parity monitor
+        # would be comparing the two copies
+        args.no_shadow = True
+    spec = fromForm(args.form) if args.form else None
+    if spec is not None:
+        args.strategy = spec['strategy']
+        args.instruments = [spec['instrument']]
+        args.granularity = spec['granularity']
+        if args.strategy not in STRATEGIES:
+            print("%s cannot run on a live account: %s"
+                  % (args.strategy, ", ".join(sorted(STRATEGIES))))
+            return 2
     pairs = args.instruments or list(getattr(settings, 'DEF_PAIRS', ['EUR_USD']))
     granularity = args.granularity or getattr(settings, 'DEF_GRANULARITY', 'M1')
     strategy_class, needs, style = load_strategy(args.strategy)
@@ -195,6 +282,12 @@ def main(argv=None):
                   "snapshot route\ndoes quote both sides, so measure the "
                   "spread there and set IB_SPREAD in\netc/settings.py, or run "
                   "a strategy that does not read a candle's ask\nand bid.")
+        if 'bid_ask_candles' in needs and provider.name == 'twelvedata':
+            print("Twelve Data serves one price series per bar. The live "
+                  "page's skew board\nprints each broker's median spread in "
+                  "pips: set TWELVEDATA_SPREAD in\netc/settings.py from it, "
+                  "or run a strategy that does not read a candle's\nask and "
+                  "bid.")
         return 2
 
     logger = getLogger()
@@ -207,9 +300,19 @@ def main(argv=None):
     for line in provider.capabilities.dump().split("\n"):
         logger.debug("capability %s" % line)
 
-    add_strategy(engine, strategy_class, style, pairs, granularity)
-    engine.add_handler(MoneyManager(pairs=pairs, units=args.units))
-    engine.add_handler(provider.execution())
+    # the first bar a signal may come from is the one still forming now: it
+    # closes after the session started, as every bar of a backtest closes
+    # before its order is placed. See MoneyManager.notBefore.
+    notBefore = datetime.datetime.utcnow() - granularityToTimedelta(granularity)
+    if spec is None:
+        add_strategy(engine, strategy_class, style, pairs, granularity)
+        engine.add_handler(MoneyManager(pairs=pairs, units=args.units,
+                                        notBefore=notBefore))
+        engine.add_handler(provider.execution())
+    else:
+        wire(engine, provider, spec, args, strategy_class, style, pairs, granularity,
+             notBefore)
+    stopAndClose(engine, logger)
 
     if 'stop_modify' in needs:
         # A climbing stop is a rule, not a level: an order states its stop once
@@ -227,7 +330,15 @@ def main(argv=None):
             for pair in pairs:
                 engine.add_handler(ParityMonitor(instrument=pair))
 
-    engine.add_handler(EventSaver())
+    engine.add_handler(EventSaver(logname=args.events) if args.events
+                       else EventSaver())
+    # every bar this session sees, next to every other session's, so the
+    # brokers can be laid side by side afterwards (data/candledb.py). The
+    # session id is the folder the event log lives in
+    engine.add_handler(CandleRecorder(
+        path=args.candle_db or getattr(settings, 'CANDLE_DB', None),
+        provider=provider.name, account=args.account or '',
+        session=os.path.basename(os.path.dirname(args.events)) if args.events else None))
 
     logger.info("registering candles: %s %s" % (", ".join(pairs), granularity))
     engine.add_handler(provider.candles(pairs=pairs, granularity=granularity))
@@ -238,6 +349,143 @@ def main(argv=None):
     logger.info("starting trading engine")
     engine.run()
     return 0
+
+
+def wire(engine, provider, spec, args, strategy_class, style, pairs, granularity,
+         notBefore=None):
+    """
+    The strategy, the money manager and the execution handler of a run read
+    from a backtest's form.
+
+    Sized on the account: the risk is the form's, of what the account holds
+    now - not of the backtest's capital. A plugin's own engine applies the
+    stop and target scales itself, as it did in the backtest, so the money
+    manager must not apply them a second time.
+    """
+    from parity_deriva.backtest.ledger import _calendar
+    from parity_deriva.portfolio.session import SessionCloser, TradeTimer
+    plugin = plugins.viewers().get(spec['strategy'])
+    risk = spec['risk']
+    rules = []
+    if plugin is not None:
+        # the plugin's engine closes on the clock itself, as it did in the
+        # backtest, and sends the CloseTradeEvent: see ftw_ab/live.py
+        kwargs = {'params': spec['params'], 'slScale': spec['slScale'],
+                  'tpScale': spec['tpScale'], 'maxBars': spec['maxBars'],
+                  'intraday': spec['intraday'], 'setup': settings}
+        scales = {}
+        if risk is None:
+            from parity_deriva.strategy.private.ftw_ab import config as ab_config
+            risk = ab_config.RISK_PER_TRADE
+    else:
+        kwargs = spec['strategyArgs'] or {}
+        scales = {'slScale': spec['slScale'], 'tpScale': spec['tpScale']}
+        # the same two handlers backtest/ledger.py registers
+        if spec['intraday']:
+            rules.append(SessionCloser(
+                at=spec['session'][1] if spec['session'] else '23:59',
+                granularity=granularity, instrument=pairs[0]))
+        if spec['maxBars']:
+            rules.append(TradeTimer(spec['maxBars'], granularity=granularity,
+                                    instrument=pairs[0]))
+    add_strategy(engine, strategy_class, style, pairs, granularity,
+                 provider=provider, **kwargs)
+    balance = None
+    if risk is not None:
+        balance = quoteBalance(provider, args.account, pairs[0], granularity,
+                               getattr(engine.handlers[-1], 'rows', None),
+                               amount=spec.get('capital'))
+    reference = spec.get('capital') is not None and balance is not None
+    getLogger().info("sizing: risk %s of %s (%s)%s" % (
+        risk, balance, pairs[0][-3:],
+        ", a reference capital moved by this session's closes, not the account's"
+        if reference else ""))
+    engine.add_handler(MoneyManager(
+        pairs=pairs, units=args.units, risk=risk, balance=balance, notBefore=notBefore,
+        # the rate the reference was converted at: a EUR account's P&L in
+        # EUR is added to a capital kept in USD at the same rate
+        reference=reference,
+        plRate=balance / spec['capital'] if reference else 1.0,
+        maxStopPips=spec['maxStopPips'], session=spec['session'],
+        calendar=_calendar(pairs[0], spec['news'], spec['newsImpacts'], settings),
+        **scales))
+    engine.add_handler(provider.execution(sized=risk is not None))
+    for rule in rules:
+        engine.add_handler(rule)
+
+
+#: seconds a stopped session waits for its closes to be reported before it
+#: exits anyway: the polled brokers answer within a few of their polls
+LIQUIDATE_SECONDS = 90
+
+
+def stopAndClose(engine, logger):
+    """
+    SIGTERM - the live page's stop - is "stop and close everything": the
+    money manager cancels this session's resting orders and closes its open
+    trades (MoneyManager.liquidate), and the process exits once the account
+    says nothing of this session's is left, or after LIQUIDATE_SECONDS.
+
+    The engine loop keeps running meanwhile, since it is what carries the
+    cancels and the closes to the broker and the fills back.
+    """
+    manager = next(h for h in engine.handlers if isinstance(h, MoneyManager))
+
+    def wait():
+        deadline = time.time() + LIQUIDATE_SECONDS
+        time.sleep(2)   # the cancels reach the money manager through the bus
+        while time.time() < deadline and not manager.settled():
+            time.sleep(1)
+        if manager.settled():
+            logger.info("STOP: nothing left open; exiting")
+        else:
+            logger.error("STOP: still open after %ds; exiting anyway - check the "
+                         "account" % LIQUIDATE_SECONDS)
+        engine.quit()
+        os._exit(0)
+
+    def handler(signum, frame):
+        if manager.liquidating:
+            return
+        logger.warning("STOP: stop and close everything")
+        engine.put(StatusEvent('LIQUIDATE'))
+        threading.Thread(target=wait, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, handler)
+
+
+def quoteBalance(provider, account, instrument, granularity, rows=None, amount=None):
+    """
+    The account's balance in the instrument's quote currency - or `amount`,
+    a reference capital held in the account's currency, converted the same
+    way: 1000 EUR on a EUR account trading EUR_USD is 1000 x the last close.
+
+    The money manager sizes in price units: a stop 0.0020 away on EUR_USD
+    loses units x 0.0020 US dollars, so the capital it takes the risk of has
+    to be in dollars too - as the backtest's capital is. An account held in
+    the base currency (EUR for EUR_USD) is converted at the last close; one
+    in a third currency is refused rather than guessed at.
+    """
+    row = next((a for a in provider.accounts() if account in (None, a['id'])), None)
+    if row is None:
+        raise SystemExit("%s has no account %r" % (provider.name, account))
+    balance, held = row['balance'], (row.get('currency') or '').upper()
+    if amount is not None:
+        balance = float(amount)
+    base, quote = instrument.split('_')[0], instrument.split('_')[-1]
+    if held in ('', quote):
+        return balance
+    if held != base:
+        raise SystemExit("account in %s, %s quoted in %s: no rate to size with"
+                         % (held, instrument, quote))
+    if rows:
+        price = rows[max(rows)][3]
+    else:
+        candles = providers.history(provider, instrument, granularity, bars=10)
+        if not candles:
+            raise SystemExit("no %s price to convert the balance at" % instrument)
+        price = candles[-1].mid['c']
+    return round(balance * float(price), 2)
 
 
 if __name__ == '__main__':

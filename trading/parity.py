@@ -140,6 +140,10 @@ class ParityMonitor(ExecutionHandler):
 			self.undecided += 1
 			self.logger.warning(
 				"PARITY undecided %s: real %s, simulated %s" % (key, real, simulated))
+			self.queue_event(StatusEvent({
+				'status': 'PARITY', 'kind': UNDECIDED, 'key': key,
+				'detail': "real %s, simulated %s" % (real, simulated),
+				'instrument': self.instrument}))
 		elif real != simulated:
 			found.append(Divergence(key, OUTCOME,
 									"real %s, simulated %s" % (real, simulated)))
@@ -158,8 +162,17 @@ class ParityMonitor(ExecutionHandler):
 		if decidable or found:
 			self.window.append(bool(found))
 		self.divergences.extend(found)
+		# Was: a divergence was a log line and nothing else. The web page
+		#      reads the JSONL event log, not the logger, so it saw the HALT
+		#      and never what led up to it.
+		# Now: each finding goes on the bus too. status is neither HALT,
+		#      RESUME nor LIQUIDATE, so the money manager passes it by, and
+		#      the event log picks it up like any other event.
 		for one in found:
 			self.logger.warning("PARITY %s" % one)
+			self.queue_event(StatusEvent({
+				'status': 'PARITY', 'kind': one.kind, 'key': one.key,
+				'detail': one.detail, 'instrument': self.instrument}))
 		del self.real[key]
 		del self.simulated[key]
 		self._judge()
@@ -215,6 +228,15 @@ class ParityMonitor(ExecutionHandler):
 			return
 		for breach in breaches:
 			self.logger.error("PARITY ALARM: %s" % breach)
+		# the page's log line for the alarm being up, under 'warn' as much as
+		# under 'halt' - once per change of what is breached, not once per
+		# intake: _judge runs on every fill, and a breached window would
+		# otherwise write the same line hundreds of times a day
+		if breaches != getattr(self, '_breached', None):
+			self._breached = list(breaches)
+			self.queue_event(StatusEvent({'status': 'PARITY_ALARM',
+										  'breaches': breaches,
+										  'instrument': self.instrument}))
 		if self.policy.get('action') != 'halt' or self.halted:
 			return
 		self.halted = True

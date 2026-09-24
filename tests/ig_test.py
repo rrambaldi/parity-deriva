@@ -391,14 +391,15 @@ class TimeTest(unittest.TestCase):
         is the clock the demo account was measured on - an expiry ten minutes
         behind UTC was refused as being in the past, while one thirty minutes
         ahead of UTC but behind both London and the account's own clock was
-        accepted. A naive datetime is the machine's local time, so the
-        expected value is computed the same way rather than written out: the
-        test would otherwise pass only on a machine set to UTC.
+        accepted.
+
+        A naive datetime is UTC and its digits go out unchanged: gtdTime is
+        built from the candle's own timestamp now (lib/utils.expiryAt), and
+        the candles are UTC. It used to be read as the machine's local time,
+        from when the expiry came from datetime.today().
         """
         when = datetime.datetime(2018, 1, 15, 23, 59, 0)
-        expected = when.astimezone(datetime.timezone.utc)
-        self.assertEqual(goodTillDate(when),
-                         expected.strftime('%Y/%m/%d %H:%M:%S'))
+        self.assertEqual(goodTillDate(when), '2018/01/15 23:59:00')
 
     def test_an_expiry_with_an_offset_is_converted_not_copied(self):
         """
@@ -704,19 +705,17 @@ class ExecutionTest(unittest.TestCase):
         This is what IG has that eToro does not, so nothing has to be
         cancelled on our side.
 
-        Was: the expiry was expected verbatim, '2018/01/15 23:59:00', which
-        pinned the wall clock being copied out. IG reads the field in UTC -
-        measured, see lib/ig.goodTillDate - and a strategy's gtdTime is the
-        machine's local time, so the two differ by the machine's offset on
-        every machine that is not on UTC. The expected value is computed the
-        same way the code converts it, which is the only form of this
-        assertion that is true anywhere.
+        The expiry goes out verbatim, and that is an assertion about two
+        things agreeing rather than about digits: IG reads the field in UTC
+        (measured, see lib/ig.goodTillDate) and a strategy's gtdTime is UTC
+        as well, being built from the candle's timestamp. While it came from
+        datetime.today() the two differed by the machine's offset, and this
+        test had to compute its own expectation the way the code did - which
+        is a test that cannot fail.
         """
         _route, body = self.handler.body(self.order())
-        expected = datetime.datetime(2018, 1, 15, 23, 59, 0).astimezone(
-            datetime.timezone.utc).strftime('%Y/%m/%d %H:%M:%S')
         self.assertEqual(body['timeInForce'], 'GOOD_TILL_DATE')
-        self.assertEqual(body['goodTillDate'], expected)
+        self.assertEqual(body['goodTillDate'], '2018/01/15 23:59:00')
 
     def test_an_order_without_an_expiry_rests_until_cancelled(self):
         _route, body = self.handler.body(self.order(gtdTime=None))
@@ -1174,3 +1173,54 @@ class HelpersTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CloseByRuleTest(unittest.TestCase):
+    """A CloseTradeEvent closes, at market, what this session opened there."""
+
+    def test_open_positions_on_the_instrument_are_closed(self):
+        from parity_deriva.event.event import CloseTradeEvent
+        setup = settings_stub()
+        api = FakeAPI(setup=setup)
+        handler = IGTransactions(setup=setup, pairs=['EUR_USD'], api=api)
+        handler.positions = {
+            'D1': {'instrument': 'EUR_USD', 'resting': False},
+            'D2': {'instrument': 'EUR_USD', 'resting': True},
+            'D3': {'instrument': 'DE30_EUR', 'resting': False}}
+        api.respond('positions', 200, {'positions': [
+            {'position': {'dealId': 'D1', 'size': 2.5, 'direction': 'SELL'}}]})
+        closed = handler.execute_event(CloseTradeEvent(
+            {'instrument': 'EUR_USD', 'reason': 'MAX_LENGTH'}))
+        self.assertEqual(closed, 1)
+        body = api.of('close_position')[0]['body']
+        self.assertEqual(body, {'dealId': 'D1', 'size': 2.5, 'orderType': 'MARKET',
+                                'direction': 'BUY'})
+
+
+class SizedTest(unittest.TestCase):
+    """Units sized on the account's risk become contracts."""
+
+    def test_units_over_contract_size(self):
+        from parity_deriva.execution.ig import IGExecutionHandler
+        setup = settings_stub()
+        setup.IG_INSTRUMENTS = {'EUR_USD': {'epic': 'E', 'expiry': '-', 'currency': 'USD',
+                                            'contractSize': 10000}}
+        handler = IGExecutionHandler(setup=setup, api=FakeAPI(setup=setup), sized=True)
+        self.assertEqual(handler.size('EUR_USD', -149895.0), 14.99)
+        plain = IGExecutionHandler(setup=setup, api=FakeAPI(setup=setup))
+        self.assertEqual(plain.size('EUR_USD', 1), 1)
+
+
+class DueTest(unittest.TestCase):
+    """Live, the next bar is not asked for before it can have closed."""
+
+    def test_no_request_before_the_next_bar_can_be_complete(self):
+        import datetime
+        setup = settings_stub()
+        api = FakeAPI(setup=setup)
+        candles = IGCandles(setup=setup, pairs=['EUR_USD'], granularity='H1', api=api)
+        candles.last['EUR_USD'] = datetime.datetime(2026, 9, 24, 10, 0)
+        self.assertEqual(candles.poll('EUR_USD', now=datetime.datetime(2026, 9, 24, 11, 59)), 0)
+        self.assertEqual(api.of('prices'), [])
+        candles.poll('EUR_USD', now=datetime.datetime(2026, 9, 24, 12, 0, 5))
+        self.assertEqual(len(api.of('prices')), 1)

@@ -73,6 +73,51 @@ def pricePrecision(instrument, setup=None):
 	return default
 
 
+def expiryAt(when, granularity, clock):
+	"""
+	The instant an order issued on this candle should die.
+
+	`clock` is (hour, minute, second) - "the end of the day", as AG01 and
+	AG02 spell it - and `when` is the candle's own timestamp.
+
+	The day is the one the candle **closes** in and not the one it opens in.
+	A signal is emitted when the bar closes, so on a daily bar those are two
+	different days: measured from the open, the order would be born after its
+	own expiry and could never fill. Measured from the close, an order from a
+	five minute bar rests until that evening exactly as it always did, and one
+	from a daily bar rests for the following day - which is the same rule read
+	on a chart where a bar is a day.
+
+	Was: datetime.today(), the machine's clock. Live that is roughly the
+	     candle's day; in a replay it is years away from it, so every order
+	     ever issued had an expiry in the future and nothing expired at all.
+	     AG01 on EUR_USD daily rested a bracket from 3 July 2022 and filled it
+	     on 15 November, at a price the market had left four months earlier.
+	Now: a function of the candle, like the signal's own key is - and for the
+	     same reason: replaying the same candles has to give the same run.
+	"""
+	hour, minute, second = clock
+	bar = granularityToTimedelta(granularity)
+	closes = when + bar if bar is not None else when
+	if hasattr(closes, 'to_pydatetime'):
+		closes = closes.to_pydatetime()
+	return closes.replace(hour=int(hour), minute=int(minute),
+						  second=int(second), microsecond=0)
+
+
+def pipSize(instrument, setup=None):
+	"""
+	What one pip of this instrument is worth, as a price difference.
+
+	Derived from the precision rather than from a second table: a pip is ten
+	ticks on every instrument this project knows - EUR_USD quotes five
+	decimals and its pip is 0.0001, the DAX quotes one and its point is 1 -
+	and a table would be the same numbers written twice, free to drift apart.
+	Add a table the day an instrument breaks the rule, not before.
+	"""
+	return 10.0 ** -(pricePrecision(instrument, setup) - 1)
+
+
 def roundPrice(instrument, value, setup=None):
 	"""
 	Round a derived price to what the instrument accepts.

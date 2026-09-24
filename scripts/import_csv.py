@@ -23,11 +23,15 @@ ask below bid would have every backtest buying under its own sell price. Pass
 
 Idempotent: a key is merged, not appended. Rows already in the store keep
 their place and the imported values win on a collision, so running it twice
-leaves the store exactly as the first run did.
+leaves the store exactly as the first run did. It does not even read it
+twice: the sha1 of every set imported is kept on the store key it went into,
+and a set whose files still hash the same is skipped without being read.
+Because the record lives on the key, a store deleted or rebuilt forgets it.
 """
 
 import argparse
 import glob
+import hashlib
 import os
 import re
 import sys
@@ -42,9 +46,15 @@ NAME = re.compile(r'^(?P<instrument>[^_]+)_(?P<timeframe>[^_]+)_'
                   re.IGNORECASE)
 
 
+#: an exporter's name for a market -> the name the stack trades it under
+ALIASES = {'DEUIDXEUR': 'DE30_EUR'}
+
+
 def instrument_name(raw):
     """eurusd -> EUR_USD. A name that already carries its separator is kept."""
     raw = raw.upper()
+    if raw in ALIASES:
+        return ALIASES[raw]
     if '_' not in raw and len(raw) == 6:
         return raw[:3] + '_' + raw[3:]
     return raw
@@ -73,17 +83,31 @@ def parse_name(path):
             match.group('side').upper())
 
 
-def read_side(path):
-    """One CSV as a frame indexed by its epoch-millisecond timestamp."""
-    frame = pd.read_csv(path)
+def read_side(path, progress=None):
+    """
+    One CSV as a frame indexed by its epoch-millisecond timestamp. Read in
+    chunks so that progress(bytes read so far) can be told as it goes.
+    """
+    parts = []
+    with open(path, 'rb') as handle:
+        for chunk in pd.read_csv(handle, chunksize=200000):
+            parts.append(chunk)
+            if progress is not None:
+                progress(handle.tell())
+    frame = pd.concat(parts, ignore_index=True)
     frame.index = pd.to_datetime(frame['timestamp'], unit='ms').dt.as_unit('us')
     frame.index.name = None
     return frame
 
 
-def build(ask_path, bid_path, swap=False):
-    """The store's flat 13-column frame from an ASK/BID file pair."""
-    ask, bid = read_side(ask_path), read_side(bid_path)
+def build(ask_path, bid_path, swap=False, progress=None):
+    """
+    The store's flat 13-column frame from an ASK/BID file pair. progress, if
+    given, is told the bytes of the pair read so far.
+    """
+    first = os.path.getsize(ask_path)
+    ask = read_side(ask_path, progress)
+    bid = read_side(bid_path, progress and (lambda n: progress(first + n)))
     if swap:
         ask, bid = bid, ask
     index = ask.index.intersection(bid.index)
@@ -109,7 +133,7 @@ def build(ask_path, bid_path, swap=False):
 def merge(path, key, frame, dry_run=False):
     """
     Put the frame into the store under key, keeping rows already there that
-    the import does not cover. Returns (added, replaced).
+    the import does not cover. Returns (added, replaced, written).
     """
     existing = None
     if os.path.exists(path):
@@ -127,29 +151,82 @@ def merge(path, key, frame, dry_run=False):
         added = len(frame.index) - replaced
         merged = pd.concat([kept, frame]).sort_index()
 
-    if not dry_run:
-        # ponytail: the whole key is rewritten rather than appended, so HDF5
-        # keeps the old blocks and the file grows. Harmless at D1; repack or
-        # switch to an append of only the new rows if M1 imports get heavy.
-        store = pd.HDFStore(path, mode='a')
-        try:
+    if dry_run:
+        return added, replaced, False
+    # Rewriting a key leaves its old blocks in the file - HDF5 does not give
+    # the space back - so a re-run that changes nothing writes nothing, and
+    # rows that only extend the series are appended rather than rewritten.
+    if existing is not None and merged.equals(existing):
+        return added, replaced, False
+    store = pd.HDFStore(path, mode='a')
+    try:
+        if existing is not None and frame.index.min() > existing.index.max():
+            store.append(key, frame)
+        else:
+            # ponytail: a correction inside the series still rewrites the
+            # whole key and grows the file; ptrepack reclaims it
             store.put(key, merged, format='table')
-        finally:
-            store.close()
-    return added, replaced
+    finally:
+        store.close()
+    return added, replaced, True
 
 
-def pairs(paths):
-    """Group the given CSV paths into {(instrument, granularity): {side: path}}."""
+def set_name(path):
+    """The import set a file belongs to: its name without -ASK/-BID.csv."""
+    return re.sub(r'-(ASK|BID)(\.csv)?$', '', os.path.basename(path),
+                  flags=re.IGNORECASE)
+
+
+def fingerprint(paths):
+    """sha1 over the files' bytes, in the order given."""
+    digest = hashlib.sha1()
+    for path in paths:
+        with open(path, 'rb') as handle:
+            for block in iter(lambda: handle.read(1 << 20), b''):
+                digest.update(block)
+    return digest.hexdigest()
+
+
+def imported(path, key):
+    """set name -> sha1 of every set already merged into this key."""
+    if not os.path.exists(path):
+        return {}
+    store = pd.HDFStore(path, mode='r')
+    try:
+        if key not in store:
+            return {}
+        return dict(getattr(store.get_storer(key).attrs, 'imported_sets', None) or {})
+    finally:
+        store.close()
+
+
+def remember(path, key, name, digest):
+    """Record a set as merged into key. put() drops attributes, so after it."""
+    sets = imported(path, key)
+    sets[name] = digest
+    store = pd.HDFStore(path, mode='a')
+    try:
+        store.get_storer(key).attrs.imported_sets = sets
+    finally:
+        store.close()
+
+
+def pairs(paths, report=print):
+    """
+    Group the given CSV paths into {(instrument, granularity, set): {side:
+    path}}. The set is the pair's shared name, so two exports of the same
+    series over different ranges are two sets, imported one after the other,
+    rather than one silently taking the other's place.
+    """
     found = {}
     for path in paths:
         parsed = parse_name(path)
         if parsed is None:
-            print("skipping %s: name is not <instrument>_<tf>_<from>_<to>-<SIDE>.csv"
+            report("skipping %s: name is not <instrument>_<tf>_<from>_<to>-<SIDE>.csv"
                   % os.path.basename(path))
             continue
         instrument, gran, side = parsed
-        found.setdefault((instrument, gran), {})[side] = path
+        found.setdefault((instrument, gran, set_name(path)), {})[side] = path
     return found
 
 
@@ -162,7 +239,11 @@ def expand(paths):
     return out
 
 
-def main(argv=None):
+def main(argv=None, report=print, progress=None):
+    """
+    report(line) is told what happened to each set; progress(done, total,
+    text), if given, how far the reading has got, in bytes of CSV.
+    """
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[1],
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('paths', nargs='*', default=[settings.CSV_DATA_DIR],
@@ -175,33 +256,56 @@ def main(argv=None):
     parser.add_argument('--dry-run', action='store_true',
                         help='report what would change, write nothing')
     args = parser.parse_args(argv)
+    tell = progress or (lambda done, total, text: None)
 
     status = 0
-    for (instrument, gran), sides in sorted(pairs(expand(args.paths)).items()):
+    todo = []
+    for (instrument, gran, name), sides in sorted(pairs(expand(args.paths), report).items()):
         if set(sides) != {'ASK', 'BID'}:
-            print("%s %s: only %s present, need both sides for mid - skipped"
-                  % (instrument, gran, '/'.join(sorted(sides))))
+            report("%s %s: only %s present, need both sides for mid - skipped"
+                   % (instrument, gran, '/'.join(sorted(sides))))
             status = 1
             continue
+        path = os.path.join(args.data_dir, "%s.hd5" % instrument)
+        digest = fingerprint([sides['ASK'], sides['BID']])
+        if imported(path, '/' + gran).get(name) == digest:
+            report("%s %s: %s already imported into %s - skipped"
+                   % (instrument, gran, name, os.path.basename(path)))
+            continue
+        todo.append((instrument, gran, name, sides, path, digest))
 
+    total = sum(os.path.getsize(s['ASK']) + os.path.getsize(s['BID'])
+                for _, _, _, s, _, _ in todo)
+    done = 0
+    for instrument, gran, name, sides, path, digest in todo:
+        size = os.path.getsize(sides['ASK']) + os.path.getsize(sides['BID'])
+        label = "%s %s" % (instrument, gran)
+        tell(done, total, "%s: reading %s" % (label, name))
         try:
-            frame, dropped = build(sides['ASK'], sides['BID'], args.swap_sides)
+            frame, dropped = build(sides['ASK'], sides['BID'], args.swap_sides,
+                                   lambda n, at=done: tell(at + n, total,
+                                                           "%s: reading %s" % (label, name)))
         except ValueError as problem:
-            print("%s %s: %s" % (instrument, gran, problem))
+            report("%s: %s" % (label, problem))
             status = 1
+            done += size
             continue
         if any(dropped):
-            print("%s %s: %d ask and %d bid rows have no counterpart, dropped"
-                  % (instrument, gran, dropped[0], dropped[1]))
+            report("%s: %d ask and %d bid rows have no counterpart, dropped"
+                   % (label, dropped[0], dropped[1]))
 
-        path = os.path.join(args.data_dir, "%s.hd5" % instrument)
-        added, replaced = merge(path, '/' + gran, frame, args.dry_run)
-        print("%s %s %s: %d rows %s to %s, %d new, %d replaced (%s..%s)"
-              % (instrument, gran, os.path.basename(path), len(frame.index),
-                 'would go' if args.dry_run else 'written', path,
-                 added, replaced, frame.index.min(), frame.index.max()))
+        done += size
+        tell(done, total, "%s: writing %s" % (label, os.path.basename(path)))
+        added, replaced, written = merge(path, '/' + gran, frame, args.dry_run)
+        if not args.dry_run:
+            remember(path, '/' + gran, name, digest)
+        report("%s %s: %d rows %s %s, %d new, %d replaced (%s..%s)"
+               % (label, os.path.basename(path), len(frame.index),
+                  'would go to' if args.dry_run else
+                  'written to' if written else 'already in', path,
+                  added, replaced, frame.index.min(), frame.index.max()))
+    tell(total, total, "done")
     return status
-
 
 if __name__ == '__main__':
     sys.exit(main())

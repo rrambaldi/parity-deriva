@@ -15,11 +15,12 @@ candles are warehoused locally in HDF5 so research runs offline, which on
 eToro is a shallower warehouse than on the other three for reasons set out
 below.
 
-Started as a fork of [QSForex](https://github.com/mhallsmoore/qsforex) by
-Michael Halls-Moore, and still MIT licensed (see below). Little of the
-original tick-based backtester survives: the engine, the event hierarchy, the
-data layer, the strategies and the execution path were rewritten around
-candles and the OANDA v3 API, then migrated from Python 2 to Python 3.
+It began, long ago, as a fork of [QSForex](https://github.com/mhallsmoore/qsforex)
+by Michael Halls-Moore. None of that code is left - the engine, the event
+hierarchy, the data layer, the strategies and the execution path were all
+rewritten around candles and the OANDA v3 API, then moved from Python 2 to
+Python 3 - but the idea of an event-driven forex stack was his, and so are
+the thanks.
 
 # What is in it
 
@@ -1073,6 +1074,66 @@ cancelling, which happens seven times over two months of EUR_USD H1 - it then
 carries on and cancels the right order, so it is a warning about nothing in
 particular.
 
+## The paper session, the candle database and the skew board
+
+A live session's shadow simulator reads the same candles as the account it
+shadows, so it measures a broker against itself. To measure every broker
+against one series nobody traded on, tick the **`twelvedata · paper`**
+account on the live page together with the broker accounts: it is a
+provider like the others (`trading/providers.TwelveDataProvider`), its
+candles come from Twelve Data (`data/twelvedata.py`) and its orders are
+filled by this stack's own simulator, promoted to broker-shaped events by
+`backtest/offline.SimulatedBroker`. The page reads it as any session.
+
+Twelve Data's basic plan is 8 credits a minute and 800 a day, one credit
+per request whatever its size, and asking how many are left costs one too -
+so the count is kept locally, in `candles.db`, and the poller asks **once
+per bar per instrument**: 288 a day on M5, two instruments fit, three do
+not. It waits `TWELVEDATA_POLL_DELAY` seconds after a bar closes, asks for
+the last two bars and moves on to the next close whether or not the bar had
+appeared yet; the vendor shows a new bar a minute or two late, and the
+two-bar answer picks it up next time for nothing extra. The key goes in
+`.env` as `TWELVEDATA_API_KEY`; the tickers in `TWELVEDATA_INSTRUMENTS`
+(`scripts/twelvedata_instruments.py` looks one up, for a credit). One
+series per bar, so `TWELVEDATA_SPREAD` is a model, off until set, exactly
+as `ETORO_SPREAD` is - and a strategy that reads a candle's ask and bid
+refuses to start on the paper account until it is.
+
+Every session, paper or broker, also writes each bar it sees into
+`DATA_DIR/live/candles.db` (`data/candledb.py`, SQLite in WAL mode because
+the sessions are separate processes), keyed by provider, account,
+instrument, granularity and bar time, with the moment the process saw the
+bar. That is what the live page's **skew board** and chart read:
+
+* `/api/live/candles` - every feed's bars, in the nine numbers a backtest's
+  candles come in, the paper feed first as the reference;
+* `/api/live/skew` - each feed's mid close against the reference's, bar by
+  bar, in pips: mean, median, p95, max, last, bias, the bars the feed skipped,
+  its median spread and median latency; a feed-by-feed matrix; and the
+  Twelve Data credits spent today;
+* `/api/live/skew/trades` - each broker session's closed trades against the
+  paper session's of the same form, joined on the signal key
+  (`lib/utils.signalNumber`, a function of the candle that produced the
+  signal and therefore the same on every account): entry and exit
+  difference in pips, P&L difference, whether the same leg closed the trade,
+  and the trades one side has and the other has not.
+
+The parity monitor's findings now reach the event log too, as `STATUS`
+events with status `PARITY` (one per divergence) and `PARITY_ALARM` (once
+per change of what is breached), so the page can show them. Nothing on the
+board is judged: there is no skew threshold to set until the numbers have
+been looked at.
+
+What goes live is a form somebody looked at the result of. A saved backtest
+(the star next to the chart title, or in the saved-runs dialog) and a run of
+a sweep (the star on its row of the simulate page) can be marked as a
+**favourite**: `DATA_DIR/favourites.json` keeps the form, where it came from
+and a snapshot of what the simulation made (`/api/favourites`). The live
+page's strategy list is the favourites first, with that summary beside the
+form, and "scegli tra le simulate" opens every saved run and sweep to pick
+one from, starred or not. The plain strategies, with their defaults and no
+simulation behind them, stay in a second group.
+
 ## The parity alarm
 
 `trading/parity.py` joins each live fill to its simulated counterpart on the
@@ -1163,15 +1224,18 @@ discovery picks them up where they sit. They can be a large share of the run:
 a bar loop with its own engine is usually checked against synthetic series
 swept bar by bar, which is slow on purpose.
 
-# License Terms
+# License
 
-Copyright (c) 2015 Michael Halls-Moore
+MIT, with a wish in front of it: the [Gratitude & Random Kindness
+License](https://github.com/rrambaldi/mit-kindness-license). The terms are
+the MIT ones, word for word; the preamble above them asks nothing and binds
+nothing. See [`LICENSE`](LICENSE), and [`LICENSE.it.md`](LICENSE.it.md) for
+an Italian courtesy translation of the preamble.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+# Thanks
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+To Michael Halls-Moore, whose [QSForex](https://github.com/mhallsmoore/qsforex)
+is where this started.
 
 # Forex Trading Disclaimer
 

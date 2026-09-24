@@ -10,6 +10,7 @@ from parity_deriva.lib.oanda import OANDATrade
 from parity_deriva.event.event import Event
 from parity_deriva.event.event import SimulatedOrderEvent
 from parity_deriva.event.event import SimulatedFillEvent
+from parity_deriva.event.event import SimulatedOrderCancelEvent
 
 class OANDABacktester(ExecutionHandler):
 
@@ -35,6 +36,9 @@ class OANDABacktester(ExecutionHandler):
 		# _set() only assigns when the default is not None, so seed it first
 		self.granularity = None
 		self._set(args,'granularity')
+		#: instrument -> the last candle seen on that stream. A gap is only
+		#: visible against the bar before it: see fillAt().
+		self.last = {}
 
 	def dumpOrders(self):
 		for o in self.orders:
@@ -49,9 +53,28 @@ class OANDABacktester(ExecutionHandler):
 		Cancel a resting order. The simulator numbers its orders itself, so it
 		cannot match on the broker's orderID carried by the event: instrument
 		and price are the only fields both sides agree on.
+
+		Never a bracket's own stop or target, though, and that is not a
+		refinement - it is the difference between a trade having a stop and
+		not having one. **In AG01 the long's stop sits at exactly the short
+		leg's entry price**, by construction: the pair is a straddle around
+		two candles and each leg's stop is the other leg's entry. So when one
+		leg fills and the money manager cancels the other by price, a match on
+		price alone can find the stop of the trade that just opened and
+		cancel that instead - leaving a live position with nothing under it,
+		which then runs until it happens to reach its target. On EUR_USD
+		daily that was months, and it read as a strategy with a remarkable
+		win rate.
+
+		A child is never what a cancel is about: the money manager issues
+		legs and hears about legs. The bracket's children are the simulator's
+		own, and retire() cancels those - by object, from the one place that
+		knows which of the two closed the trade.
 		"""
 		instrument = getattr(event, 'instrument', None)
 		for o in list(self.orders):
+			if getattr(o, 'orig', None) is not None:
+				continue
 			if o.price != event.price:
 				continue
 			if instrument is not None and getattr(o, 'instrument', None) != instrument:
@@ -265,6 +288,157 @@ class OANDABacktester(ExecutionHandler):
 			'signalNumber': getattr(o, 'signalNumber', None),
 		}))
 
+	def dropSiblings(self, filled):
+		"""
+		One entry of a signal fills; the other end of it never existed.
+
+		AG01 brackets a reversal with two opposite orders and says
+		signalType EXCLUSIVE: on the account, the first to fill cancels the
+		other. Here nothing did that within a bar. The money manager does
+		publish the cancel, but it hears about the fill only after this
+		candle has been handed to every handler - and by then both ends had
+		filled, on a bar wide enough to reach them both.
+
+		Children are left alone: a trade's stop and target are cancelled by
+		each other through retire(), which knows which of them closed it.
+		"""
+		key = getattr(filled, 'signalNumber', None)
+		if key is None:
+			return
+		for other in list(self.orders):
+			if other is filled or getattr(other, 'orig', None) is not None:
+				continue
+			if getattr(other, 'signalNumber', None) != key:
+				continue
+			if self.retire(other):
+				self.logger.info("===== OCO: ORDER# %s dropped, %s filled"
+								 % (other.id, filled.id))
+
+	def expired(self, o, event):
+		"""
+		Has this order outlived the expiry it was issued with?
+
+		Nothing offline read gtdTime before. AG01 and AG02 issue a bracket
+		that is meant to die at the end of the day - a straddle around one
+		reversal is not that trade a week later - and live the brokers
+		enforce it, three of them on our own side (data/etoro.py, data/ib.py,
+		data/ig.py). Here the order simply rested: on EUR_USD daily a bracket
+		from 3 July 2022 filled on 15 November at a price from four months
+		earlier, and, this stack taking one position at a time, held the
+		strategy shut for all of it.
+
+		Only an entry expires. The stop and the target of an open trade carry
+		their parent's fields, expiry included, and cancelling those at
+		midnight would leave a position standing with neither - which is not
+		what any account does: a bracket's children are good until the trade
+		closes.
+
+		The comparison is against the candle's own time, so the order dies on
+		the first bar that begins after the instant it was given, which is
+		where it would have died.
+		"""
+		if getattr(o, 'orig', None) is not None:
+			return False
+		when = getattr(o, 'gtdTime', None)
+		if when is None or event.time <= when:
+			return False
+		o.state = 'CANCELED'
+		if o in self.orders:
+			self.orders.remove(o)
+			self.closed_orders.append(o)
+		self.logger.info("===== EXPIRED ORDER# %s %s past %s"
+						 % (o.id, o.price, when))
+		# said out loud, because the money manager counts a group as open
+		# until its orders are accounted for, and the ledger writes the leg
+		# down as cancelled rather than as a leg that vanished.
+		# Was: a plain OrderCancelEvent. Live, that is an instruction: the
+		#      real execution handler cancelled the order at the broker and
+		#      the money manager, matching on price, killed the live leg -
+		#      the simulator's expiry leaked onto the real account.
+		# Now: the simulator's own type, like its orders and fills; offline
+		#      SimulatedBroker promotes it, so nothing there changes.
+		self.queue_event(SimulatedOrderCancelEvent({
+			'orderID': o.id,
+			'price': o.price,
+			'instrument': getattr(o, 'instrument', None),
+			'signalNumber': getattr(o, 'signalNumber', None),
+			'reason': 'GTD_EXPIRY',
+		}))
+		return True
+
+	def fillAt(self, o, event, side):
+		"""
+		What this resting order trades at on this bar, or None for no fill.
+
+		Inside the bar's range it trades at its own level, which is what a
+		resting order means.
+
+		Outside it, there is one case that is still a fill and it is the one
+		this exists for: **price gapped over the level while the book was
+		shut.** A bar whose open is on the far side of the level from the
+		previous close never offered the level at all - between the two
+		prints the market crossed it - and the first price anybody could have
+		had is the open. So that is the fill, which is worse than the level
+		for a stop or a buy stop and better for a target or a limit, exactly
+		as it would have been on the account.
+
+		Was: [low, high] and nothing else, so an order the market jumped over
+		     stayed on the book. EUR_USD daily, 21 to 23 April 2017: a long
+		     entered at 1.06778 with its target at 1.07851, Friday closing at
+		     1.07268 and Monday opening at 1.09197 - straight over it. The
+		     target was never touched again until 19 February 2020, so the
+		     simulator carried that position for nearly three years and then
+		     closed it at a price the trade had made and given back twice
+		     over. Every trade after it in that run was refused, because this
+		     stack takes one position at a time.
+		Now: it fills on the Monday open, which is where it would have filled.
+
+		A gap needs a bar before it. On the first candle of a run there is
+		nothing to have gapped from, so only the range applies.
+		"""
+		book = event.ask if side == 'ask' else event.bid
+		before = self.last.get(getattr(o, 'instrument', None))
+		opened = book['o']
+		# A market order has no level to be reached: it is filled at the first
+		# price there is, which is this bar's open - this being the first bar
+		# after the close the strategy acted on. Only an entry: the stop and
+		# the target a bracket builds carry their parent's fields, this one
+		# included, and a stop filled at the open would close every trade on
+		# the bar after it opened.
+		if getattr(o, 'orig', None) is None \
+				and getattr(o, 'orderType', None) == 'MARKET':
+			return opened
+		# A stop the market is already past is taken at the first price
+		# there is. That is what a stop is - "sell once the bid is at or under
+		# this" - and it is not a gap: the level can have been passed inside
+		# a bar the simulator never saw it on.
+		#
+		# Was: only a level inside the bar or inside the gap from the last
+		#      close filled. A stop moved after the fact - the trailer reads
+		#      the strategy's M15 bar, which is dispatched after the M5 bars
+		#      it contains - could land above a long's market: the M15 high
+		#      reached the rung, the last M5 bar had closed back under it.
+		#      Nothing then filled it until price came back up, and on
+		#      EUR_USD FTWP a trade stayed open from 2015 to the end of the
+		#      data while the strategy kept trading around it.
+		# Now: fills at this bar's open, as the account would have.
+		if getattr(o, 'type', None) == 'STOP_LOSS_ORDER' \
+				and (opened <= o.price if o.units < 0 else opened >= o.price):
+			return opened
+		if before is not None:
+			closed = (before.ask if side == 'ask' else before.bid)['c']
+			# the gap is asked about first, and not only when the level is
+			# outside the bar: a bar that gapped over the level and then came
+			# back through it during the session still crossed it while the
+			# book was shut, so the open is the first price there was. Asking
+			# the range first would fill that one at the level - better than
+			# the market gave, on a bar that had already jumped it
+			if min(closed, opened) <= o.price <= max(closed, opened):
+				return opened
+		if book['l'] <= o.price <= book['h']:
+			return o.price
+		return None
+
 	def checkOrder(self, event):
 		if self.granularity is not None and getattr(event, 'granularity', None) != self.granularity:
 			return
@@ -273,28 +447,123 @@ class OANDABacktester(ExecutionHandler):
 			% ( event.time, event.mid['o'], event.mid['h'], event.mid['l'], event.mid['c']))
 		# snapshot: handleSLTP appends the stop/target to self.orders, and a
 		# child must not be matched against the very bar that opened the trade
-		for o in list(self.orders):
-			# an order is only ever filled by its own instrument's candles
-			if instrument is not None and getattr(o, 'instrument', None) != instrument:
-				continue
+		resting = [o for o in self.orders
+				   if instrument is None
+				   or getattr(o, 'instrument', None) == instrument]
+		# Nearest to the open first.
+		#
+		# A bar that reaches two of these says nothing about which it reached
+		# first - the same blindness backtest/resolution.py measures - and the
+		# order matters, because the first fill takes the other off the book.
+		# Coming out of the open, the nearer level is the one price met first
+		# unless it doubled back, so that is the reading taken.
+		#
+		# Was: the book's own order, which on a wide bar filled *both* ends of
+		#      an AG01 straddle. EUR_USD daily, 26 August 2016: a long at
+		#      1.13117 and a short at 1.12452 from one signal, both opened,
+		#      each one's stop being the other's entry. The money manager
+		#      never saw that group finish and refused every signal after it -
+		#      ten years of data, and the run's last trade is in September
+		#      2016.
+		resting.sort(key=lambda o: abs(
+			o.price - (event.ask if o.units > 0 else event.bid)['o']))
+		for o in resting:
 			if o.state=='PENDING':
-				# a real broker fills on touch, so the bounds are inclusive
-				if o.units>0 and o.price >= event.ask['l'] and o.price <= event.ask['h']:
-					o.state='FILLED'
-					self.logger.info("===== FILLED BUY ORDER# %s %f [ %f %f ]" % (o.id, o.price, event.ask['l'], event.ask['h']))
-					self.reportFill(o, event)
-					self.handleSLTP(o, event)
-				if o.units<0 and o.price >= event.bid['l'] and o.price <= event.bid['h']:
-					o.state='FILLED'
-					self.logger.info("===== FILLED SELL ORDER# %s %f [ %f %f ]" % (o.id, o.price, event.bid['l'], event.bid['h']))
-					self.reportFill(o, event)
-					self.handleSLTP(o, event)
+				# before the fill: an order whose expiry has passed was not
+				# on the book when this bar traded
+				if self.expired(o, event):
+					continue
+				# a buy trades against the ask and a sell against the bid,
+				# whatever the order is for: an entry, a stop or a target
+				side = 'ask' if o.units>0 else 'bid'
+				at = self.fillAt(o, event, side)
+				if at is None:
+					continue
+				book = event.ask if side=='ask' else event.bid
+				if at != o.price:
+					self.logger.info("===== GAPPED PAST ORDER# %s %f, filled "
+						"at the open %f [ %f %f ]"
+						% (o.id, o.price, at, book['l'], book['h']))
+					# the level it traded at, not the level it asked for.
+					# handleSLTP books the P&L off these prices, so a fill
+					# recorded at the level would be money the account
+					# neither made nor lost
+					o.price = at
+				o.state='FILLED'
+				self.logger.info("===== FILLED %s ORDER# %s %f [ %f %f ]"
+					% ('BUY' if o.units>0 else 'SELL', o.id, o.price,
+					   book['l'], book['h']))
+				self.reportFill(o, event)
+				self.handleSLTP(o, event)
+				self.dropSiblings(o)
 			elif o.state=='FILLED':
 				pass
+
+		self.last[instrument] = event
+
+	def closeOpen(self, event):
+		"""
+		Close whatever is open on an instrument, at the bar this arrives on.
+
+		The third way out of a trade, and the only one that is not a level:
+		see event.CloseTradeEvent. A long is sold on the bid and a short
+		bought back on the ask, the way every other fill here is priced, and
+		the close of the bar is the price - the decision was taken on this
+		bar and the account cannot trade at a price the bar never showed.
+
+		Both legs of the bracket come off the book, for the reason retire()
+		exists: a stop left resting closes the same trade a second time when
+		price reaches it later.
+		"""
+		instrument = getattr(event, 'instrument', None)
+		bar = self.last.get(instrument)
+		if bar is None:
+			self.logger.warning("CLOSE asked for %s before any bar of it"
+								% instrument)
+			return
+		reason = getattr(event, 'reason', 'CLOSE')
+		for o in list(self.orders):
+			if o.state != 'FILLED':
+				continue
+			if instrument is not None \
+					and getattr(o, 'instrument', None) != instrument:
+				continue
+			book = bar.bid if o.units > 0 else bar.ask
+			price = float(book['c'])
+			gain = (price - o.price) * o.units
+			o.state = 'CLOSED'
+			self.retire(getattr(o, 'SLOrder', None))
+			self.retire(getattr(o, 'TPOrder', None))
+			if o in self.orders:
+				self.orders.remove(o)
+				self.closed_orders.append(o)
+			self.balance += gain
+			self.logger.info("******** CLOSED TRADE TYPE: %s PL: %d OPEN:%6.2f "
+				"CLOSED:%6.2f BALANCE:%6.2f"
+				% (reason, gain, o.price, price, self.balance))
+			self.queue_event(SimulatedFillEvent({
+				'orderID': o.id,
+				# no second order took this trade: the close is the decision
+				# itself, so the closing id is the trade's own
+				'closingOrderID': o.id,
+				'instrument': getattr(o, 'instrument', None),
+				'units': -o.units,
+				'price': price,
+				'time': getattr(event, 'time', None) or bar.time,
+				'pl': gain,
+				'financing': 0.0,
+				'accountBalance': self.balance,
+				'reason': reason,
+				'tradesClosed': [{'tradeID': o.id, 'realizedPL': gain}],
+				'signalNumber': getattr(o, 'signalNumber', None),
+			}))
 
 	def execute_event(self, event):
 		if str(event)=='ORDERCANCEL':
 			return self.cancelOrder(event)
+
+		if str(event)=='CLOSETRADE':
+			return self.closeOpen(event)
 
 		if str(event)=='STOPMODIFY':
 			return self.modifyStop(event)

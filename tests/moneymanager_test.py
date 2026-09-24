@@ -14,6 +14,7 @@ import unittest
 
 from parity_deriva.event.event import (SignalEvent, OrderEvent, ClientOrderEvent,
                                  TransactionEvent, StatusEvent, CandleEvent)
+from parity_deriva.data import calendar
 from parity_deriva.portfolio.moneymanager import MoneyManager
 from parity_deriva.tests.helpers import Recorder, TempDirCase
 
@@ -491,6 +492,229 @@ class TestOrdersThatNeverFill(MoneyManagerCase):
         self.assertTrue(self.mm.orderIssued)
 
 
+class TestMaxStop(MoneyManagerCase):
+    """
+    The widest stop the account will take a position on, in pips.
+
+    One rule for every strategy, because it is a rule about the account: every
+    strategy that places orders comes through here. The fixture's signal is a
+    ten point stop on an instrument whose pip is one point.
+    """
+
+    def setUp(self):
+        super(TestMaxStop, self).setUp()
+        # the temp settings are a mock, so the precision that decides what a
+        # pip is has to be said rather than auto-created as another mock
+        self.settings.INSTRUMENT_PRECISION = {'DE30_EUR': 1}
+        self.settings.DEFAULT_PRICE_PRECISION = 5
+
+    def manager(self, pips):
+        mm = MoneyManager(setup=self.settings, units=100, maxStopPips=pips)
+        mm.signals, mm.processed = {}, []
+        mm.onTrade = mm.orderIssued = False
+        mm.set_queue(self.sink)
+        return mm
+
+    def test_no_ceiling_is_the_default(self):
+        self.assertIsNone(MoneyManager(setup=self.settings).maxStopPips)
+        self.mm.handleSignal(self.signal())
+        self.assertEqual(len(self.sink.of('ORDER')), 1)
+
+    def test_a_stop_inside_the_ceiling_is_traded(self):
+        self.manager(10).handleSignal(self.signal())
+        self.assertEqual(len(self.sink.of('ORDER')), 1)
+
+    def test_a_stop_wider_than_the_ceiling_is_refused(self):
+        """
+        Refused, not pulled in: the stop is where the rule says the setup
+        failed, and moving it would be this component choosing a level the
+        strategy did not - and dragging the target along with it.
+        """
+        self.manager(9).handleSignal(self.signal())
+        self.assertEqual(self.sink.events, [])
+
+    def test_the_ceiling_is_read_in_pips_and_not_in_price(self):
+        """
+        Ten points of the DAX is ten pips; ten points of EUR_USD would be a
+        hundred thousand. A ceiling that did not divide by the pip would be a
+        different rule per instrument under one name.
+        """
+        mm = self.manager(10)
+        self.assertFalse(mm.tooWide({'instrument': 'DE30_EUR',
+                                     'price': 11700.0, 'stopLoss': 11690.0}))
+        self.assertTrue(mm.tooWide({'instrument': 'DE30_EUR',
+                                    'price': 11700.0, 'stopLoss': 11689.0}))
+
+    def test_a_signal_with_no_stop_is_not_too_wide(self):
+        """It is unsizable, which size() already refuses and says why."""
+        mm = self.manager(10)
+        self.assertFalse(mm.tooWide({'instrument': 'DE30_EUR',
+                                     'price': 11700.0, 'stopLoss': None}))
+
+
+class TestLevelScale(MoneyManagerCase):
+    """
+    slScale and tpScale move the initial stop and target, as a multiple of
+    their distance from the entry. The fixture is a 10 point stop and a 20
+    point target on a 11700 entry.
+    """
+
+    def setUp(self):
+        super(TestLevelScale, self).setUp()
+        # a pip of the DAX is one point, for the ceiling test
+        self.settings.INSTRUMENT_PRECISION = {'DE30_EUR': 1}
+        self.settings.DEFAULT_PRICE_PRECISION = 5
+
+    def scaled(self, sl=None, tp=None, pips=None):
+        mm = MoneyManager(setup=self.settings, units=100, slScale=sl,
+                          tpScale=tp, maxStopPips=pips)
+        mm.signals, mm.processed = {}, []
+        mm.onTrade = mm.orderIssued = False
+        mm.set_queue(self.sink)
+        mm.handleSignal(self.signal())
+        orders = self.sink.of('ORDER')
+        return orders[0] if orders else None
+
+    def test_none_leaves_them_where_they_were(self):
+        order = self.scaled()
+        self.assertEqual((order.stopLoss, order.takeProfit), (11690.0, 11720.0))
+
+    def test_a_multiple_of_the_distance(self):
+        order = self.scaled(sl=1.5, tp=0.5)
+        self.assertAlmostEqual(order.stopLoss, 11685.0)
+        self.assertAlmostEqual(order.takeProfit, 11710.0)
+
+    def test_a_short_scales_the_other_way(self):
+        mm = MoneyManager(setup=self.settings, units=100, slScale=2)
+        mm.signals, mm.processed = {}, []
+        mm.onTrade = mm.orderIssued = False
+        mm.set_queue(self.sink)
+        mm.handleSignal(SignalEvent({"instrument": "DE30_EUR", "units": -1,
+                                     "orderType": "STOP", "price": 11700.0,
+                                     "stopLoss": 11710.0, "takeProfit": 11680.0,
+                                     "signalNumber": "S1", "gtdTime": None}))
+        self.assertAlmostEqual(self.sink.of('ORDER')[0].stopLoss, 11720.0)
+
+    def test_the_ceiling_reads_the_stop_that_is_traded(self):
+        """A 10 point stop fits a 12 pip ceiling; the same stop x1.5 does not."""
+        self.assertIsNotNone(self.scaled(pips=12))
+        self.sink.events[:] = []
+        self.assertIsNone(self.scaled(sl=1.5, pips=12))
+
+
+class TestSessionHours(MoneyManagerCase):
+    """
+    When this account decides, in UTC.
+
+    One rule for every strategy, like the stop ceiling and for the same
+    reason. It closes the signal and not the order: an order placed inside
+    the window rests until it fills or expires, because "this account decides
+    between eight and four" is a different rule from "its pending orders
+    vanish at four".
+    """
+
+    def manager(self, session):
+        mm = MoneyManager(setup=self.settings, units=100, session=session)
+        mm.signals, mm.processed = {}, []
+        mm.onTrade = mm.orderIssued = False
+        mm.set_queue(self.sink)
+        return mm
+
+    def at(self, hour, minute=0):
+        se = self.signal()
+        se.time = datetime.datetime(2024, 1, 2, hour, minute)
+        return se
+
+    def test_no_window_is_all_day(self):
+        self.assertIsNone(MoneyManager(setup=self.settings).session)
+        self.manager(None).handleSignal(self.at(3))
+        self.assertEqual(len(self.sink.of('ORDER')), 1)
+
+    def test_a_signal_inside_the_window_is_taken(self):
+        self.manager(('07:00', '16:00')).handleSignal(self.at(7))
+        self.assertEqual(len(self.sink.of('ORDER')), 1)
+
+    def test_a_signal_outside_it_is_refused(self):
+        self.manager(('07:00', '16:00')).handleSignal(self.at(6, 59))
+        self.assertEqual(self.sink.of('ORDER'), [])
+
+    def test_the_end_is_outside(self):
+        """
+        Half open, like every other window here: 16:00 is the first instant
+        after the session and not the last of it.
+        """
+        mm = self.manager(('07:00', '16:00'))
+        mm.handleSignal(self.at(15, 59))
+        self.assertEqual(len(self.sink.of('ORDER')), 1)
+        mm.onTrade = mm.orderIssued = False
+        mm.handleSignal(self.at(16))
+        self.assertEqual(len(self.sink.of('ORDER')), 1, "16:00 is the next day's")
+
+    def test_a_window_that_wraps_midnight(self):
+        """('22:00', '06:00') is the Asian session, not an empty one."""
+        mm = self.manager(('22:00', '06:00'))
+        self.assertFalse(mm.outsideSession(datetime.datetime(2024, 1, 2, 23)))
+        self.assertFalse(mm.outsideSession(datetime.datetime(2024, 1, 2, 3)))
+        self.assertTrue(mm.outsideSession(datetime.datetime(2024, 1, 2, 12)))
+
+    def test_a_signal_with_no_time_is_not_refused(self):
+        """A hand-made signal in a test has no clock to be outside of."""
+        self.manager(('07:00', '16:00')).handleSignal(self.signal())
+        self.assertEqual(len(self.sink.of('ORDER')), 1)
+
+
+class TestNewsWindows(MoneyManagerCase):
+    """
+    Standing aside for the calendar. The widths and which events matter
+    belong to the Calendar handed in; this only asks it about an instant.
+    """
+
+    def manager(self, before=10, after=10, impacts=(calendar.HIGH,)):
+        frame = calendar.merge(calendar.empty(), [
+            ('2024-01-02 13:30:00', 'EUR', 'high', 'Rate decision'),
+            ('2024-01-02 15:00:00', 'EUR', 'low', 'Something small'),
+            ('2024-01-02 17:00:00', 'JPY', 'high', 'Elsewhere'),
+        ])
+        mm = MoneyManager(setup=self.settings, units=100,
+                          calendar=calendar.Calendar(
+                              frame, currencies=('DE30', 'EUR'),
+                              impacts=impacts, before=before, after=after))
+        mm.signals, mm.processed = {}, []
+        mm.onTrade = mm.orderIssued = False
+        mm.set_queue(self.sink)
+        return mm
+
+    def at(self, hour, minute=0):
+        se = self.signal()
+        se.time = datetime.datetime(2024, 1, 2, hour, minute)
+        return se
+
+    def test_no_calendar_is_no_rule(self):
+        self.assertIsNone(MoneyManager(setup=self.settings).calendar)
+        self.mm.handleSignal(self.at(13, 30))
+        self.assertEqual(len(self.sink.of('ORDER')), 1)
+
+    def test_a_signal_on_the_news_is_refused(self):
+        self.manager().handleSignal(self.at(13, 25))
+        self.assertEqual(self.sink.of('ORDER'), [])
+
+    def test_a_signal_clear_of_it_is_taken(self):
+        self.manager().handleSignal(self.at(13, 19))
+        self.assertEqual(len(self.sink.of('ORDER')), 1)
+
+    def test_an_event_of_another_currency_is_not_this_pair_s_news(self):
+        self.manager().handleSignal(self.at(17))
+        self.assertEqual(len(self.sink.of('ORDER')), 1)
+
+    def test_an_impact_not_asked_for_is_not_news(self):
+        self.manager().handleSignal(self.at(15))
+        self.assertEqual(len(self.sink.of('ORDER')), 1)
+        wider = self.manager(impacts=(calendar.HIGH, calendar.LOW))
+        wider.handleSignal(self.at(15))
+        self.assertEqual(len(self.sink.of('ORDER')), 1,
+                         "the wider calendar refused it, so nothing was added")
+
+
 class RiskSizingCase(MoneyManagerCase):
     """
     Sizing a trade off the account instead of off a fixed number of units.
@@ -522,11 +746,12 @@ class RiskSizingCase(MoneyManagerCase):
     def sizes(self):
         return [o.units for o in self.sink.events if str(o) == 'ORDER']
 
-    def close(self, mm, balance):
+    def close(self, mm, balance, pl=None):
         """What the broker says the account holds after a trade closed."""
         mm.closeTrade(TransactionEvent({"type": "ORDER_FILL",
                                         "orderID": "1",
                                         "tradesClosed": [{}],
+                                        "pl": pl,
                                         "accountBalance": balance}))
 
 
@@ -620,6 +845,31 @@ class TestMonthlyReview(RiskSizingCase):
         self.close(mm, 200000.0)
         mm.handleSignal(self.at(datetime.datetime(2018, 2, 1), number="S2"))
         self.assertEqual(self.sizes(), [100.0, 200.0])
+
+    def test_a_reference_capital_moves_with_its_own_closes_not_the_account(self):
+        # the account holds 5000000 - other money - and this session made
+        # 100000: the next month risks on 200000, not on 5000000
+        mm = self.manager(reference=True)
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5)))
+        self.close(mm, 5000000.0, pl="100000")
+        mm.handleSignal(self.at(datetime.datetime(2018, 2, 1), number="S2"))
+        self.assertEqual(self.sizes(), [100.0, 200.0])
+
+    def test_a_reference_capital_s_pl_is_converted_at_the_rate_it_was(self):
+        # 100000 USD of capital from a EUR account at 1.25: a 40000 EUR win
+        # is 50000 USD
+        mm = self.manager(reference=True, plRate=1.25)
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5)))
+        self.close(mm, None, pl="40000")
+        mm.handleSignal(self.at(datetime.datetime(2018, 2, 1), number="S2"))
+        self.assertEqual(self.sizes(), [100.0, 150.0])
+
+    def test_a_reference_capital_does_not_move_inside_the_month(self):
+        mm = self.manager(reference=True)
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 5)))
+        self.close(mm, None, pl="100000")
+        mm.handleSignal(self.at(datetime.datetime(2018, 1, 20), number="S2"))
+        self.assertEqual(self.sizes(), [100.0, 100.0])
 
     def test_a_losing_month_sizes_down(self):
         mm = self.manager()

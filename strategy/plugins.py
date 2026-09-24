@@ -21,13 +21,24 @@ A viewer plugin - a strategy with its own engine, drawn by the web service
 rather than replayed through the simulator - is a dictionary:
 
 	name     what the page calls it
+	description  optional: the line the page prints over its chart, which a
+			 handler class spells DESCRIPTION
+	instrument, granularity  optional: what the page selects when the
+			 strategy is picked. A handler class spells them INSTRUMENT and
+			 GRANULARITY
+	setupBars    optional: how many bars back from the signal the entry rule
+			 reads, which the page boxes. A handler class spells it
+			 SETUP_BARS
 	fields   () -> the form: a list of {name, label, value, and either
 			 choices for a menu or min/max/step for a number box}
 	params   (get) -> the parameters, built from a function that takes a
 			 query string key and returns its text or None. Raises one of
 			 `errors` for anything it will not accept
 	run      (instrument, granularity, params, dtfrom=, dtto=, setup=) ->
-			 a result the service's payload() can read
+			 a result the service's payload() can read. A run that also
+			 takes progress= is handed a function to call now and then
+			 with {bars, at, balance, trades, won, lost, curve} - as
+			 backtest/ledger.Progress reports - which raises to stop it
 	errors   the exceptions a bad request raises, which the service turns
 			 into a 400 rather than a traceback
 """

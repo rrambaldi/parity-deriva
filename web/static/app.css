@@ -25,6 +25,16 @@
   --trail: #ff9f45;
   --long: #58a6ff;
   --short: #e8a33d;
+  /* one colour per price feed on the live page: the closes a feed drew, the
+     trades its session took, its line in the skew strip (livechart.js reads
+     these off the root). A provider not named here is drawn --dim. */
+  --feed-twelvedata: #f2f2f2;
+  --feed-ig: #58a6ff;
+  --feed-capital: #e8a33d;
+  --feed-etoro: #3fb68b;
+  --feed-mt5: #c8a2ff;
+  --feed-ib: #ff9f45;
+  --feed-oanda: #e2555a;
   --font: 13px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -92,20 +102,84 @@ button:disabled { opacity: .5; cursor: default; }
 #message.info { background: #17252f; border-bottom-color: var(--entry); color: #cfe6ff; }
 
 section { padding: 12px 16px; }
+/* the two strips live inside the chart panel and are read as part of it: same
+   bars, same width, no padding of their own and no gap above. A strip that
+   floats a centimetre under the candles is a second chart; one that touches
+   them is the same chart with another axis. */
+#curve-panel, #levels-panel { padding: 0; margin-top: 4px; }
 
-#chart-head, #equity-head {
+#chart-tools, #equity-head, #levels-head, #curve-head {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-bottom: 6px;
   color: var(--dim);
 }
-#chart-title, #equity-title { color: var(--text); }
-/* the curve has nothing to hover, so it does not offer a crosshair */
-#equity { cursor: default; }
-#equity-note { color: var(--dim); }
+/* the title has its own line. It is a title - what was run, on what, over
+   what - and a readout that grows as the cursor moves used to push it about
+   and wrap it; the controls and the readouts are in the row under it now,
+   which is free to wrap without moving anything above it. */
+#chart-head {
+  margin-bottom: 4px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+/* and that row wraps rather than squeezing its buttons off the end */
+#chart-tools { flex-wrap: wrap; row-gap: 6px; }
+/* the disclosure triangle: a <summary> laid out as flex loses the marker the
+   browser would draw, so it is asked for again explicitly */
+#equity-head, #levels-head, #curve-head { cursor: pointer; list-style: none; }
+#equity-head::before, #levels-head::before,
+#curve-head::before { content: "\25be"; color: var(--dim); }
+#equity-box:not([open]) #equity-head::before,
+#curve-box:not([open]) #curve-head::before,
+#levels-box:not([open]) #levels-head::before { content: "\25b8"; }
+#equity-head::-webkit-details-marker,
+#curve-head::-webkit-details-marker,
+#levels-head::-webkit-details-marker { display: none; }
+#chart-title, #equity-title, #levels-title, #curve-title { color: var(--text); }
+/* the curve is not hovered but it is clicked: a click on it goes to the trade
+   that made that step */
+#equity { cursor: pointer; }
+#equity-note, #levels-note, #curve-note { color: var(--dim); }
+/* nothing to hover on either of the two panels below the chart */
+#levels-chart, #curve-chart { cursor: default; }
 #chart-zoom { color: var(--entry); }
-#chart-head button { margin-left: auto; }
+/* the selected trade's figures, over the chart. Monospace and wrapping,
+   because it is a table row written as a line */
+#chart-trade {
+  margin: 0 0 6px;
+  font: 12px ui-monospace, Menlo, Consolas, monospace;
+  color: var(--text);
+}
+/* the buttons sit together at the right end; only the first one needs the
+   push, and 'reset' is display:none while it is hidden rather than a gap */
+#chart-tools button:first-of-type { margin-left: auto; }
+/* what the strategy says it does: the full width of the panel, with room
+   around it so it reads as a paragraph and not as another readout */
+#chart-about {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  color: var(--dim);
+  line-height: 1.45;
+}
+/* a pressed toggle, so "are the levels on" is answerable without looking at
+   the chart it is a question about */
+#levels[aria-pressed="false"], #slope[aria-pressed="false"] { opacity: .55; }
+
+/* the shading's own two colours, so the legend and the canvas cannot drift */
+.k.up { color: #3ca370; }
+.k.down { color: #c8553d; }
+#slope-note { color: var(--dim); }
+#calendar-box { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+#calendar-state { color: var(--dim); margin: 4px 0 6px; }
+#calendar-how { color: var(--dim); margin: 0 0 8px; padding-left: 20px; line-height: 1.6; }
+#calendar-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+#detail-box { color: var(--dim); display: inline-flex; gap: 4px; align-items: center; }
+#detail-box select { font: inherit; }
 
 canvas {
   width: 100%;
@@ -115,6 +189,9 @@ canvas {
   border-radius: 4px;
   cursor: crosshair;
 }
+/* the price chart is draggable, and a crosshair does not say so. app.js
+   swaps this for 'grabbing' while a drag is running. */
+#chart { cursor: grab; }
 
 .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 6px 0 0; color: var(--dim); }
 .k::before {
@@ -126,14 +203,45 @@ canvas {
   vertical-align: middle;
   border-top: 2px solid currentColor;
 }
+/* the entry arrows, which are solid marks rather than levels: a triangle in
+   the legend would need its own shape, and the colour is what identifies them */
+.k.buy { color: var(--long); }
+.k.sell { color: var(--short); }
+/* an indicator's own colour is set inline, because which curve gets which is
+   decided by the order the strategy declared them in */
+.k.curve::before { border-top-style: solid; }
 .k.entry { color: var(--entry); }
 .k.exit { color: var(--exit); }
 .k.tp { color: var(--tp); }
 .k.sl { color: var(--sl); }
 .k.trail { color: var(--trail); }
+/* the swings, dotted on the chart and dotted in the legend */
+.k.support { color: var(--tp); }
+.k.resistance { color: var(--sl); }
+.k.support::before, .k.resistance::before { border-top-style: dotted; }
+/* the entry-to-exit arrow, which is solid and thicker than a level */
+.k.won { color: var(--tp); }
+.k.lost { color: var(--sl); }
+.k.won::before, .k.lost::before { border-top-width: 3px; }
+/* the box around the bars the entry rule read */
+.k.setup { color: var(--text); }
+.k.setup::before { border-top-style: dashed; }
 .k.tp::before, .k.sl::before, .k.trail::before { border-top-style: dashed; }
-.note { color: var(--dim); }
+/* the legend folds away; the help behind its (?) is a dialog */
+#legend-box { margin: 6px 0 0; color: var(--dim); }
+#legend-box > summary { cursor: pointer; width: max-content; }
+#help-open { padding: 0 7px; border-radius: 50%; line-height: 18px; }
+#help-dialog { width: min(640px, calc(100vw - 32px)); }
+#help-list { margin: 0; padding-left: 18px; line-height: 1.5; }
+#help-list li + li { margin-top: 6px; }
 
+#runs-table { width: 100%; border-collapse: collapse; }
+#runs-table th, #runs-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+#runs-table th { color: var(--dim); font-weight: normal; }
+#runs-table .num { text-align: right; }
+#runs-rows tr[data-id] { cursor: pointer; }
+#runs-rows tr[data-id]:hover td { background: #1d222b; }
+#trade-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 8px; color: var(--dim); }
 #report-panel { display: flex; flex-wrap: wrap; gap: 24px; padding-top: 0; }
 #report, #counts { display: flex; flex-wrap: wrap; gap: 18px; }
 
@@ -171,6 +279,269 @@ tbody tr.empty:hover { background: none; }
 .outcome { font-size: 11px; padding: 1px 6px; border-radius: 3px; border: 1px solid currentColor; }
 .outcome.tp { color: var(--tp); }
 .outcome.sl { color: var(--sl); }
+/* an exit this page has no opinion about: it closed, on the strategy's own
+   rule, and the badge says which rather than pretending to grade it */
+.outcome.other { color: var(--dim); }
 .outcome.open { color: var(--dim); }
 .pl.good { color: var(--up); }
 .pl.bad { color: var(--down); }
+
+/* the data dialog: the exports waiting, and the import's own report */
+#data-dialog, #help-dialog, #runs-dialog, #ask-dialog, #sets-dialog, #analysis-dialog, #live-dialog, #sim-dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px 16px;
+  width: min(760px, calc(100vw - 32px));
+}
+#data-dialog::backdrop, #help-dialog::backdrop, #runs-dialog::backdrop, #ask-dialog::backdrop, #sets-dialog::backdrop, #analysis-dialog::backdrop, #live-dialog::backdrop, #sim-dialog::backdrop { background: rgba(0, 0, 0, .55); }
+.dialog-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.dialog-head button { margin-left: auto; }
+/* the yes or no asked before a long run, see askUser() */
+#ask-dialog { width: min(520px, calc(100vw - 32px)); }
+#ask-text { white-space: pre-line; margin: 0 0 14px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
+#ask-yes { border-color: var(--entry); }
+#data-loaded {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background: #10131a;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+#data-loaded div + div { margin-top: 4px; }
+#data-loaded .dim, #data-dir { color: var(--dim); }
+#data-dir { margin-bottom: 6px; overflow-wrap: anywhere; }
+/* the title row: the name on the left, the page's own buttons on the
+   right, short of the menu; the controls on the row under it */
+#brand { display: flex; align-items: center; width: 100%; }
+#runs-open { margin-left: auto; }
+#data-files { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+#data-files th, #data-files td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+#data-files th { color: var(--dim); font-weight: normal; }
+#data-files td:first-child { overflow-wrap: anywhere; }
+#data-files td.missing { color: var(--sl); }
+#data-rows tr { cursor: pointer; }
+#data-rows tr:hover td { background: #1d222b; }
+#data-progress-box { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+#data-progress { flex: 1; height: 10px; accent-color: var(--entry); }
+#data-progress-text { color: var(--dim); white-space: nowrap; }
+#data-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+#data-log {
+  margin: 10px 0 0;
+  padding: 8px;
+  max-height: 40vh;
+  overflow: auto;
+  background: #10131a;
+  border: 1px solid var(--line);
+  white-space: pre-wrap;
+}
+
+/* ------------------------------------------------------------ simulate */
+
+/* the strategy's own parameters on the backtest page, and the values to try
+   on the simulate page: a box of fields on a line of their own */
+#params, #grid {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+  flex-basis: 100%;
+  border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px 10px;
+}
+#params legend, #grid legend { color: var(--dim); font-size: 11px; padding: 0 4px; }
+#grid-strategy, #grid-account { display: flex; flex-wrap: wrap; gap: 12px; }
+#grid-account { border-left: 1px solid var(--line); padding-left: 12px; }
+.hint { text-transform: none; letter-spacing: 0; }
+#combos { color: var(--dim); align-self: center; }
+#sim-head { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 6px; color: var(--dim); }
+#sim-title { font-weight: 600; color: var(--text); }
+#sim-equity { display: block; width: 100%; }
+#sim-current { margin-top: 8px; color: #cfe6ff; }
+.k.sim-run { color: #e8a33d; }
+.k.sim-pick { color: var(--entry); }
+.k.sim-done { color: rgba(139, 149, 166, .6); }
+#sim-rows td.good { color: var(--up); }
+#sim-rows td.bad { color: var(--down); }
+#sim-thead th { cursor: pointer; }
+.run-actions { white-space: nowrap; }
+.run-actions button { padding: 1px 6px; font-size: 11px; }
+@media (max-width: 640px) {
+  #grid-account { border-left: 0; padding-left: 0; }
+  #sim-table-panel { overflow-x: auto; }
+}
+#params[hidden] { display: none; }
+/* the results alone, inside the simulate page's run dialog */
+.embed header { display: none; }
+#sim-table-panel { overflow-x: auto; }
+#grid-strategy:empty + #grid-account { border-left: 0; padding-left: 0; }
+
+/* the saved sets of simulations */
+#sets-dialog { width: calc(100vw - 32px); max-width: none; }
+#sets-dialog, #ask-dialog { max-height: calc(100vh - 48px); }
+#sets-table th, #sets-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+#sets-table th { color: var(--dim); font-weight: normal; }
+#sets-table .num { text-align: right; }
+#sets-table tbody tr { cursor: pointer; }
+.set-name { width: 14em; padding: 2px 6px; }
+.set-delete, .set-rerun { padding: 1px 6px; font-size: 11px; }
+#sets-table td:last-child { white-space: nowrap; }
+.set-delete:hover { border-color: var(--down); }
+#sets-open { margin-left: auto; }
+
+/* one run of a set, full page, with the backtest page inside */
+#run-dialog { width: calc(100vw - 24px); height: calc(100vh - 24px); max-width: none;
+  max-height: none; padding: 8px 12px 12px; display: none; flex-direction: column;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
+#run-dialog[open] { display: flex; }
+#run-dialog::backdrop { background: rgba(0, 0, 0, .6); }
+#run-dialog .dialog-head { margin-bottom: 8px; }
+#run-backtest { margin-left: auto; }
+#run-backtest + button { margin-left: 0; }
+#run-frame { flex: 1; width: 100%; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); }
+
+/* the KPI comparison: a verdict colour always comes with its mark */
+#kpi-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; margin-bottom: 6px; }
+#kpi-head .hint { color: var(--dim); }
+#kpi-panel { overflow-x: auto; }
+#kpi-thead th { cursor: pointer; }
+#kpi-rows td.good { color: var(--up); }
+#kpi-rows td.ok { color: #e8c33d; }
+#kpi-rows td.bad { color: var(--down); }
+
+/* one run's KPIs in words */
+#analysis-dialog { width: min(980px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
+#analysis-body table { border-collapse: collapse; margin: 8px 0 4px; }
+#analysis-body th, #analysis-body td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--line); }
+#analysis-body th { color: var(--dim); font-weight: normal; }
+#analysis-body td.num { text-align: right; }
+#analysis-body td.good { color: var(--up); }
+#analysis-body td.ok { color: #e8c33d; }
+#analysis-body td.bad { color: var(--down); }
+#analysis-body h3 { font-size: 13px; margin: 16px 0 4px; }
+#analysis-body p { margin: 6px 0 2px; }
+#analysis-body ul { margin: 2px 0 6px; padding-left: 20px; }
+.analysis-summary { font-weight: bold; }
+
+/* going live, from the backtest page */
+.nav-link { color: var(--dim); text-decoration: none; border: 1px solid var(--line);
+  border-radius: 4px; padding: 3px 8px; margin-left: 8px; }
+.nav-link:hover { border-color: var(--entry); color: var(--text); }
+#live-targets fieldset { border: 1px solid var(--line); border-radius: 4px; margin: 6px 0; padding: 4px 10px 8px; }
+#live-targets legend { color: var(--dim); padding: 0 4px; }
+#live-targets label { display: block; padding: 2px 0; cursor: pointer; }
+#live-targets .hint, #live-dialog .hint { color: var(--dim); margin: 2px 0; }
+#live-message { color: var(--down); }
+
+/* the live page */
+#live-clock { margin-left: 12px; }
+#live-back { margin-left: auto; }
+#live-panel, #live-detail { padding: 8px 16px; overflow-x: auto; }
+/* a session started from the live page itself */
+#new-live { margin: 8px 16px; padding: 8px 12px 12px; border: 1px solid var(--line);
+  border-radius: 6px; background: var(--panel); }
+#new-live h3 { font-size: 13px; margin: 0 0 8px; color: var(--dim); font-weight: normal; }
+#new-accounts { border: 1px solid var(--line); border-radius: 4px; margin: 0; padding: 4px 10px 8px;
+  flex-basis: 100%; }
+#new-accounts legend { color: var(--dim); padding: 0 4px; }
+#new-accounts label { display: block; padding: 2px 0; cursor: pointer; text-transform: none;
+  letter-spacing: 0; color: var(--text); }
+#new-accounts .hint { color: var(--dim); margin: 2px 0; }
+#new-accounts .real { color: var(--down); font-weight: 600; }
+#new-description { color: var(--dim); margin: 8px 0 0; max-width: 110ch; }
+#new-message { color: var(--entry); margin: 6px 0 0; }
+#live-table, .live-small { border-collapse: collapse; width: 100%; }
+#live-table th, #live-table td, .live-small th, .live-small td {
+  text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+#live-table th, .live-small th { color: var(--dim); font-weight: normal; }
+#live-table .num, .live-small .num { text-align: right; }
+#live-table tbody tr[data-id] { cursor: pointer; }
+#live-table td.good, .live-small td.good { color: var(--up); }
+#live-table td.bad, .live-small td.bad { color: var(--down); }
+#live-foot td { color: var(--dim); border-bottom: 0; }
+#live-equity { width: 100%; display: block; margin: 8px 0; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 4px; }
+#detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 900px) { #detail-grid { grid-template-columns: minmax(0, 1fr); } }
+#live-detail h3 { font-size: 13px; margin: 12px 0 4px; color: var(--dim); font-weight: normal; }
+#event-list { max-height: 360px; overflow-y: auto; font-size: 12px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; }
+.event { white-space: pre; }
+.event-transaction { color: var(--up); }
+.event-signal, .event-order { color: var(--entry); }
+.event-status { color: var(--down); }
+/* a parity status is a divergence from the reference, not an error */
+.event-parity { color: var(--trail); }
+.event-candle { color: var(--dim); }
+#console { max-height: 260px; overflow: auto; font-size: 11px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; margin: 0; }
+.hint { color: var(--dim); }
+
+/* the skew board, the live chart and the trade skew tables */
+#skew-board, #live-chart-panel, #trade-skew { padding: 8px 16px; overflow-x: auto; }
+#skew-table tr.hint td { color: var(--dim); }
+#skew-table td.bad, #trade-skew tr.bad td, #skew-note.bad { color: var(--down); }
+#skew-note { margin: 6px 0 0; }
+#chart-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 6px; }
+#chart-controls label { flex-direction: row; align-items: center; gap: 6px; text-transform: none;
+  letter-spacing: 0; font-size: inherit; cursor: pointer; }
+#chart-hover { flex: 1 1 300px; }
+/* the two canvases are one chart: same bars, same margins, no gap to speak of */
+#live-skew { margin-top: 4px; }
+#live-chart, #live-skew { cursor: grab; }
+#trade-skew h3 { font-size: 13px; margin: 12px 0 4px; color: var(--dim); font-weight: normal; }
+#trade-skew tbody tr[data-signal] { cursor: pointer; }
+
+/* the pages, fixed at the top right of every page (menu.js). The
+   title row keeps its right edge clear of it. */
+#brand { padding-right: var(--menu-w); min-height: 30px; }
+:root { --menu-w: 420px; }
+#menu { position: fixed; top: 8px; right: 12px; z-index: 50; display: flex; gap: 4px;
+  padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+#menu a, #menu button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
+  color: var(--dim); text-decoration: none; background: none; border: 1px solid transparent;
+  border-radius: 4px; font: var(--font); cursor: pointer; }
+#menu a:hover, #menu button:hover { color: var(--text); border-color: var(--line); }
+#menu [aria-current="page"] { color: var(--text); border-color: var(--entry); background: #1d222b; }
+#menu a:focus-visible, #menu button:focus-visible { outline: 2px solid var(--entry); outline-offset: 1px; }
+.embed #menu { display: none; }
+@media (max-width: 900px) {
+  :root { --menu-w: 176px; }
+  #menu span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  #menu a, #menu button { padding: 6px 8px; }
+}
+
+/* the favourite star: a run marked as one of the forms the live page trades.
+   A button drawn as a glyph, so it sits in a title or a table cell without a
+   box of its own; lit when pressed */
+.fav-star { background: none; border: 0; color: var(--dim); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
+.fav-star[aria-pressed="true"] { color: #f2c14e; }
+.fav-star:hover { color: var(--text); }
+
+/* the live page's new session: the favourites to pick from on the left, what
+   the picked one is on the right; one column when the two would not fit */
+#new-live .new-grid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr); gap: 18px; align-items: start; }
+@media (max-width: 900px) { #new-live .new-grid { grid-template-columns: 1fr; } }
+#new-summary { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+#new-summary h4 { margin: 0 0 6px; }
+#new-summary dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; margin: 0; }
+#new-summary dt { color: var(--dim); }
+#new-summary dd { margin: 0; }
+#new-summary .hint { margin-top: 8px; }
+#new-summary h5 { margin: 10px 0 4px; font-size: inherit; }
+#new-summary dd.hint { margin-top: 0; }
+/* the way back to the backtest this form came from: a button, not a word in the hint */
+#new-summary a.open-backtest { display: inline-block; margin-top: 10px; padding: 5px 10px; color: var(--entry);
+  border: 1px solid var(--entry); border-radius: 4px; text-decoration: none; }
+#new-summary a.open-backtest:hover { background: var(--entry); color: var(--bg); }
+#new-summary a.open-backtest:focus-visible { outline: 2px solid var(--entry); outline-offset: 2px; }
+#sim-dialog td.params { font-size: 0.85em; color: var(--dim); max-width: 360px; }
+/* the favourites dialog on the live page: the runs table's look, see #runs-table */
+#sim-dialog { width: min(980px, calc(100vw - 32px)); }
+#sim-dialog table { width: 100%; border-collapse: collapse; }
+#sim-dialog th, #sim-dialog td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+#sim-dialog th { color: var(--dim); font-weight: normal; }
+#sim-dialog .num { text-align: right; }
+#sim-dialog tr[data-pick] { cursor: pointer; }
+/* the panel colour is the dialog's own, so the hover is the one every table here has */
+#sim-dialog tr[data-pick]:hover { background: #1d222b; }
+#sim-tabs { display: flex; gap: 8px; margin: 8px 0; }
+#sim-tabs button[aria-pressed="true"] { border-color: var(--entry); color: var(--text); }

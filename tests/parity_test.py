@@ -13,8 +13,9 @@ from unittest import mock
 from parity_deriva.event.event import (SimulatedFillEvent, StatusEvent,
                                        TransactionEvent)
 from parity_deriva.portfolio.moneymanager import MoneyManager
-from parity_deriva.trading.parity import (OUTCOME, SLIPPAGE, UNKNOWN_OUTCOMES,
-                                          ParityMonitor, policy_for)
+from parity_deriva.trading.parity import (OUTCOME, SLIPPAGE, UNDECIDED,
+                                          UNKNOWN_OUTCOMES, ParityMonitor,
+                                          policy_for)
 from parity_deriva.tests.helpers import Recorder, TempDirCase
 
 
@@ -261,7 +262,7 @@ class TestUnpaired(ParityCase):
             mon.execute_event(sim_fill('K%d' % i, 1.5, 'STOP_LOSS_ORDER', closed=True))
         self.assertEqual(mon.reconciled, 0)
         self.assertTrue(mon.halted)
-        self.assertEqual(self.sink.events[0].status, 'HALT')
+        self.assertIn('HALT', self.sink.statuses())
 
     def test_a_trade_that_pairs_up_later_is_not_stranded(self):
         mon = self.monitor(max_unpaired=0)
@@ -279,22 +280,22 @@ class TestAction(ParityCase):
         self.trade(mon, 'K1', 'STOP_LOSS_ORDER', 'TAKE_PROFIT_ORDER')
         self.assertTrue(mon.breaches())
         self.assertFalse(mon.halted)
-        self.assertEqual(self.sink.events, [])
+        self.assertNotIn('HALT', self.sink.statuses())
 
     def test_halt_publishes_a_status_event(self):
         mon = self.monitor(min_sample=1, max_outcome_mismatch=0.0,
                            action='halt')
         self.trade(mon, 'K1', 'STOP_LOSS_ORDER', 'TAKE_PROFIT_ORDER')
         self.assertTrue(mon.halted)
-        self.assertEqual(self.sink.kinds(), ['STATUS'])
-        self.assertEqual(self.sink.events[0].status, 'HALT')
+        self.assertEqual(set(self.sink.kinds()), {'STATUS'})
+        self.assertIn('HALT', self.sink.statuses())
 
     def test_it_halts_once_and_does_not_repeat(self):
         mon = self.monitor(min_sample=1, max_outcome_mismatch=0.0,
                            action='halt')
         for i in range(4):
             self.trade(mon, 'K%d' % i, 'STOP_LOSS_ORDER', 'TAKE_PROFIT_ORDER')
-        self.assertEqual(len(self.sink.of('STATUS')), 1)
+        self.assertEqual(self.sink.statuses().count('HALT'), 1)
 
     def test_resume_clears_it(self):
         mon = self.monitor(min_sample=1, max_outcome_mismatch=0.0,
@@ -492,7 +493,7 @@ class TestUndecidedThreshold(ParityCase):
     def test_it_can_halt_like_any_other_breach(self):
         mon = self.monitor(max_undecided=0, action='halt')
         self.trade(mon, 'u1', 'UNKNOWN', 'TAKE_PROFIT_ORDER')
-        self.assertEqual(self.sink.statuses(), ['HALT'])
+        self.assertEqual(self.sink.statuses().count('HALT'), 1)
 
     def test_the_shipped_setting_is_off(self):
         """
@@ -501,3 +502,73 @@ class TestUndecidedThreshold(ParityCase):
         """
         from parity_deriva.etc import settings
         self.assertIsNone(policy_for('EUR_USD', settings).get('max_undecided'))
+
+
+class TestDivergencesArePublished(ParityCase):
+    """
+    Was: a divergence was a log line and nothing else. The web page reads the
+         JSONL event log, not the logger, so it saw the HALT and never what
+         led up to it.
+    Now: each finding is a STATUS event as well - status PARITY for one
+         comparison, PARITY_ALARM for a breach - so it lands in the log the
+         page reads. Nothing else on the bus reads STATUS for anything but
+         HALT, RESUME, LIQUIDATE, ERROR and DONE, so these pass everyone by.
+    """
+
+    def parity(self):
+        return [e for e in self.sink.of('STATUS') if e.status == 'PARITY']
+
+    def alarms(self):
+        return [e for e in self.sink.of('STATUS') if e.status == 'PARITY_ALARM']
+
+    def test_an_outcome_divergence_is_a_status_event(self):
+        mon = self.monitor()
+        self.trade(mon, 'K1', 'STOP_LOSS_ORDER', 'TAKE_PROFIT_ORDER')
+        found = self.parity()
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].kind, OUTCOME)
+        self.assertEqual(found[0].key, 'K1')
+        self.assertEqual(found[0].instrument, 'EUR_USD')
+        self.assertEqual(found[0].detail, mon.divergences[0].detail)
+
+    def test_an_undecided_pair_is_said_too(self):
+        mon = self.monitor()
+        self.trade(mon, 'K1', 'UNKNOWN', 'TAKE_PROFIT_ORDER')
+        found = self.parity()
+        self.assertEqual([e.kind for e in found], [UNDECIDED])
+        self.assertEqual(found[0].key, 'K1')
+        self.assertIn('UNKNOWN', found[0].detail)
+
+    def test_an_agreeing_trade_says_nothing(self):
+        mon = self.monitor()
+        self.trade(mon, 'K1', 'TAKE_PROFIT_ORDER', 'TAKE_PROFIT_ORDER')
+        self.assertEqual(self.sink.events, [])
+
+    def test_a_breach_is_an_alarm_event_carrying_the_breaches(self):
+        mon = self.monitor(min_sample=1, max_outcome_mismatch=0.0,
+                           action='warn')
+        self.trade(mon, 'K1', 'STOP_LOSS_ORDER', 'TAKE_PROFIT_ORDER')
+        alarms = self.alarms()
+        self.assertTrue(alarms)
+        self.assertEqual(alarms[0].breaches, mon.breaches())
+        self.assertIn('outcome mismatch', alarms[0].breaches[0])
+        self.assertEqual(alarms[0].instrument, 'EUR_USD')
+        # 'warn' is still warn
+        self.assertFalse(mon.halted)
+
+    def test_the_alarm_comes_before_the_halt(self):
+        """The page should read what tripped it, then that it tripped."""
+        mon = self.monitor(min_sample=1, max_outcome_mismatch=0.0,
+                           action='halt')
+        self.trade(mon, 'K1', 'STOP_LOSS_ORDER', 'TAKE_PROFIT_ORDER')
+        statuses = self.sink.statuses()
+        self.assertLess(statuses.index('PARITY_ALARM'), statuses.index('HALT'))
+
+    def test_the_money_manager_is_not_moved_by_them(self):
+        mm = MoneyManager(setup=self.settings, units=1)
+        mm.signals, mm.processed = {}, []
+        mm.onTrade = mm.orderIssued = mm.halted = False
+        mm.set_queue(Recorder())
+        mm.execute_event(StatusEvent({'status': 'PARITY', 'kind': OUTCOME}))
+        mm.execute_event(StatusEvent({'status': 'PARITY_ALARM', 'breaches': ['x']}))
+        self.assertFalse(mm.halted)

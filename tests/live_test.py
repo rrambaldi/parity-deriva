@@ -13,6 +13,7 @@ a trade that never leaves.
 import contextlib
 import io
 import logging
+import json
 import unittest
 from unittest import mock
 
@@ -80,6 +81,9 @@ class LiveCase(unittest.TestCase):
             mock.patch.object(live, 'Engine', lambda: self.engine),
             mock.patch.object(live, 'getLogger', lambda: logging.getLogger('test')),
             mock.patch.object(live, 'EventSaver', lambda *a, **k: _label('saver')),
+            # a label too, or every wiring test would open the real candle
+            # database in DATA_DIR
+            mock.patch.object(live, 'CandleRecorder', lambda *a, **k: _label('recorder')),
         ]
         for p in patches:
             p.start()
@@ -169,3 +173,75 @@ class TestTheCapabilityGate(LiveCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestThePaperAccount(LiveCase):
+    """
+    On a provider whose execution handler is the simulator there is nothing
+    to shadow: a second simulator would fill the same orders, and the parity
+    monitor would compare the two copies and call them equal.
+    """
+
+    def test_no_shadow_and_no_parity_but_the_recorder(self):
+        self.run_main(FakeProvider(name='twelvedata', paper=True, bid_ask_candles=True),
+                      '--strategy', 'AG01', '--instrument', 'EUR_USD', '--granularity', 'M5')
+        kinds = self.kinds()
+        self.assertNotIn('simulator', kinds)
+        self.assertNotIn('ParityMonitor', kinds)
+        self.assertIn('execution', kinds)
+        self.assertIn('recorder', kinds)
+        self.assertIn('PAPER', self.out.getvalue())
+
+    def test_a_broker_keeps_its_shadow_and_records_too(self):
+        self.run_main(FakeProvider(**OANDA_LIKE), '--strategy', 'AG01',
+                      '--instrument', 'EUR_USD', '--granularity', 'M5')
+        kinds = self.kinds()
+        self.assertIn('simulator', kinds)
+        self.assertIn('ParityMonitor', kinds)
+        # after the event log, before the sources: a bar is recorded once
+        # every handler before it has seen it
+        self.assertLess(kinds.index('saver'), kinds.index('recorder'))
+        self.assertLess(kinds.index('recorder'), kinds.index('candles'))
+
+    def test_a_strategy_reading_bid_and_ask_is_refused_with_the_spread_hint(self):
+        code = self.run_main(FakeProvider(name='twelvedata', paper=True),
+                             '--strategy', 'AG01', '--instrument', 'EUR_USD',
+                             '--granularity', 'M5')
+        self.assertEqual(code, 2)
+        self.assertIn('TWELVEDATA_SPREAD', self.out.getvalue())
+
+
+class QuoteBalanceTest(unittest.TestCase):
+    """The risk is taken of the balance in the currency the P&L is in."""
+
+    class Provider(object):
+        name = 'fake'
+
+        def __init__(self, currency):
+            self.currency = currency
+
+        def accounts(self):
+            return [{'id': 'A', 'balance': 30000.0, 'currency': self.currency}]
+
+    def test_converted_from_the_base_kept_in_the_quote_refused_otherwise(self):
+        rows = {1: (1.1, 1.2, 1.0, 1.14, 0)}
+        self.assertEqual(live.quoteBalance(self.Provider('EUR'), 'A', 'EUR_USD', 'H1', rows),
+                         34200.0)
+        self.assertEqual(live.quoteBalance(self.Provider('USD'), 'A', 'EUR_USD', 'H1', rows),
+                         30000.0)
+        with self.assertRaises(SystemExit):
+            live.quoteBalance(self.Provider('GBP'), 'A', 'EUR_USD', 'H1', rows)
+
+    def test_a_reference_capital_takes_the_balance_s_place_converted_the_same(self):
+        rows = {1: (1.1, 1.2, 1.0, 1.14, 0)}
+        self.assertEqual(live.quoteBalance(self.Provider('EUR'), 'A', 'EUR_USD', 'H1', rows,
+                                           amount=1000), 1140.0)
+        self.assertEqual(live.quoteBalance(self.Provider('USD'), 'A', 'EUR_USD', 'H1', rows,
+                                           amount=1000), 1000.0)
+
+    def test_the_form_s_capital_is_read_and_a_bad_one_refused(self):
+        form = {'strategy': 'AG01', 'instrument': 'EUR_USD', 'granularity': 'H1'}
+        self.assertIsNone(live.fromForm(json.dumps(form))['capital'])
+        self.assertEqual(live.fromForm(json.dumps(dict(form, capital='1000')))['capital'], 1000.0)
+        with self.assertRaises(Exception):
+            live.fromForm(json.dumps(dict(form, capital='0')))

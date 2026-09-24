@@ -64,6 +64,11 @@ class IGExecutionHandler(ExecutionHandler):
 
 		self.api = args.get('api') or IGAPI(setup=self.setup)
 		self.guaranteed = bool(getattr(self.setup, 'IG_GUARANTEED_STOP', False))
+		#: units are the money manager's, sized on the account's risk, and IG
+		#: deals in contracts: with this set a size is units over the
+		#: instrument's contractSize. Off, a unit is a contract, which is
+		#: what the one-unit demo scripts have always sent
+		self._set(args, 'sized', False)
 		self.logger.debug("initialized... %s account"
 						  % ("demo" if self.api.demo else "REAL"))
 
@@ -81,6 +86,20 @@ class IGExecutionHandler(ExecutionHandler):
 		if value is None:
 			return None
 		return float(value) * scale(instrument, self.setup)
+
+	def size(self, instrument, units):
+		"""The deal size for `units`: see `sized`."""
+		if not self.sized:
+			return abs(units)
+		entry = (getattr(self.setup, 'IG_INSTRUMENTS', {}) or {}).get(instrument) or {}
+		size = round(abs(units) / float(entry.get('contractSize') or 1), 2)
+		step = entry.get('sizeStep')
+		if step:
+			# a market that deals in whole lots of `step`: the nearest one
+			size = round(size / step) * step
+		if size <= 0:
+			raise IGError("%s units of %s round to no contract" % (units, instrument))
+		return size
 
 	def body(self, event):
 		"""
@@ -101,7 +120,7 @@ class IGExecutionHandler(ExecutionHandler):
 			'epic': epic(instrument, self.setup),
 			'expiry': expiry(instrument, self.setup),
 			'direction': direction,
-			'size': abs(units),
+			'size': self.size(instrument, units),
 			'currencyCode': currency(instrument, self.setup),
 			# Every order here brackets a position of its own, and IG attaches
 			# a stop or a limit only to a deal that opens one.

@@ -35,6 +35,14 @@ class EventSaver(ExecutionHandler):
 		try:
 			now = datetime.date.today()
 			if now != self.started:
+				# Was: the file was closed and reopened at midnight - under
+				#      the same name, because getFileName() reads self.started
+				#      and nothing ever moved it on. Every event after the
+				#      first midnight still went into day one's file, and with
+				#      overwrite=True the reopen truncated it as well.
+				# Now: the date rolls before the reopen, so the new file is
+				#      today's.
+				self.started = now
 				self.f.close()
 				self.f = open(self.getFileName(), self.openmode)
 				

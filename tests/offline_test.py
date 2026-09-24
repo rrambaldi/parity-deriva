@@ -11,7 +11,9 @@ from parity_deriva.backtest.driver import Collector, ReplayEngine
 from parity_deriva.backtest.oanda import OANDABacktester
 from parity_deriva.backtest.offline import SimulatedBroker
 from parity_deriva.event.event import (CandleEvent, OrderEvent, StatusEvent,
-                                       SimulatedFillEvent, SimulatedOrderEvent)
+                                       SimulatedFillEvent,
+                                       SimulatedOrderCancelEvent,
+                                       SimulatedOrderEvent)
 from parity_deriva.portfolio.moneymanager import MoneyManager
 from parity_deriva.trading.handler import ExecutionHandler, StreamHandler
 from parity_deriva.tests.helpers import T0, Recorder, TempDirCase, candle_dict
@@ -157,6 +159,27 @@ class TestSimulatedBroker(OfflineCase):
             {"orderID": 7, "price": 1.5, "pl": 3.0,
              "tradesClosed": [{"tradeID": 7}]}))
         self.assertTrue(self.sink.events[0].has_attr('tradesClosed'))
+
+    def test_an_expiry_cancel_becomes_an_order_cancel(self):
+        """
+        Was: the simulator published a plain ORDERCANCEL for an entry that
+             outlived its gtdTime, and live the real execution handler and
+             the money manager - which falls back to matching on price -
+             both acted on it against the real order.
+        Now: it publishes SIMULATEDORDERCANCEL, promoted here like the rest,
+             payload intact, so the money manager offline still learns the
+             leg is dead.
+        """
+        self.adapter.execute_event(SimulatedOrderCancelEvent(
+            {"orderID": 7, "price": 1.5, "instrument": "DE30_EUR",
+             "signalNumber": "K1", "reason": "GTD_EXPIRY"}))
+        self.assertEqual(self.sink.kinds(), ['ORDERCANCEL'])
+        out = self.sink.events[0]
+        self.assertEqual(out.orderID, 7)
+        self.assertEqual(out.price, 1.5)
+        self.assertEqual(out.instrument, "DE30_EUR")
+        self.assertEqual(out.signalNumber, "K1")
+        self.assertEqual(out.reason, 'GTD_EXPIRY')
 
     def test_everything_else_passes_through_untouched(self):
         for ev in (StatusEvent('DONE'), self.order(), self.candle()):

@@ -98,6 +98,7 @@ ROUTES = {
 	'refresh': ('/session/refresh-token', 1),
 	'logout': ('/session', 1),
 	'accounts': ('/accounts', 1),
+	'switch': ('/session', 1),
 	'search': ('/markets', 1),
 	'market': ('/markets/%s', 3),
 	'prices': ('/prices/%s', 3),
@@ -370,18 +371,19 @@ def goodTillDate(dt):
 	  GOOD_TILL_DATE_IN_THE_PAST - so the check is made on acceptance and the
 	  two survivals above mean what they look like.
 
-	So the instant is converted rather than its digits copied. The strategies
-	build gtdTime with datetime.today(), which is the machine's local time: on
-	a machine that is not on UTC, copying those digits moved AG01's
-	end-of-day expiry by the machine's offset, and an order that should have
-	rested until midnight died two hours early - or outlived the day it
-	belonged to.
+	So the instant is converted rather than its digits copied. A datetime
+	that carries an offset is converted from it; a naive one is already UTC,
+	because the strategies build gtdTime from the candle's own timestamp
+	(lib/utils.expiryAt) and the candles are UTC.
+
+	Was: a naive value was read as the machine's local time, which is what
+	     datetime.today() returned when the expiry came from the clock rather
+	     than from the data. Passing a UTC instant through that shifted it by
+	     the machine's offset.
 	"""
 	import datetime as _dt
 	if dt.tzinfo is None:
-		# naive means the machine's own clock, which is what datetime.today()
-		# returns; astimezone() with no argument is what reads that offset
-		dt = dt.astimezone()
+		dt = dt.replace(tzinfo=_dt.timezone.utc)
 	return dt.astimezone(_dt.timezone.utc).strftime('%Y/%m/%d %H:%M:%S')
 
 
@@ -500,10 +502,21 @@ class IGAPI(object):
 				self.logger.error(
 					"IG login returned 200 without CST / X-SECURITY-TOKEN")
 				return False
+			current = (payload.get('currentAccountId')
+					   or (payload.get('accountInfo') or {}).get('accountId') or '')
+			if self.account and current and self.account != current:
+				# a v2 session deals on the login's current account whatever
+				# IG_ACCOUNT_ID says, and switching it (PUT /session) moves
+				# every other session of the login too - measured on the demo
+				# on 2026-09-24. Version 3 names the account on each request
+				self.logger.error(
+					"IG session is on %s, not %s: a version 2 session cannot "
+					"deal on another account safely; set IG_SESSION_VERSION=3"
+					% (current, self.account))
+				self.cst = self.security_token = None
+				return False
 			if not self.account:
-				self.account = ((payload.get('currentAccountId'))
-								or (payload.get('accountInfo') or {}).get('accountId')
-								or '')
+				self.account = current
 		else:
 			token = payload.get('oauthToken') or {}
 			self.oauth = token.get('access_token')

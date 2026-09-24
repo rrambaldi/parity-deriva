@@ -37,6 +37,26 @@ class ExecutionHandler(MetaHandler):
 
 		return False
 
+	def otherStream(self, event):
+		"""
+		Is this candle from a stream other than the one this handler reads?
+
+		A backtest can put two granularities of one instrument on the bus -
+		the daily bars a strategy signals on and the minute bars its orders
+		are filled against (backtest/shadow.py) - and every handler that
+		counts bars has to say which of the two it is counting. The simulator
+		and portfolio/trailer.py already did, each with its own copy of this
+		test; a strategy did not, and would have taken every minute of the
+		day for a day of its own.
+
+		An event with no granularity at all passes. Every live source sets
+		one, so that case is a hand-made candle in a test, and dropping those
+		would be this guard deciding what the tests are allowed to feed.
+		"""
+		granularity = getattr(event, 'granularity', None)
+		return granularity is not None \
+			and getattr(self, 'granularity', None) not in (None, granularity)
+
 	def set_queue(self, event_queue):
 #		self.logger.debug("Set event queue: %s" % self.event_queue)
 		if event_queue is not None:

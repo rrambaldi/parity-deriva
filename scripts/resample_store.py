@@ -30,46 +30,8 @@ import sys
 import pandas as pd
 
 from parity_deriva.etc import settings
-from parity_deriva.lib.utils import granularityToTimedelta
-
-AGGREGATE = {'o': 'first', 'h': 'max', 'l': 'min', 'c': 'last'}
-
-
-def aggregation_map(columns):
-    """
-    Map the flat store columns onto their aggregation. ask_h takes the max,
-    bid_o the first, volume the sum.
-    """
-    how = {}
-    for column in columns:
-        if column == 'volume':
-            how[column] = 'sum'
-            continue
-        side, _, leg = column.partition('_')
-        if side in ('ask', 'bid', 'mid') and leg in AGGREGATE:
-            how[column] = AGGREGATE[leg]
-        else:
-            raise ValueError("unexpected column %r in store" % column)
-    return how
-
-
-def resample(frame, target):
-    """Aggregate a flat candle frame up to the target granularity."""
-    rule = granularityToTimedelta(target)
-    if rule is None:
-        raise ValueError("unknown granularity %r" % target)
-    out = frame.resample(rule).agg(aggregation_map(frame.columns))
-    # A period with no source bars is the market being closed, and there is no
-    # candle to report for it. Such a row has NaN prices but volume 0, because
-    # summing nothing gives 0 rather than NaN - so the emptiness has to be
-    # judged on the prices, not on the whole row.
-    prices = [c for c in out.columns if c != 'volume']
-    if prices:
-        out = out[~out[prices].isna().all(axis=1)]
-    if 'volume' in out.columns:
-        out['volume'] = out['volume'].fillna(0).astype('int64')
-    return out
-
+# the aggregation lives with the reader, which derives the same bars on the fly
+from parity_deriva.data.store import AGGREGATE, aggregation_map, resample  # noqa: F401
 
 def process(path, source, target, force=False, dry_run=False):
     src_key = '/' + source.lstrip('/')

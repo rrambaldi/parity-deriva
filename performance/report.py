@@ -21,6 +21,9 @@ is the kind of quiet wrongness everything else here is written to avoid.
 """
 
 
+import datetime
+
+
 #: outcomes the simulator reports, in the vocabulary trading/parity.py shares
 TAKE_PROFIT = 'TAKE_PROFIT_ORDER'
 STOP_LOSS = 'STOP_LOSS_ORDER'
@@ -151,4 +154,79 @@ def report(trades):
 		# said in the payload rather than only in this docstring, so a
 		# consumer cannot label it as money by accident
 		'unit': 'price x units',
+	}
+
+
+#: trading days a year, for annualising a daily Sharpe ratio
+TRADING_DAYS = 252
+
+
+def kpis(curve, start, dtfrom, dtto, summary=None):
+	"""
+	The ratios strategies are compared on, from the capital curve.
+
+	`curve` is [(time, balance)] after each close, `start` the opening
+	balance, `dtfrom`/`dtto` the window the run covered (datetimes), and
+	`summary` what report() said about the same trades, for the ratios that
+	are about trades rather than about the curve.
+
+	Percentages are of the account, not price x units: these only mean
+	something for a run sized off an account (risk set), which is what a
+	sweep is. The daily series is one balance per weekday - the market is
+	shut at the weekend, and zero returns there would flatter the Sharpe.
+	The risk free rate is taken as zero.
+	"""
+	import math
+
+	summary = summary or {}
+	points = sorted(curve, key=lambda point: point[0])
+	final = points[-1][1] if points else start
+	years = max((dtto - dtfrom).total_seconds() / (365.25 * 86400), 1e-9)
+
+	# one balance per weekday, the last close on or before its end
+	daily, i, balance = [], 0, start
+	day = dtfrom.replace(hour=0, minute=0, second=0, microsecond=0)
+	while day <= dtto:
+		end = day + datetime.timedelta(days=1)
+		while i < len(points) and points[i][0] < end:
+			balance = points[i][1]
+			i += 1
+		if day.weekday() < 5:
+			daily.append(balance)
+		day = end
+
+	# drawdown in per cent of the peak, on every close and not only daily
+	peak, mdd = start, 0.0
+	for _, value in points:
+		peak = max(peak, value)
+		if peak > 0:
+			mdd = max(mdd, (peak - value) / peak * 100)
+
+	peak, squares = start, []
+	for value in daily:
+		peak = max(peak, value)
+		squares.append(((peak - value) / peak * 100) ** 2 if peak > 0 else 0.0)
+	ulcer = math.sqrt(sum(squares) / len(squares)) if squares else None
+
+	returns = [b / a - 1 for a, b in zip([start] + daily, daily) if a > 0]
+	sharpe = None
+	if len(returns) > 1:
+		mean = sum(returns) / len(returns)
+		sd = math.sqrt(sum((r - mean) ** 2 for r in returns) / (len(returns) - 1))
+		sharpe = mean / sd * math.sqrt(TRADING_DAYS) if sd > 0 else None
+
+	car = ((final / start) ** (1 / years) - 1) * 100 if start > 0 and final > 0 else None
+	win, loss = summary.get('averageWin'), summary.get('averageLoss')
+	return {
+		'roi': (final - start) / start * 100 if start else None,
+		'car': car,
+		'maxDrawdownPct': mdd,
+		'carMdd': (car / mdd) if car is not None and mdd > 0 else None,
+		'sharpe': sharpe,
+		'ulcer': ulcer,
+		'riskReward': (win / loss) if win and loss else None,
+		'expectancy': summary.get('expectancy'),
+		'profitFactor': summary.get('profitFactor'),
+		'winRate': summary.get('winRate'),
+		'years': years,
 	}

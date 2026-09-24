@@ -91,7 +91,7 @@ class RegistryTest(unittest.TestCase):
 
     def test_available(self):
         self.assertEqual(providers.available(),
-                         ['etoro', 'ib', 'ig', 'oanda'])
+                         ['capital', 'etoro', 'ib', 'ig', 'mt5', 'oanda', 'twelvedata'])
 
     def test_default_comes_from_settings(self):
         p = providers.get_provider(setup=settings_stub(PROVIDER='etoro'))
@@ -114,7 +114,7 @@ class RegistryTest(unittest.TestCase):
         """
         with self.assertRaises(UnknownProvider) as caught:
             providers.get_provider('interactive-brokers')
-        for name in ('etoro', 'ib', 'ig', 'oanda'):
+        for name in ('etoro', 'ib', 'ig', 'mt5', 'oanda'):
             self.assertIn(name, str(caught.exception))
 
     def test_missing_provider_setting_falls_back_to_oanda(self):

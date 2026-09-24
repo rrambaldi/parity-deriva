@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>parity-deriva simulate</title>
+<!-- relative, like index.html: served at /sim this is /static/app.css, and
+     behind a proxy at /parity/sim it is /parity/static/app.css -->
+<link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+
+<header>
+  <div id="brand">
+    <h1>parity-deriva &middot; simulate</h1>
+    <button type="button" id="sets-open" title="the sets of simulations already made">sets</button>
+  </div>
+  <!--
+    One backtest per combination of the values below. The first row is
+    held fixed for every run; the second is what varies. Every field of the
+    second row is a list: comma separated, `a..b/step` for a range with both
+    ends in, `none` for the field left empty (no ceiling, all day, no limit).
+  -->
+  <form id="sim-controls" autocomplete="off">
+    <label>strategy <select id="strategy"></select></label>
+    <label>instrument <select id="instrument"></select></label>
+    <label>timeframe <select id="granularity"></select></label>
+    <label>from <input type="date" id="from"></label>
+    <label>to <input type="date" id="to"></label>
+    <label>risk % <input type="number" id="risk" value="1" min="0.01" max="100" step="0.01"></label>
+    <label>capital <input type="number" id="balance" min="0" step="any"></label>
+    <fieldset id="grid">
+      <legend>values to try &middot; <span class="hint">1, 2, 3 &middot; 10..50/10 &middot; none</span></legend>
+      <div id="grid-strategy"></div>
+      <div id="grid-account">
+        <label>max stop (pips) <input type="text" id="g-maxStop" placeholder="none"></label>
+        <label>hours UTC <input type="text" id="g-session" placeholder="07:00-16:00, none" size="18"></label>
+        <label>intraday <input type="text" id="g-intraday" placeholder="0, 1" size="5"></label>
+        <label>max bars <input type="text" id="g-maxBars" placeholder="none"></label>
+        <label title="initial stop distance x this: 1 as the strategy, 1.5 half as far again">SL &times; <input type="text" id="g-slScale" placeholder="1" size="10"></label>
+        <label title="initial target distance x this">TP &times; <input type="text" id="g-tpScale" placeholder="1" size="10"></label>
+      </div>
+    </fieldset>
+    <label>name <input type="text" id="sweep-name" placeholder="optional" size="16" maxlength="120"></label>
+    <span id="combos"></span>
+    <button type="submit" id="run">simulate</button>
+    <button type="button" id="rerun" hidden title="run the set on show again, as a new set">rerun</button>
+    <button type="button" id="stop" hidden>stop</button>
+  </form>
+</header>
+
+<dialog id="ask-dialog">
+  <form method="dialog">
+    <p id="ask-text"></p>
+    <div class="dialog-actions">
+      <button value="no">cancel</button>
+      <button value="yes" id="ask-yes">run it anyway</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- the sets kept on disk (web/service.py saveSweep), newest first. A click
+     on a row opens it; the name can be edited in place -->
+<dialog id="sets-dialog">
+  <form method="dialog" class="dialog-head">
+    <strong>simulation sets</strong>
+    <button type="submit" aria-label="close">close</button>
+  </form>
+  <table id="sets-table">
+    <thead><tr><th>id</th><th>saved (UTC)</th><th>name</th><th>strategy</th><th>instrument</th><th>tf</th>
+      <th>from</th><th>to</th><th>varied</th><th class="num">runs</th>
+      <th class="num">best capital</th><th></th></tr></thead>
+    <tbody id="sets-rows"></tbody>
+  </table>
+</dialog>
+
+<!-- one run of the set, drawn by the backtest page itself (?embed=1): the
+     same mask on both pages, see EMBED in app.js -->
+<dialog id="run-dialog">
+  <form method="dialog" class="dialog-head">
+    <strong id="run-title"></strong>
+    <button type="button" id="run-backtest" title="open this run on the backtest page">backtest page</button>
+    <button type="submit" aria-label="close">close</button>
+  </form>
+  <iframe id="run-frame" title="the run"></iframe>
+</dialog>
+
+<!-- one run's KPIs read out in words: see analyse() in sim.js -->
+<dialog id="analysis-dialog">
+  <form method="dialog" class="dialog-head">
+    <strong id="analysis-title"></strong>
+    <button type="submit" aria-label="close">close</button>
+  </form>
+  <div id="analysis-body"></div>
+</dialog>
+
+<p id="message" hidden></p>
+
+<!--
+  Every run's capital, on one time axis. The finished ones are grey so that
+  forty of them read as a spread rather than as forty colours; the one
+  running now is amber, and the one under the cursor or picked in the table
+  is blue.
+-->
+<section id="sim-chart-panel">
+  <div id="sim-head">
+    <span id="sim-title">no simulation yet</span>
+    <span id="sim-readout"></span>
+  </div>
+  <canvas id="sim-equity" height="340"></canvas>
+  <p class="legend">
+    <span class="k sim-run">running now</span>
+    <span class="k sim-pick">selected</span>
+    <span class="k sim-done">finished</span>
+  </p>
+  <!-- the run going now: its parameters and its trades so far -->
+  <div id="sim-current" hidden></div>
+</section>
+
+<section id="sim-table-panel">
+  <table id="sim-table">
+    <thead id="sim-thead"></thead>
+    <tbody id="sim-rows">
+      <tr class="empty"><td>press simulate to fill this table</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!--
+  The same runs compared on the ratios strategies are usually judged by:
+  redditività, rischio, risk-adjusted. Each figure is marked against its
+  usual target (the title of its column says which), and the last column
+  counts the targets met - no single one of them is the answer.
+-->
+<section id="kpi-panel" hidden>
+  <div id="kpi-head"><strong>KPI comparison</strong>
+    <span class="hint">percentages of the account · Sharpe on weekday returns, risk free 0 · click a column to rank</span></div>
+  <table id="kpi-table">
+    <thead id="kpi-thead"></thead>
+    <tbody id="kpi-rows"></tbody>
+  </table>
+</section>
+
+<script src="static/menu.js"></script>
+<script src="static/sim.js"></script>
+</body>
+</html>

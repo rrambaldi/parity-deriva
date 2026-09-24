@@ -408,6 +408,8 @@ class EToroTransactions(StreamHandler):
 		kind = str(event)
 		if kind == 'CLIENTORDER':
 			return self.watch(event)
+		if kind == 'CLOSETRADE':
+			return self.closeTrades(event)
 		if kind == 'ORDERCANCEL':
 			# The execution handler sends the DELETE; drop the order here so
 			# the poll stops asking about it.
@@ -548,6 +550,27 @@ class EToroTransactions(StreamHandler):
 
 	# ---------------------------------------------------------------- closes
 
+	def closeTrades(self, event):
+		"""
+		A CloseTradeEvent: every position this handler opened on the
+		instrument, closed at market through the market-close route. The
+		close comes back through the trade history like any other.
+		"""
+		instrument = getattr(event, 'instrument', None)
+		done = 0
+		for position_id, position in list(self.positions.items()):
+			if position.get('instrument') != instrument:
+				continue
+			status, payload = self.api.post(
+				'close_position', parts=(position_id,),
+				body={'InstrumentId': instrumentId(instrument, self.setup),
+					  'UnitsToDeduct': None})
+			self.logger.info("CLOSE %s %s (%s): status %s %s"
+							 % (instrument, position_id, getattr(event, 'reason', None),
+								status, payload))
+			done += status in (200, 201)
+		return done
+
 	def since(self):
 		"""
 		The minDate for the history read: the oldest position still open.
@@ -655,12 +678,13 @@ class EToroTransactions(StreamHandler):
 		when = known.get('gtdTime')
 		if when is None:
 			return False
-		# Local time here, deliberately, where everything else in this module
-		# is UTC. gtdTime is not a broker timestamp: the strategies build it
-		# with datetime.today().replace(hour=...), so it is a local wall-clock
-		# instant - AG01's "expire at 23:59:59" means the operator's evening.
-		# Converting it would move the expiry by the machine's offset.
-		now = now if now is not None else datetime.datetime.today()
+		# UTC, because that is the clock gtdTime is on: the strategies
+		# build it from the candle's own timestamp (lib/utils.expiryAt), and
+		# the candles are UTC. It used to be the machine's local time, back
+		# when the expiry came from datetime.today() - on a machine that is
+		# not on UTC the two differ by its offset, and the order died early
+		# or outlived its day by that much.
+		now = now if now is not None else datetime.datetime.utcnow()
 		if when > now:
 			return False
 

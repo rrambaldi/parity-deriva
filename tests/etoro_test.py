@@ -1802,3 +1802,17 @@ class ExpiryReleasesTheSignalTest(unittest.TestCase):
         self.manager.execute_event(rejects[0])
         self.assertEqual(self.manager.signals, {})
         self.assertFalse(self.manager.orderIssued)
+
+
+class CloseByRuleTest(unittest.TestCase):
+    """A CloseTradeEvent closes what this session holds on the instrument."""
+
+    def test_positions_on_the_instrument_go_through_the_market_close_route(self):
+        from parity_deriva.event.event import CloseTradeEvent
+        api = FakeAPI()
+        poller = EToroTransactions(setup=settings_stub(), pairs=['EUR_USD'], api=api)
+        poller.positions = {77: {'instrument': 'EUR_USD'}, 78: {'instrument': 'DE30_EUR'}}
+        self.assertEqual(poller.execute_event(CloseTradeEvent({'instrument': 'EUR_USD'})), 1)
+        call = api.of('close_position')[0]
+        self.assertEqual(call['parts'], (77,))
+        self.assertIsNone(call['body']['UnitsToDeduct'])

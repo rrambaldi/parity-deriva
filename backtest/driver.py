@@ -4,6 +4,21 @@ import logging
 import traceback
 
 
+class Cancelled(Exception):
+	"""
+	A replay stopped because whoever asked for it asked it to stop.
+
+	Not a fault, so the engine re-raises it without the critical log a broken
+	handler earns: the run is over because somebody pressed a button, and the
+	journal filling with a traceback for that teaches whoever reads it to
+	ignore tracebacks.
+
+	Raised from a handler - see ledger.Progress, whose report can say no - and
+	caught by whoever started the run. Nothing partial is returned: half a
+	backtest presented as a backtest is worse than no backtest.
+	"""
+
+
 class Collector(object):
 	"""Queue stand-in that just keeps what a source produces."""
 
@@ -76,6 +91,8 @@ class ReplayEngine(object):
 			for handler in self.handlers:
 				try:
 					handler.execute_event(current)
+				except Cancelled:
+					raise
 				except Exception as exc:
 					self.logger.critical("ERROR in execute_event: %s" % str(exc))
 					self.logger.critical(traceback.format_exc())

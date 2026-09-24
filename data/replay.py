@@ -6,12 +6,21 @@ import json
 import time
 import os
 from parity_deriva.etc import settings
+from parity_deriva.data import store
 
 import requests
 
+from parity_deriva.backtest.driver import Cancelled
 from parity_deriva.event.event import CandleEvent
 from parity_deriva.event.event import StatusEvent
 from parity_deriva.trading.handler import StreamHandler
+
+
+#: how often the reading says where it is, as a share of the rows. Eleven
+#: years of M5 is 876 000 of them and a minute of silence before the first
+#: bar reaches the bus; a hundred lines over that minute is a progress bar,
+#: and one per row would cost more than the reading.
+READ_STEPS = 100
 
 
 class ForexCandles(StreamHandler):
@@ -24,6 +33,10 @@ class ForexCandles(StreamHandler):
 
 		self.logger = logging.getLogger('parity_deriva.trading.trading')
 		self._set(args,'setup', settings)
+
+		# who to tell how far the reading has got, or None. Set directly
+		# rather than through _set, which cannot hold a default of None.
+		self.progress = args.get('progress')
 
 		self._set(args,'pairs','DE30_EUR')
 		self._set(args,'granularity','M5')
@@ -62,25 +75,42 @@ class ForexCandles(StreamHandler):
 			store_name  = "%s.hd5" % p
 			self.candles[p] = 0
 			self.curr[p] = pd.to_datetime(self.dtfrom)
-			# open read-only and close it: pd.HDFStore(path)[key] leaves the
-			# handle open in append mode, which then refuses any read-only
-			# open of the same file elsewhere in the process
-			store = pd.HDFStore(os.path.join(self.setup.DATA_DIR,store_name), mode='r')
-			try:
-				s = store[self.granularity]
-			finally:
-				store.close()
+			# a granularity the store does not hold is built from the finest
+			# one it does, so a D run replays off an M5-only store
+			s = store.load(os.path.join(self.setup.DATA_DIR,store_name), self.granularity)
 			a=s.to_dict('split')
 			self.last[p] = min(s.index.max(), self.dtto)
 			self.samples[p] = len(s.loc[self.curr[p]:self.last[p]])
 			self.logger.debug("%s %d samples to go" % ( p, self.samples[p]))
 			self.cent[p] = max(1, self.samples[p] // 100)
 			x={}
+			rows = len(a['index'])
+			every = max(1, rows // READ_STEPS)
 			for i, t in enumerate(a['index']):
 				x[t] = dict(zip(a['columns'], a['data'][i]))
+				if i % every == 0:
+					self.report("reading %s %s" % (p, self.granularity), i, rows)
 			self.logger.debug("%s %d loaded" % ( p, len(x)))
 			self.store[p] = x
 
+
+	def report(self, stage, done, total):
+		"""
+		How far the reading has got, for whoever asked to be told.
+
+		The reading is the part with nothing to show: a run over eleven years
+		of M5 spends the best part of a minute here, before a single bar has
+		reached the bus, and a page that says nothing for that minute looks
+		like a page that has hung.
+
+		The listener answers, like the one ledger.Progress reports to: False
+		stops the run. That refusal is an exception and it must not be caught
+		by the catch-all in stream_to_queue, which is why that one lets a
+		Cancelled through.
+		"""
+		if self.progress is None:
+			return
+		self.progress(stage, done, total)
 
 	def to_candle(self, tm, row):
 		"""
@@ -119,6 +149,8 @@ class ForexCandles(StreamHandler):
 					maxtime_reached = maxtime_reached and self.curr[pair]>self.last[pair]
 					if self.cent[pair]<=self.candles[pair] and self.candles[pair] % self.cent[pair] == 0:
 						self.logger.debug("%s %d%%" % ( pair, (self.candles[pair]//self.cent[pair])))
+						self.report("preparing %s %s" % (pair, self.granularity),
+									self.candles[pair], self.samples[pair])
 				
 				if maxtime_reached:
 					self.logger.info("Max time reached on all pairs. Streamer stopped")
@@ -128,6 +160,11 @@ class ForexCandles(StreamHandler):
 
 				if self.sleep is not None and self.sleep > 0:
 					time.sleep(self.sleep)
+		except Cancelled:
+			# asked for, not a fault. Swallowing it here would leave the run
+			# going on half a stream, which is the one outcome worth more
+			# care than the rest of this catch-all
+			raise
 		except Exception as e:
 			sev = StatusEvent('ERROR')
 			self.queue_event(sev)

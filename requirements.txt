@@ -26,3 +26,7 @@ urllib3>=2.2                   # tested with 2.7.0
 # required by backtest/output.py only
 matplotlib>=3.9                # tested with 3.11.1
 seaborn>=0.13                  # tested with 0.13.2
+
+# provider mt5 only: the MetaTrader5 package runs under Wine, reached over rpyc
+# (scripts/mt5_bridge.sh). The Wine side needs the same rpyc version.
+rpyc==6.0.2                    # tested with 6.0.2

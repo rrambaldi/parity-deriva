@@ -652,10 +652,13 @@ class IBTransactions(StreamHandler):
 		when = group.get('gtdTime')
 		if when is None:
 			return False
-		# Local time deliberately: gtdTime is not a broker timestamp. The
-		# strategies build it with datetime.today().replace(hour=...), so
-		# AG01's "expire at 23:59:59" means the operator's evening.
-		now = now if now is not None else datetime.datetime.today()
+		# UTC, because that is the clock gtdTime is on: the strategies
+		# build it from the candle's own timestamp (lib/utils.expiryAt), and
+		# the candles are UTC. It used to be the machine's local time, back
+		# when the expiry came from datetime.today() - on a machine that is
+		# not on UTC the two differ by its offset, and the order died early
+		# or outlived its day by that much.
+		now = now if now is not None else datetime.datetime.utcnow()
 		if when > now:
 			return False
 

@@ -18,10 +18,20 @@ paths in the error messages. --host is there for the case where you know you
 want that - a container, say - and it prints a warning when you use it,
 because the difference between 127.0.0.1 and 0.0.0.0 is the whole of the
 security model here.
+
+SIGHUP restarts it in place, on whatever code is on disk now:
+
+    kill -HUP $(systemctl show -p MainPID --value parity-deriva-web)
+
+The process execs itself, so it keeps its PID and systemd sees nothing - and
+anyone who can signal the process (its own user) can restart it without
+sudo. A backtest running at that moment is lost, as with any restart.
 """
 
 import argparse
 import logging
+import os
+import signal
 import sys
 
 from parity_deriva.etc import settings
@@ -41,6 +51,10 @@ def parse(argv):
                         help="most candles one reply may carry (default %d). "
                              "A window wider than this is refused rather than "
                              "truncated" % MAX_CANDLES)
+    parser.add_argument('--no-resume', action='store_true',
+                        help="do not start again the live sessions left "
+                             "running: for a second server on the same data, "
+                             "a test one, which must not trade twice")
     parser.add_argument('--verbose', action='store_true',
                         help="let the backtest log what it is doing. Off by "
                              "default: a run logs several lines per fill, "
@@ -65,6 +79,19 @@ def main(argv=None):
 
     server = serve(host=args.host, port=args.port, setup=settings,
                    max_candles=args.max_candles)
+    if not args.no_resume:
+        # the live sessions never stopped: a systemctl restart took their
+        # processes with it, and the database says they should be trading
+        for session in server.RequestHandlerClass.service.live.resume():
+            logger.info("live session %s resumed" % session)
+
+    def restart(signum, frame):
+        # the socket is closed first so the new process can bind the port;
+        # everything else goes with the exec
+        logger.info("SIGHUP: restarting on the code on disk")
+        server.server_close()
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    signal.signal(signal.SIGHUP, restart)
 
     if args.host not in ('127.0.0.1', 'localhost', '::1'):
         logger.warning(

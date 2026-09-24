@@ -1,5 +1,29 @@
 from decimal import Decimal
 import os
+import shlex
+
+
+def dotenv(key, default=None):
+    """
+    key from the environment, else from parity_deriva/.env, else default.
+
+    The .env is written to be sourced by a shell (`export KEY='value'`),
+    which systemd's EnvironmentFile ignores, so a service reads it here.
+    """
+    if key in os.environ:
+        return os.environ[key]
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+    try:
+        with open(path) as handle:
+            for line in handle:
+                words = shlex.split(line, comments=True)
+                if words[:1] == ['export']:
+                    words = words[1:]
+                if words and words[0].startswith(key + '='):
+                    return words[0][len(key) + 1:]
+    except (OSError, ValueError):
+        pass
+    return default
 
 
 ENVIRONMENTS = { 
@@ -18,7 +42,7 @@ ENVIRONMENTS = {
 # --------------------------------------------------------------------------
 # Which broker the stack talks to
 #
-# 'oanda', 'etoro', 'ig' or 'ib'. The event bus is the same whichever it is -
+# 'oanda', 'etoro', 'ig', 'ib' or 'mt5'. The event bus is the same whichever it is -
 # strategies, the money manager, the simulator and the parity monitor do not
 # know which is behind them - but the four brokers are not the same shape, and
 # what each can do is declared in trading/providers.py rather than discovered.
@@ -49,6 +73,10 @@ API_VERSION = '3'
 
 DATA_DIR = os.environ.get('PARITY_DERIVA_DATA_DIR', "/home/rrambaldi/DATA")
 LOG_DIR = os.environ.get('PARITY_DERIVA_LOG_DIR', "/home/rrambaldi/DATA")
+# Where candle CSV exports wait to be imported into the stores - the viewer's
+# data dialog uploads into it and runs scripts/import_csv.py over it. Set in
+# .env (PARITY_DERIVA_IMPORT_DIR) or the environment.
+IMPORT_DIR = dotenv('PARITY_DERIVA_IMPORT_DIR', '/mnt/HC_Volume_37718599/rrambaldi/parity-deriva/data')
 BASE_CURRENCY = "EUR"
 EQUITY = Decimal("100000.00")
 
@@ -240,7 +268,9 @@ ETORO_SPREAD = None
 
 # Leverage on every order. Anything above 1 makes eToro require a stopLossRate,
 # which execution/etoro.py then refuses to send an order without.
-ETORO_LEVERAGE = 1
+# Read from .env too, where a demo account can ask for more: a stop a few
+# pips away on 1% of the account is several times the account's size.
+ETORO_LEVERAGE = int(dotenv('ETORO_LEVERAGE', 1))
 
 # Settlement type: cfd, real, realFutures or marginTrade. Optional on the v2
 # create route and left unset here, because the eligible values differ per
@@ -263,6 +293,133 @@ ETORO_ENFORCE_EXPIRY = True
 # and lib/etoro.RateLimiter paces against those, but a poll interval short
 # enough to fight the limiter just adds latency.
 ETORO_POLL_SECONDS = 5
+
+# --------------------------------------------------------------------------
+# Twelve Data
+#
+# Not a broker: a price feed nobody trades on, which is why the paper
+# session runs on it (trading/providers.TwelveDataProvider). Its one
+# account, 'paper', is this stack's own simulator filling the orders.
+#
+#   export TWELVEDATA_API_KEY=...      # in .env, read here through dotenv()
+#
+# Measured on 2026-09-24 on the basic plan: 8 credits a minute, 800 a day,
+# one credit per /time_series call whatever its size, and /api_usage costs
+# one too - so the count is kept locally, in candles.db, and the two limits
+# below are the plan's figures rather than measurements of anything.
+TWELVEDATA_API_KEY = dotenv('TWELVEDATA_API_KEY', '')
+TWELVEDATA_MINUTE_LIMIT = 8
+TWELVEDATA_DAILY_LIMIT = 800
+# credits never spent by the bar poller, kept for the one history call a
+# strategy's warm-up makes when a session starts
+TWELVEDATA_RESERVE = 40
+# seconds after a bar closes before it is asked for. The closed bar is there
+# at once; the delay is for the vendor's clock and ours to disagree a little
+TWELVEDATA_POLL_DELAY = 20
+
+# This project names instruments the way OANDA does; Twelve Data spells a pair
+# 'EUR/USD'. Resolved on 2026-09-24: both below answer 5min bars on the basic
+# plan. 'GDAXI' answered 404, so DE30_EUR has no entry - find its ticker with
+#     python scripts/twelvedata_instruments.py DAX
+# (one credit) and paste it here. An unmapped instrument raises.
+TWELVEDATA_INSTRUMENTS = {
+    'EUR_USD': 'EUR/USD',
+    'GBP_USD': 'GBP/USD',
+}
+
+# One OHLC per bar, like eToro: bid and ask are a model or they are nothing.
+# Unset, candles carry mid only, the provider declines bid_ask_candles and a
+# strategy that reads them refuses to start on it. The live page's skew board
+# prints every broker's median spread, in pips, which is the figure to copy:
+#     TWELVEDATA_SPREAD = 0.00007
+#     TWELVEDATA_SPREAD = {'EUR_USD': 0.00007, 'GBP_USD': 0.00010}
+TWELVEDATA_SPREAD = None
+
+# --------------------------------------------------------------------------
+# Candle database
+#
+# Every live session writes the bars it sees here, one row per (provider,
+# account, instrument, granularity, bar), next to sessions.db. SQLite in WAL
+# mode, because the sessions are separate processes and the HDF5 warehouse
+# does not take concurrent appends. See data/candledb.py.
+CANDLE_DB = dotenv('PARITY_DERIVA_CANDLE_DB', os.path.join(DATA_DIR, 'live', 'candles.db'))
+
+# --------------------------------------------------------------------------
+# MetaTrader 5
+#
+# The terminal and the MetaTrader5 package run under Wine and are reached
+# through scripts/mt5_bridge.sh, which has to be running. See lib/mt5.py.
+#
+#   export MT5_LOGIN=...  MT5_PASSWORD=...  MT5_SERVER=...
+#
+# or leave them unset and point MT5_CREDENTIALS at a file holding them.
+MT5_LOGIN = dotenv('MT5_LOGIN', '')
+MT5_PASSWORD = dotenv('MT5_PASSWORD', '')
+MT5_SERVER = dotenv('MT5_SERVER', '')
+MT5_CREDENTIALS = dotenv('MT5_CREDENTIALS', '/home/rrambaldi/mq.txt')
+MT5_BRIDGE = dotenv('MT5_BRIDGE', '127.0.0.1:18812')
+MT5_TERMINAL = 'C:\\Program Files\\MetaTrader 5\\terminal64.exe'
+# More than one account: one terminal each, each behind its own bridge
+# (scripts/mt5_add_account.sh makes the terminal and prints the entry).
+# Set, this replaces the single terminal the four settings above describe:
+#     MT5_TERMINALS = [
+#         {'credentials': '/home/rrambaldi/mq.txt', 'bridge': '127.0.0.1:18812',
+#          'terminal': MT5_TERMINAL},
+#         {'credentials': '/home/rrambaldi/mq2.txt', 'bridge': '127.0.0.1:18813',
+#          'terminal': 'C:\\MT5\\acc2\\terminal64.exe', 'portable': True},
+#     ]
+# 'suffix' is what that broker adds to every symbol (OANDA TMS: EURUSD.pro).
+MT5_TERMINALS = [
+    {'credentials': MT5_CREDENTIALS, 'bridge': MT5_BRIDGE, 'terminal': MT5_TERMINAL},
+    # OANDA TMS (EU): MT5 only, no v20 REST API
+    {'credentials': '/home/rrambaldi/oanda-mt5.txt', 'bridge': '127.0.0.1:18813',
+     'terminal': 'C:\\MT5\\oanda\\terminal64.exe', 'portable': True, 'suffix': '.pro'},
+]
+# The login a process trades on; web/livesessions sets it per session.
+MT5_ACCOUNT = dotenv('MT5_ACCOUNT', '')
+# Demo only for now. lib/mt5.py reads the account's trade mode after the
+# login and refuses anything but a demo while this is False.
+MT5_ALLOW_REAL = False
+# The broker's clock minus UTC, in hours, used only while the market is shut:
+# with it open the offset is read off the newest tick.
+MT5_SERVER_UTC_OFFSET = 3
+# Marks this stack's orders on the account, and slippage allowed on a market
+# order, in points.
+MT5_MAGIC = 71210
+MT5_DEVIATION = 10
+MT5_POLL_SECONDS = 5
+# Symbol and precision where the broker's differ from 'EUR_USD' -> 'EURUSD':
+#     'DE30_EUR': {'symbol': 'GER40', 'precision': 1},
+MT5_INSTRUMENTS = {
+}
+
+# --------------------------------------------------------------------------
+# Capital.com
+#
+# IG's API under other names: lib/capital.py drives data/ig.py and
+# execution/ig.py through it. A login is the account's email, an API key
+# generated in Settings > API integrations, and the key's own password:
+#
+#   export CAPITAL_API_KEY=...
+#   export CAPITAL_IDENTIFIER=...        # the login email
+#   export CAPITAL_API_PASSWORD=...      # the key's custom password
+#   export CAPITAL_ACCOUNT_ID=...        # optional; the preferred one if unset
+#
+# DOMAIN chooses demo against real, as for IG.
+CAPITAL_API_DOMAIN = os.environ.get('CAPITAL_API_DOMAIN', '')
+CAPITAL_API_KEY = os.environ.get('CAPITAL_API_KEY', '')
+CAPITAL_IDENTIFIER = os.environ.get('CAPITAL_IDENTIFIER', '')
+CAPITAL_API_PASSWORD = os.environ.get('CAPITAL_API_PASSWORD', '')
+CAPITAL_ACCOUNT_ID = os.environ.get('CAPITAL_ACCOUNT_ID', '')
+# Resolved on the demo account on 2026-09-24 (GET /markets/EURUSD):
+# "EUR/USD", quoted in USD, lotSize 1, minDealSize 100, minSizeIncrement 100,
+# minStopOrProfitDistance 0.01%. Sizes are units, so contractSize is 1 and
+# sizeStep rounds a risk-sized order to what the market accepts.
+CAPITAL_INSTRUMENTS = {
+    'EUR_USD': {'epic': 'EURUSD', 'expiry': '-', 'currency': 'USD',
+                'precision': 5, 'contractSize': 1, 'sizeStep': 100},
+}
+CAPITAL_CURRENCY = None
 
 # --------------------------------------------------------------------------
 # IG
@@ -290,9 +447,12 @@ IG_ACCOUNT_ID = os.environ.get('IG_ACCOUNT_ID', '')
 # 2 or 3. Version 2 returns CST and X-SECURITY-TOKEN headers that last hours;
 # version 3 returns an OAuth pair whose access token is measured in seconds
 # and has to be refreshed. Two is the default because a refresh that fails
-# mid-session costs an order, and the only thing version 3 buys this project
-# is a token format it does not need.
-IG_SESSION_VERSION = 2
+# mid-session costs an order. What version 3 does buy is the account on
+# every request (IG-ACCOUNT-ID): a version 2 session deals on the login's
+# current account, and two live sessions on two accounts of one login need
+# version 3 - web/livesessions.py sets it for them. Measured 2026-09-24: the
+# demo's access token lasts 1795 s and lib/ig.py refreshes it.
+IG_SESSION_VERSION = int(dotenv('IG_SESSION_VERSION', 2))
 
 # This project names instruments the way OANDA does. IG names them with an
 # epic - CS.D.EURUSD.MINI.IP and the like - and the mapping is not derivable:
@@ -350,8 +510,12 @@ IG_SESSION_VERSION = 2
 # to read: IG refuses a stop closer than that and nothing here moves a level
 # to fit, so the order is sent as asked and the refusal is published.
 IG_INSTRUMENTS = {
+    # contractSize: units in one contract, read off GET /markets/{epic}
+    # (2026-09-24: "contractSize": "10000", valueOfOnePip 1.00 USD). The live
+    # runner sizes in units on the account's risk and deals size = units /
+    # contractSize - see execution/ig.py `sized`
     'EUR_USD': {'epic': 'CS.D.EURUSD.CEBM.IP', 'expiry': '-',
-                'currency': 'USD', 'precision': 5},
+                'currency': 'USD', 'precision': 5, 'contractSize': 10000},
     'DE30_EUR': {'epic': 'IX.D.DAX.IFMM.IP', 'expiry': '-',
                  'currency': 'EUR', 'precision': 1},
 }

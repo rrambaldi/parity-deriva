@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>parity-deriva live</title>
+<link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+
+<header>
+  <div id="brand">
+    <h1>parity-deriva &middot; live</h1>
+    <span id="live-clock" class="hint"></span>
+  </div>
+</header>
+
+<p id="message" hidden></p>
+
+<!--
+  Each broker session against the reference (the twelvedata paper session):
+  how far its prices sit from the reference's, how its trades paired with
+  the simulated ones (api/live/skew, api/live/skew/trades).
+-->
+<section id="skew-board">
+  <table id="skew-table" class="live-small">
+    <thead><tr><th>feed</th><th>Δ prezzo vs riferimento</th><th class="num">spread mediano (pip)</th>
+      <th class="num">latenza mediana (s)</th><th class="num">accoppiati</th><th class="num">Δentry medio (pip)</th>
+      <th class="num">esiti diversi</th><th class="num">spaiati</th><th>parity</th></tr></thead>
+    <tbody id="skew-rows"><tr><td colspan="9" class="hint">in attesa dei dati&hellip;</td></tr></tbody>
+  </table>
+  <p id="skew-note" class="hint"></p>
+</section>
+
+<!--
+  One group's candles - a strategy on an instrument at a granularity - from
+  the feed picked, the other feeds' closes over them, every session's trades
+  on the bars; under it the skew strip on the same bars (livechart.js).
+-->
+<section id="live-chart-panel">
+  <div id="chart-controls">
+    <label>gruppo <select id="chart-group"></select></label>
+    <label>candele di <select id="chart-feed"></select></label>
+    <label><input type="checkbox" id="chart-follow" checked> segui</label>
+    <span id="chart-hover" class="hint"></span>
+  </div>
+  <canvas id="live-chart" height="380"></canvas>
+  <canvas id="live-skew" height="120"></canvas>
+</section>
+
+<!-- every signal twice: as simulated on the reference and as placed on the broker -->
+<section id="trade-skew">
+  <div id="trade-skew-tables"><p class="hint">in attesa dei dati&hellip;</p></div>
+</section>
+
+<!--
+  Every session, newest first: one process trading one form on one account
+  (web/livesessions.py). The P&L is the broker's, as it reported each close;
+  a trade still open counts in the positions and not in the net.
+-->
+<section id="live-panel">
+  <table id="live-table">
+    <thead><tr><th>session</th><th>account</th><th>strategy</th><th>market</th>
+      <th>started (UTC)</th><th>status</th><th>last bar</th>
+      <th class="num">signals</th><th class="num">orders</th><th class="num">open</th>
+      <th class="num">closed</th><th class="num">net</th><th></th></tr></thead>
+    <tbody id="live-rows"><tr class="empty"><td colspan="13">no session yet: start one below, or from the backtest page</td></tr></tbody>
+    <tfoot id="live-foot"></tfoot>
+  </table>
+</section>
+
+<!--
+  A session started from here rather than from a backtest: the strategy with
+  its own default parameters, on every account ticked - one process per
+  account, all in parallel (web/livesessions.start).
+-->
+<!--
+  What goes live is a form somebody looked at the result of: the strategy
+  list is the favourites - saved backtests and sweep runs starred on their
+  own pages (api/favourites) - and the aside shows what that simulation
+  made. The plain strategies, with their defaults and no simulation behind
+  them, stay in a second group. "scegli tra le simulate" opens every saved
+  run and sweep to pick from, starred or not.
+-->
+<section id="new-live">
+  <h3>new live session</h3>
+  <div class="new-grid">
+    <form id="new-form" autocomplete="off">
+      <label>strategia <select id="new-strategy"></select></label>
+      <button type="button" id="choose-sim">scegli tra le simulate&hellip;</button>
+      <label>instrument <select id="new-instrument"></select></label>
+      <label>timeframe <select id="new-granularity"></select></label>
+      <label>risk % <input type="number" id="new-risk" value="1" min="0.01" max="100" step="0.01"></label>
+      <label>capitale di riferimento <input type="number" id="new-capital" min="1" step="1" placeholder="tutto il saldo del conto" title="nella valuta del conto: il risk % è calcolato su questa cifra, non sul saldo, e ogni mese si aggiorna col P&L di questa sessione, come in simulazione. Vuoto = il saldo del conto"></label>
+      <fieldset id="new-accounts"><legend>accounts</legend><p class="hint">reading the accounts&hellip;</p></fieldset>
+      <button type="submit" id="new-start">start</button>
+    </form>
+    <aside id="new-summary"><p class="hint">scegli una strategia: qui compare il riassunto della sua simulazione</p></aside>
+  </div>
+  <p id="new-description" class="hint"></p>
+  <p id="new-message" hidden></p>
+</section>
+
+<!-- every simulated form on disk, to pick one or star it: the saved backtest
+     runs, and the sweeps with their runs -->
+<dialog id="sim-dialog">
+  <form method="dialog" class="dialog-head">
+    <strong>strategie simulate</strong>
+    <button type="submit" aria-label="close">close</button>
+  </form>
+  <div id="sim-tabs">
+    <button type="button" data-tab="runs" aria-pressed="true">backtest salvati</button>
+    <button type="button" data-tab="sweeps" aria-pressed="false">simulazioni (sweep)</button>
+  </div>
+  <div id="sim-list"><p class="hint">leggo&hellip;</p></div>
+  <p id="sim-message" class="hint" hidden></p>
+</dialog>
+
+<!-- the session clicked: its capital, its trades, what it logged -->
+<section id="live-detail" hidden>
+  <div id="detail-head"><strong id="detail-title"></strong> <span id="detail-params" class="hint"></span></div>
+  <canvas id="live-equity" height="220"></canvas>
+  <div id="detail-grid">
+    <div>
+      <h3>open positions</h3>
+      <table class="live-small"><thead><tr><th>deal</th><th>opened</th><th class="num">units</th><th class="num">price</th></tr></thead>
+        <tbody id="open-rows"></tbody></table>
+      <h3>closed trades</h3>
+      <table class="live-small"><thead><tr><th>deal</th><th>opened</th><th>closed</th><th class="num">units</th>
+        <th class="num">entry</th><th class="num">exit</th><th class="num">P&amp;L</th><th>reason</th></tr></thead>
+        <tbody id="closed-rows"></tbody></table>
+    </div>
+    <div>
+      <h3>events <span class="hint">newest first</span></h3>
+      <div id="event-list"></div>
+    </div>
+  </div>
+  <h3>console</h3>
+  <pre id="console"></pre>
+</section>
+
+<dialog id="ask-dialog">
+  <form method="dialog">
+    <p id="ask-text"></p>
+    <div class="dialog-actions">
+      <button value="no">cancel</button>
+      <button value="yes" id="ask-yes">yes</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="static/menu.js"></script>
+<script src="static/livechart.js"></script>
+<script src="static/live.js"></script>
+</body>
+</html>

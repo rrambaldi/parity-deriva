@@ -281,8 +281,24 @@ class IGCandles(StreamHandler):
 
 	# ---------------------------------------------------------------- stream
 
+	def due(self, pair, now=None):
+		"""
+		Can a bar newer than the last one sent be complete yet?
+
+		Live, every row IG serves spends from the weekly allowance, and a
+		poll every few seconds for an hourly bar would spend it in a day. So
+		after a bar the next request waits until the bar after it can have
+		closed, and then asks every poll until it has.
+		"""
+		if not self.live or self.last[pair] is None or self.period is None:
+			return True
+		now = now if now is not None else utcnow()
+		return now >= self.last[pair] + 2 * self.period
+
 	def poll(self, pair, now=None):
 		"""Emit whatever complete bars this instrument has that are new."""
+		if not self.due(pair, now):
+			return 0
 		payload = self.request(pair)
 		if payload is None:
 			return 0
@@ -454,6 +470,8 @@ class IGTransactions(StreamHandler):
 		kind = str(event)
 		if kind == 'CLIENTORDER':
 			return self.watch(event)
+		if kind == 'CLOSETRADE':
+			return self.closeTrades(event)
 		if kind == 'ORDERCANCEL':
 			# The execution handler sends the delete; drop the deal here so
 			# the poll stops asking about it.
@@ -764,6 +782,34 @@ class IGTransactions(StreamHandler):
 
 	# ---------------------------------------------------------------- closes
 
+	def closeTrades(self, event):
+		"""
+		A CloseTradeEvent (portfolio/session.py, or a plugin's own engine):
+		every position this handler opened on the instrument, closed at
+		market. Here and not in the execution handler because this is where
+		the positions are known; the close itself then comes back through
+		pollCloses like any other, with IG's own P&L on it.
+		"""
+		instrument = getattr(event, 'instrument', None)
+		mine = [deal for deal, position in self.positions.items()
+				if not position.get('resting') and position.get('instrument') == instrument]
+		if not mine:
+			return 0
+		held = self.open_positions() or {}
+		done = 0
+		for deal in mine:
+			row = (held.get(deal) or {}).get('position') or {}
+			if not row:
+				continue
+			body = {'dealId': deal, 'size': row.get('size'), 'orderType': 'MARKET',
+					'direction': 'SELL' if row.get('direction') == 'BUY' else 'BUY'}
+			status, payload = self.api.delete('close_position', body=body)
+			self.logger.info("CLOSE %s %s (%s): status %s %s"
+							 % (instrument, deal, getattr(event, 'reason', None),
+								status, payload))
+			done += status == 200
+		return done
+
 	def open_positions(self):
 		"""Every position IG currently holds, by dealId."""
 		status, payload = self.api.get('positions')
@@ -987,12 +1033,13 @@ class IGTransactions(StreamHandler):
 		when = known.get('gtdTime')
 		if when is None:
 			return False
-		# Local time deliberately, where everything else here is UTC: gtdTime
-		# is not a broker timestamp. The strategies build it with
-		# datetime.today().replace(hour=...), so AG01's "expire at 23:59:59"
-		# means the operator's evening, and converting it would move the
-		# expiry by the machine's offset.
-		now = now if now is not None else datetime.datetime.today()
+		# UTC, because that is the clock gtdTime is on: the strategies
+		# build it from the candle's own timestamp (lib/utils.expiryAt), and
+		# the candles are UTC. It used to be the machine's local time, back
+		# when the expiry came from datetime.today() - on a machine that is
+		# not on UTC the two differ by its offset, and the order died early
+		# or outlived its day by that much.
+		now = now if now is not None else datetime.datetime.utcnow()
 		if when > now:
 			return False
 

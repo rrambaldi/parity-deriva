@@ -247,6 +247,317 @@ class TestFillRules(BacktesterCase):
         self.assertEqual([o.state for o in self.bt.orders], ['FILLED'])
 
 
+class TestExclusiveLegs(BacktesterCase):
+    """
+    A straddle is one trade or none, never both.
+
+    AG01 brackets a reversal with a buy above the pair and a sell below it and
+    says signalType EXCLUSIVE. On a bar wide enough to reach both, this used
+    to open both - each one's stop being the other's entry - and the money
+    manager, which never saw that group finish, refused every signal after it.
+    On EUR_USD daily the run's last trade was in September 2016 with ten years
+    of data behind it.
+    """
+
+    def straddle(self, buy=11720.0, sell=11680.0, key="S1"):
+        for units, price in ((1, buy), (-1, sell)):
+            event = self.order(units=units, price=price, sl=None, tp=None)
+            event.signalNumber = key
+            self.bt.execute_event(event)
+
+    def wide(self, dt=T0):
+        """A bar that reaches both ends of the straddle above."""
+        return self.candle(dt=dt, o=11700.0, h=11730.0, l=11670.0, c=11700.0)
+
+    def test_only_one_end_of_a_straddle_fills(self):
+        self.straddle()
+        self.bt.execute_event(self.wide())
+        filled = [o for o in self.bt.closed_orders + self.bt.orders
+                  if o.state == 'FILLED']
+        self.assertEqual(len(filled), 1)
+
+    def test_the_other_end_is_off_the_book(self):
+        self.straddle()
+        self.bt.execute_event(self.wide())
+        self.assertEqual([o.state for o in self.bt.orders
+                          if o.state == 'PENDING'], [])
+
+    def test_the_end_nearer_the_open_is_the_one_that_filled(self):
+        """
+        Which one a bar reached first is not in the bar - the same blindness
+        backtest/resolution.py measures - and coming out of the open the
+        nearer level is the one price met first unless it doubled back.
+        """
+        self.straddle(buy=11705.0, sell=11650.0)
+        self.bt.execute_event(self.wide())
+        filled = [o for o in self.bt.closed_orders + self.bt.orders
+                  if o.state == 'FILLED']
+        self.assertEqual(len(filled), 1)
+        self.assertAlmostEqual(filled[0].price, 11705.0)
+
+    def test_two_signals_are_not_each_other_s_siblings(self):
+        """Only the legs of one signal cancel each other."""
+        self.straddle(buy=11720.0, sell=11680.0, key="S1")
+        self.straddle(buy=11725.0, sell=11675.0, key="S2")
+        self.bt.execute_event(self.wide())
+        filled = [o for o in self.bt.closed_orders + self.bt.orders
+                  if o.state == 'FILLED']
+        self.assertEqual(len(filled), 2)
+        self.assertEqual(sorted(getattr(o, 'signalNumber') for o in filled),
+                         ['S1', 'S2'])
+
+
+class TestCancelNeverTakesAStop(BacktesterCase):
+    """
+    A cancel matched on price must not find a live trade's stop.
+
+    In AG01 the long's stop sits at exactly the short leg's entry, by
+    construction: the pair straddles two candles and each leg's stop is the
+    other leg's price. So when one leg fills and the money manager cancels the
+    other by price - the only field both sides agree on - a match that does
+    not exclude children can take the stop of the trade that just opened. The
+    position then runs with nothing under it until it reaches its target,
+    which on EUR_USD daily was months, and reads as a strategy with a
+    remarkable win rate.
+    """
+
+    def bracket(self):
+        """AG01's shape: a long whose stop is where the short would enter."""
+        buy = self.order(units=1, price=11720.0, sl=11680.0, tp=11760.0)
+        buy.signalNumber = "S1"
+        self.bt.execute_event(buy)
+        sell = self.order(units=-1, price=11680.0, sl=11720.0, tp=11640.0)
+        sell.signalNumber = "S1"
+        self.bt.execute_event(sell)
+
+    def test_cancelling_the_losing_leg_leaves_the_stop_standing(self):
+        self.bracket()
+        # a bar that reaches the buy and not the sell
+        self.bt.execute_event(self.candle(o=11700.0, h=11730.0, l=11695.0,
+                                          c=11725.0))
+        self.bt.execute_event(OrderCancelEvent({'orderID': 99,
+                                                'price': 11680.0,
+                                                'instrument': 'DE30_EUR'}))
+        stops = [o for o in self.bt.orders
+                 if getattr(o, 'orig', None) is not None and o.price == 11680.0]
+        self.assertEqual([o.state for o in stops], ['PENDING'])
+
+    def test_and_the_trade_still_exits_on_it(self):
+        self.bracket()
+        self.bt.execute_event(self.candle(o=11700.0, h=11730.0, l=11695.0,
+                                          c=11725.0))
+        self.bt.execute_event(OrderCancelEvent({'orderID': 99,
+                                                'price': 11680.0,
+                                                'instrument': 'DE30_EUR'}))
+        self.bt.execute_event(self.candle(dt=T0 + datetime.timedelta(minutes=1),
+                                          o=11700.0, h=11705.0, l=11670.0,
+                                          c=11675.0))
+        closed = [e for e in self.sink.of('SIMULATEDFILL')
+                  if e.has_attr('tradesClosed')]
+        self.assertEqual([e.reason for e in closed], ['STOP_LOSS_ORDER'])
+
+    def test_a_leg_that_is_still_resting_is_what_a_cancel_finds(self):
+        """The ordinary case: the cancel does its job."""
+        self.bracket()
+        self.bt.execute_event(OrderCancelEvent({'orderID': 99,
+                                                'price': 11680.0,
+                                                'instrument': 'DE30_EUR'}))
+        self.assertEqual([o.price for o in self.bt.orders], [11720.0])
+
+
+class TestExpiry(BacktesterCase):
+    """
+    An order dies when the expiry it was issued with passes.
+
+    Nothing offline read gtdTime at all. AG01 issues a bracket meant to last
+    the day; here it rested for as long as the data did, and on EUR_USD daily
+    one from 3 July 2022 filled on 15 November - four months and a different
+    market. Taking one position at a time, it held the strategy shut for all
+    of it, which is why a single zombie order cost more than one trade.
+    """
+
+    def order(self, units=1, price=11700.0, sl=11690.0, tp=11720.0, gtd=None):
+        event = BacktesterCase.order(self, units=units, price=price, sl=sl,
+                                     tp=tp)
+        event.gtdTime = gtd
+        return event
+
+    def test_an_order_past_its_expiry_is_cancelled(self):
+        self.bt.execute_event(self.order(price=11800.0, sl=None, tp=None,
+                                         gtd=T0))
+        self.bt.execute_event(self.candle(dt=T0 + datetime.timedelta(minutes=1)))
+        self.assertEqual(self.bt.orders, [])
+        self.assertEqual(self.bt.closed_orders[0].state, 'CANCELED')
+
+    def test_it_says_so_where_the_money_manager_can_hear(self):
+        """
+        A group the money manager still believes is outstanding stops every
+        later signal, so an order that dies quietly costs more than itself.
+
+        Was: a plain ORDERCANCEL straight off the simulator. Live, the real
+             execution handler and the money manager - which matches on price
+             when it does not know the id - both heard it and acted on the
+             real order.
+        Now: the simulator's own SIMULATEDORDERCANCEL, which offline
+             SimulatedBroker promotes to ORDERCANCEL for the money manager.
+        """
+        self.bt.execute_event(self.order(price=11800.0, sl=None, tp=None,
+                                         gtd=T0))
+        self.bt.execute_event(self.candle(dt=T0 + datetime.timedelta(minutes=1)))
+        self.assertEqual(self.sink.of('ORDERCANCEL'), [])
+        cancels = self.sink.of('SIMULATEDORDERCANCEL')
+        self.assertEqual(len(cancels), 1)
+        self.assertEqual(cancels[0].reason, 'GTD_EXPIRY')
+
+    def test_a_bar_at_the_expiry_itself_still_trades(self):
+        """Good *till* that instant: the bar stamped on it is not past it."""
+        self.bt.execute_event(self.order(sl=None, tp=None, gtd=T0))
+        self.bt.execute_event(self.candle(dt=T0))
+        self.assertEqual(self.bt.orders[0].state, 'FILLED')
+
+    def test_an_expired_order_does_not_fill_on_the_bar_that_killed_it(self):
+        """It was off the book before that bar traded, so it cannot be both."""
+        self.bt.execute_event(self.order(sl=None, tp=None, gtd=T0))
+        self.bt.execute_event(self.candle(dt=T0 + datetime.timedelta(minutes=1)))
+        self.assertEqual(self.sink.of('SIMULATEDFILL'), [])
+        self.assertEqual(self.bt.closed_orders[0].state, 'CANCELED')
+
+    def test_an_order_with_no_expiry_rests_as_long_as_the_data(self):
+        self.bt.execute_event(self.order(price=11800.0, sl=None, tp=None,
+                                         gtd=None))
+        for i in range(5):
+            self.bt.execute_event(
+                self.candle(dt=T0 + datetime.timedelta(minutes=i)))
+        self.assertEqual(self.bt.orders[0].state, 'PENDING')
+
+    def test_the_stop_and_target_of_an_open_trade_do_not_expire(self):
+        """
+        They carry their parent's fields, expiry included. Cancelling them at
+        midnight would leave a position standing with neither a stop nor a
+        target, which is not something any account does to you.
+        """
+        self.bt.execute_event(self.order(gtd=T0))
+        self.bt.execute_event(self.candle(dt=T0))          # the entry fills
+        self.bt.execute_event(self.candle(dt=T0 + datetime.timedelta(minutes=1),
+                                          o=11700.0, h=11701.0, l=11699.0,
+                                          c=11700.0))
+        children = [o for o in self.bt.orders if getattr(o, 'orig', None)]
+        self.assertEqual(len(children), 2)
+        self.assertEqual(sorted(o.state for o in children),
+                         ['PENDING', 'PENDING'])
+
+
+class TestGaps(BacktesterCase):
+    """
+    An order the market jumped over is filled at the open, not left resting.
+
+    The case that found this: EUR_USD daily, a long entered 18 April 2017
+    with its target at 1.07851. Friday 21 April closed at 1.07268 and Monday
+    23 April opened at 1.09197 - clean over it. Reading only [low, high], the
+    target was never touched again until February 2020, so the run carried
+    one position for three years and, taking one trade at a time, refused
+    every signal in between.
+    """
+
+    def gap(self, first, second, units=1, price=11750.0):
+        """A bar, then a bar that opens somewhere else entirely."""
+        self.bt.execute_event(self.order(units=units, price=price,
+                                         sl=None, tp=None))
+        self.bt.execute_event(self.candle(**first))
+        self.bt.execute_event(
+            self.candle(dt=T0 + datetime.timedelta(minutes=1), **second))
+        return self.bt.orders[0]
+
+    def test_a_buy_the_market_gapped_over_fills_at_the_open(self):
+        order = self.gap({'o': 11700.0, 'h': 11706.0, 'l': 11694.0,
+                          'c': 11703.0},
+                         {'o': 11800.0, 'h': 11810.0, 'l': 11795.0,
+                          'c': 11805.0})
+        self.assertEqual(order.state, 'FILLED')
+        # the ask open, because a buy trades against the ask
+        self.assertAlmostEqual(order.price, 11800.2)
+
+    def test_the_fill_it_reports_is_the_price_it_got(self):
+        """
+        Not the level it asked for. handleSLTP books P&L off these prices, so
+        a fill recorded at the level is money the account never saw.
+        """
+        self.gap({'o': 11700.0, 'h': 11706.0, 'l': 11694.0, 'c': 11703.0},
+                 {'o': 11800.0, 'h': 11810.0, 'l': 11795.0, 'c': 11805.0})
+        fill = self.sink.of('SIMULATEDFILL')[-1]
+        self.assertAlmostEqual(float(fill.price), 11800.2)
+
+    def test_a_sell_the_market_gapped_under_fills_at_the_bid_open(self):
+        order = self.gap({'o': 11700.0, 'h': 11706.0, 'l': 11694.0,
+                          'c': 11697.0},
+                         {'o': 11600.0, 'h': 11605.0, 'l': 11590.0,
+                          'c': 11595.0},
+                         units=-1, price=11650.0)
+        self.assertEqual(order.state, 'FILLED')
+        self.assertAlmostEqual(order.price, 11599.8)
+
+    def test_a_bar_that_gapped_over_and_came_back_still_fills_at_the_open(self):
+        """
+        The level is inside this bar's range, so the range alone would fill it
+        at the level - but the market had already jumped it before the bar
+        opened, and the open is the first price there was.
+        """
+        order = self.gap({'o': 11700.0, 'h': 11706.0, 'l': 11694.0,
+                          'c': 11703.0},
+                         {'o': 11800.0, 'h': 11810.0, 'l': 11740.0,
+                          'c': 11760.0})
+        self.assertEqual(order.state, 'FILLED')
+        self.assertAlmostEqual(order.price, 11800.2)
+
+    def test_a_gap_that_stops_short_of_the_level_does_not_fill(self):
+        """The whole rule is that the market crossed it, not that it moved."""
+        order = self.gap({'o': 11700.0, 'h': 11706.0, 'l': 11694.0,
+                          'c': 11703.0},
+                         {'o': 11740.0, 'h': 11745.0, 'l': 11735.0,
+                          'c': 11742.0})
+        self.assertEqual(order.state, 'PENDING')
+
+    def test_the_first_candle_of_a_run_has_nothing_to_have_gapped_from(self):
+        self.bt.execute_event(self.order(units=1, price=11750.0,
+                                         sl=None, tp=None))
+        self.bt.execute_event(self.candle(o=11800.0, h=11810.0, l=11795.0,
+                                          c=11805.0))
+        self.assertEqual(self.bt.orders[0].state, 'PENDING')
+
+    def test_a_target_gapped_over_closes_the_trade_at_the_open(self):
+        """The case above, end to end: the trade closes, and for more."""
+        self.bt.execute_event(self.order(units=1, price=11700.0,
+                                         sl=11690.0, tp=11720.0))
+        self.bt.execute_event(self.candle(o=11700.0, h=11706.0, l=11694.0,
+                                          c=11703.0))
+        self.bt.execute_event(self.candle(dt=T0 + datetime.timedelta(minutes=1),
+                                          o=11800.0, h=11810.0, l=11795.0,
+                                          c=11805.0))
+        closed = [e for e in self.sink.of('SIMULATEDFILL')
+                  if e.has_attr('tradesClosed')]
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(closed[0].reason, 'TAKE_PROFIT_ORDER')
+        # the bid open, and the trade made 99.8 rather than the 20 its target
+        # asked for
+        self.assertAlmostEqual(float(closed[0].price), 11799.8)
+        self.assertAlmostEqual(float(closed[0].pl), 99.8)
+
+    def test_the_other_leg_of_the_bracket_is_still_retired(self):
+        """
+        A gap fill is still one-cancels-the-other. Leaving the stop resting
+        would close the same trade a second time when price came back.
+        """
+        self.bt.execute_event(self.order(units=1, price=11700.0,
+                                         sl=11690.0, tp=11720.0))
+        self.bt.execute_event(self.candle(o=11700.0, h=11706.0, l=11694.0,
+                                          c=11703.0))
+        self.bt.execute_event(self.candle(dt=T0 + datetime.timedelta(minutes=1),
+                                          o=11800.0, h=11810.0, l=11795.0,
+                                          c=11805.0))
+        self.assertEqual([o.state for o in self.bt.orders
+                          if o.state == 'PENDING'], [])
+
+
 class TestStopLossTakeProfitChildren(BacktesterCase):
 
     def fill_a_long(self, sl=11690.0, tp=11720.0):
@@ -543,6 +854,24 @@ class TestStopModify(BacktesterCase):
                                           c=11703.0))
         closed = [e for e in self.sink.events if e.has_attr('tradesClosed')][0]
         self.assertEqual(closed.pl, 2.0)
+
+    def test_a_stop_moved_past_the_market_is_taken_at_the_next_open(self):
+        """
+        Was: the trailer moved a long's stop above where the last bar had
+             closed, and no later bar came back up to it, so the trade never
+             closed - EUR_USD FTWP M15 held one from 2015 to the end.
+        Now: a sell stop at or above the open is taken at the open.
+        """
+        bt = OANDABacktester(setup=self.settings)
+        bt.set_queue(self.sink)
+        bt.execute_event(self.order(price=11700.0, sl=11690.0, tp=None))
+        bt.execute_event(self.candle(o=11700.0, h=11706.0, l=11699.0, c=11701.0))
+        bt.execute_event(self.StopModifyEvent({"orderID": 1, "price": 11702.0}))
+        bt.execute_event(self.candle(dt=T0 + datetime.timedelta(minutes=1),
+                                     o=11700.0, h=11701.0, l=11695.0, c=11700.0))
+        closed = [e for e in self.sink.events if e.has_attr('tradesClosed')]
+        self.assertEqual([(e.reason, e.price) for e in closed],
+                         [('STOP_LOSS_ORDER', 11699.8)])  # the bid's open
 
     def test_a_price_less_event_is_refused(self):
         self.assertFalse(self.bt.execute_event(self.StopModifyEvent(

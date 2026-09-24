@@ -250,6 +250,32 @@ class StopModifyEvent(Event):
 			self.orderID, self.price)
 
 
+class CloseTradeEvent(Event):
+	"""
+	Close whatever is open on an instrument, now, at the market.
+
+	A bracket comes out on one of its two legs, both of which are levels
+	decided when the order was placed. This is the third way out and it is not
+	a level: it is a decision about the clock - the trading day is over, and a
+	strategy that does not hold overnight comes out of whatever it holds.
+
+	Like a stop modify, it says what to do and not how: the simulator closes
+	against the bar it is on (backtest/oanda.closeOpen), a broker would close
+	the trade through its own endpoint, and the rule that decides when lives
+	in one place, portfolio/session.py, so both sides act on the same decision
+	rather than on two implementations of it.
+
+	It carries the instrument and the time, and no price: the price of a
+	market close belongs to whoever is executing, which is the same reason a
+	market order does not carry one.
+	"""
+
+	def info(self):
+		return "CLOSE TRADE %s @%s (%s)" % (
+			getattr(self, 'instrument', None), getattr(self, 'time', None),
+			getattr(self, 'reason', None))
+
+
 class OrderEvent(Event):
 	def info(self):
 		return "ORDER %s %s %s %s @%f %s %s" % (
@@ -293,6 +319,27 @@ class SimulatedFillEvent(Event):
 		closed = " CLOSE" if self.has_attr('tradesClosed') else ""
 		return "SIM FILL%s orderID: %s @%s signal: %s" % (
 			closed, self.orderID, self.price, getattr(self, 'signalNumber', None))
+
+
+class SimulatedOrderCancelEvent(Event):
+	"""
+	The simulator reporting that it dropped a resting order of its own - so
+	far only an entry that outlived its gtdTime (backtest/oanda.expired).
+
+	Deliberately not an OrderCancelEvent, for the reason SimulatedOrderEvent
+	is not a ClientOrderEvent: ORDERCANCEL is an instruction, not a report. In
+	the parallel deployment the real execution handler hears it and cancels
+	the order at the broker, and the money manager - which falls back to
+	matching on instrument and price when the id is not one it knows, and the
+	simulator's ids never are - marks the live leg as dead. So a cancel the
+	simulator issued about its own book reached the real account. A distinct
+	type is ignored by every existing handler; offline, SimulatedBroker
+	promotes it back to ORDERCANCEL so the loop closes as it did.
+	"""
+
+	def info(self):
+		return "SIM ORDER CANCEL orderID: %s reason: %s" % (
+			self.orderID, getattr(self, 'reason', None))
 
 
 class StatusEvent(Event):
