@@ -117,7 +117,7 @@ class Trailer(ExecutionHandler):
 		key = (signal, getattr(event, 'price', None))
 		ladder = self.ladders.pop(key, None)
 		if ladder is None:
-			ladder = self.bySignal(signal)
+			ladder = self.bySignal(signal, _float(getattr(event, 'units', None)))
 		if ladder is None:
 			return
 		orderID = getattr(event, 'orderID', None)
@@ -145,20 +145,29 @@ class Trailer(ExecutionHandler):
 		self.logger.debug("trailing order# %s from %s, step %s"
 			% (orderID, trade['entry'], trade['step']))
 
-	def bySignal(self, signal):
+	def bySignal(self, signal, units=None):
 		"""
 		The ladder of a signal whose fill did not land on the order's price.
 
 		The exact join is on (signalNumber, price), because a straddle puts two
-		orders of one signal on the book at different prices. Live, though, a
-		stop order fills at the price the market gave, not the price it was
-		written at, so the exact key misses on the first slipped pip. When the
-		signal left one order - which is the case for every SINGLE signal -
-		there is no ambiguity to protect and the ladder is found by name.
+		orders of one signal on the book at different prices. But a stop order
+		fills at the price the market gave, not the price it was written at -
+		live on the first slipped pip, offline on a bar that gapped past it -
+		so the exact key misses. When the signal left one order there is no
+		ambiguity and the ladder is found by name; a straddle's two legs are
+		one long and one short, so the fill's side tells them apart.
+
+		Was: a straddle's gapped fill found two ladders, took neither, and the
+		trade was never trailed. AG01-MOD with trailProfit (no target at all)
+		on EUR_USD M15, trade 589 of 12 May 2026: short from 1.17404, price
+		fell 400 pips, the stop never moved, and the trade stayed open to the
+		end of the run - four months in which no other signal was taken.
 		"""
 		if signal is None:
 			return None
 		keys = [k for k in self.ladders if k[0] == signal]
+		if len(keys) > 1 and units:
+			keys = [k for k in keys if self.ladders[k]['units'] * units > 0]
 		if len(keys) != 1:
 			return None
 		return self.ladders.pop(keys[0])

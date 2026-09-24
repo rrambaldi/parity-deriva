@@ -54,6 +54,25 @@ class TestFollow(TrailerCase):
         self.assertEqual(stops, [1.3050])
 
 
+class TestStraddle(unittest.TestCase):
+    """A signal with two legs whose fill gapped past its level."""
+
+    def test_the_gapped_leg_is_found_by_its_side_and_trailed(self):
+        t = Trailer(granularity='D')
+        sink = Recorder()
+        t.set_queue(sink)
+        for price, units, stop in ((1.3000, 1, 1.2900), (1.2900, -1, 1.3000)):
+            t.execute_event(OrderEvent({'signalNumber': 'K', 'instrument': 'EUR_USD',
+                                        'price': price, 'units': units, 'stopLoss': stop,
+                                        'trailDistance': 0.0100}))
+        # the short fills a pip under its level: the exact join misses
+        t.execute_event(TransactionEvent({'type': 'ORDER_FILL', 'orderID': 8,
+                                          'signalNumber': 'K', 'instrument': 'EUR_USD',
+                                          'price': 1.2899, 'units': -1, 'time': T0}))
+        t.execute_event(candle(1, 1.2890, 1.2800))
+        self.assertEqual([round(e.price, 5) for e in sink.of('STOPMODIFY')], [1.2900])
+
+
 class TestFloor(TrailerCase):
 
     def test_nothing_moves_before_the_target(self):
