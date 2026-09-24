@@ -329,6 +329,7 @@ function follow(job) {
   $('run').disabled = running;
   $('stop').hidden = !running;
   $('rerun').hidden = running || !job.total;
+  $('delete').hidden = running || !job.id;
   if (running) $('stop').disabled = !!job.cancel;
   if (job.error) message(job.error);
   else if (running) {
@@ -368,6 +369,18 @@ function rerun(job) {
   $('sim-controls').requestSubmit();
 }
 $('rerun').addEventListener('click', () => state.job && rerun(state.job));
+
+// the set on show, from the list of sets (api/sweeps/<id>); the page then
+// starts over empty, as if no set had been run
+$('delete').addEventListener('click', async () => {
+  const job = state.job;
+  if (!job || !job.id) return;
+  if (!await askUser(`Delete the set ${job.id}${job.name ? ' (' + job.name + ')' : ''}? It cannot be undone.`, 'delete')) return;
+  try {
+    await post('api/sweeps/' + job.id, { delete: true });
+    location.reload();
+  } catch (error) { message(String(error.message || error)); }
+});
 
 $('stop').addEventListener('click', async () => {
   $('stop').disabled = true;

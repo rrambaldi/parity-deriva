@@ -1427,6 +1427,14 @@ class Service(object):
 		return self.sweepSummary(job)
 
 	def deleteSweep(self, sweep):
+		# the set the page picks up again (api/sweep) is the one held here:
+		# deleted, it is forgotten too, or a reload would show it back. One
+		# still running is refused - its thread would save it again
+		live = getattr(self, '_sweep', None)
+		if live and live.get('id') == sweep:
+			if live.get('running'):
+				raise ServiceError("the set is still running: stop it first")
+			self._sweep = None
 		for suffix in ('.json.gz', '.meta.json'):
 			try:
 				os.remove(self.sweepPath(sweep, suffix))

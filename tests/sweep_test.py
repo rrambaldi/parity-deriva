@@ -212,6 +212,18 @@ class TestSavedSweeps(TempDirCase):
         self.service.deleteSweep('20260923-120000-abcdef')
         self.assertEqual(self.service.sweeps(), [])
 
+    def test_the_set_on_show_is_forgotten_when_deleted_refused_while_running(self):
+        sweep = '20260923-120000-abcdef'
+        self.service.saveSweep(self.job())
+        self.service._sweep = dict(self.job(), running=True)
+        with self.assertRaises(ServiceError):
+            self.service.deleteSweep(sweep)
+        self.assertEqual(len(self.service.sweeps()), 1)
+        self.service._sweep['running'] = False
+        self.service.deleteSweep(sweep)
+        self.assertEqual(self.service.sweepStatus()['total'], 0)
+        self.assertEqual(self.service.sweeps(), [])
+
     def test_a_run_is_kept_whole_and_goes_with_its_set(self):
         sweep = '20260923-120000-abcdef'
         self.service.saveSweep(self.job())
