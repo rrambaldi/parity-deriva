@@ -2237,7 +2237,8 @@ $('live-open').addEventListener('click', async () => {
   const say = (text) => { $('live-message').textContent = text; $('live-message').hidden = !text; };
   say('');
   $('live-what').textContent = `${fields.strategy} on ${fields.instrument} ${fields.granularity}`
-    + (fields.risk ? `, risk ${fields.risk}% of each account` : '')
+    + (fields.risk ? `, risk ${fields.risk}% of a capital of ${fields.balance || 'the default'}, the same on every account`
+                   + ' (one in USD takes it 1:1)' : '')
     + ' - one session per account, on the bars from now on.';
   const box = $('live-targets');
   box.innerHTML = '<p class="hint">reading the accounts…</p>';

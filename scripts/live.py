@@ -464,7 +464,8 @@ def quoteBalance(provider, account, instrument, granularity, rows=None, amount=N
     loses units x 0.0020 US dollars, so the capital it takes the risk of has
     to be in dollars too - as the backtest's capital is. An account held in
     the base currency (EUR for EUR_USD) is converted at the last close; one
-    in a third currency is refused rather than guessed at.
+    in a third currency is refused rather than guessed at - its balance, that
+    is: a reference capital is one number every account trades, taken 1:1.
     """
     row = next((a for a in provider.accounts() if account in (None, a['id'])), None)
     if row is None:
@@ -476,6 +477,12 @@ def quoteBalance(provider, account, instrument, granularity, rows=None, amount=N
     if held in ('', quote):
         return balance
     if held != base:
+        if amount is not None:
+            # a reference capital is one number for every account: one in a
+            # third currency (eToro's USD on DE30_EUR) takes it 1:1.
+            # ponytail: its P&L comes back converted at the real rate, off
+            # by that rate against the others; a EURUSD feed would fix it
+            return balance
         raise SystemExit("account in %s, %s quoted in %s: no rate to size with"
                          % (held, instrument, quote))
     if rows:
