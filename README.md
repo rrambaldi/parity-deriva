@@ -54,8 +54,10 @@ the thanks.
   the values to try, one backtest per combination (one value in every field is
   one backtest). Each run opens on its own page: the candles on top, the
   trades under them in the order they opened, and clicking a trade zooms the
-  chart onto it with its entry, exit, stop and target drawn in. It runs the
-  offline stack on the local warehouse and contacts no broker.
+  chart onto it with its entry, exit, stop and target drawn in. Runs of
+  different sets can be put together in a mix, their capitals added up on one
+  time axis. It runs the offline stack on the local warehouse and contacts no
+  broker.
 * **Audit trail** - every event is written to a JSONL log and can be replayed.
 * **Performance** - `performance/analyze.py` reports win/loss statistics,
   consecutive runs and three flavours of optimal *f* over the closed trades
@@ -850,8 +852,19 @@ and open <http://127.0.0.1:8731>: the simulate page. Pick a strategy, an
 instrument and a granularity - the dates default to what that store actually
 holds - and press simulate. With one value in every field that is one
 backtest; a list in a field is one backtest per value. `view` on a run's row
-opens it in full, `page` on a page of its own (`/run`). The data - stores,
-CSV imports, the economic calendar - is on the settings page (`/settings`).
+opens it on a page of its own (`/run`), whose `prev` and `next` walk the rows
+of the table it was picked from, in the order that table was sorted in; back
+comes to the same set, sorted the same way (`/?set=<id>` holds it). The data -
+stores, CSV imports, the economic calendar - is on the settings page
+(`/settings`).
+
+The mix page (`/mix`) puts runs of any sets together - strategies,
+instruments and timeframes of their own - as if each were traded on its own
+account side by side: the mix's capital is theirs added up at every close, on
+one time axis, and a run counts its opening capital before it starts and its
+last after it ends. Its win rate, profit factor and drawdown are of the
+whole, read off the curves' steps, which are money. A mix is kept in
+`DATA_DIR/mixes.json` as it is edited (`/api/mixes`).
 
 On the run's page the chart is on top with the whole range on it. The trades are under it in the
 order they opened, with the signal that produced each one, where it went in,
@@ -882,8 +895,9 @@ and runs it again only when neither has it:
 http://127.0.0.1:8731/run?sweep=20260924-101500-a1b2c3&run=3&instrument=EUR_USD&granularity=H1&strategy=AG01&from=2018-01-01&to=2018-03-03
 ```
 
-Arrow keys (or `j` and `k`) walk through the trades, and `escape` goes back to
-the whole range.
+The up and down arrows (or `j` and `k`) walk through the trades, left and
+right through the runs of the table, and `escape` goes back to the whole
+range.
 
 ### What it runs, and what it will not
 

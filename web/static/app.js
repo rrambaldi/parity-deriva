@@ -50,13 +50,6 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
-/*
- * Inside the simulate page's run dialog (?embed=1): the same page without
- * its header and menu, so the chart, the report and the trades are one mask
- * and not two copies of it.
- */
-const EMBED = new URLSearchParams(location.search).has('embed');
-if (EMBED) document.documentElement.classList.add('embed');
 const canvas = $('chart');
 const ctx = canvas.getContext('2d');
 
@@ -1741,7 +1734,7 @@ function show(data) {
 function fromAddress() {
   const params = new URLSearchParams(location.search);
   const { sweep, run } = Object.fromEntries(params);
-  for (const key of ['embed', 'sweep', 'run', 'trade']) params.delete(key);
+  for (const key of ['sweep', 'run', 'trade']) params.delete(key);
   if (!params.get('instrument')) return null;
   return { fields: Object.fromEntries(params), sweep, run };
 }
@@ -2003,11 +1996,48 @@ $('fav-star').addEventListener('click', () => {
   if (source) toggleFavourite(source).catch((error) => message(String(error.message || error)));
 });
 
+/*
+ * Prev and next: the runs of the table this one was opened from, in that
+ * table's order, left in sessionStorage by the page that has the table
+ * (sim.js, mix.js). A run opened from anywhere else has none. They replace
+ * the address rather than push one, so back still goes straight to the table.
+ */
+function walkRuns() {
+  let list = null;
+  try { list = JSON.parse(sessionStorage.getItem('run-list')); } catch (error) { /* none */ }
+  const here = new URLSearchParams(location.search);
+  const key = (q) => `${q.get('sweep')}/${q.get('run')}`;
+  const at = here.get('sweep') && list && Array.isArray(list.runs)
+    ? list.runs.findIndex((href) => key(new URLSearchParams(href.split('?')[1])) === key(here)) : -1;
+  if (at < 0) return;
+  const go = (step) => { if (list.runs[at + step]) location.replace(list.runs[at + step]); };
+  $('run-nav').hidden = false;
+  $('run-back').href = list.back;
+  $('run-at').textContent = `${at + 1} of ${list.runs.length}`;
+  $('run-prev').disabled = at === 0;
+  $('run-next').disabled = at === list.runs.length - 1;
+  $('run-prev').addEventListener('click', () => go(-1));
+  $('run-next').addEventListener('click', () => go(1));
+  document.addEventListener('keydown', (event) => {
+    if (event.target.matches('input, select, textarea') || event.altKey || event.ctrlKey
+      || event.metaKey) return;
+    if (event.key === 'ArrowLeft') go(-1);
+    if (event.key === 'ArrowRight') go(1);
+  });
+}
+
 async function start() {
-  await loadStores();
+  walkRuns();
+  const saved = fromAddress();
+  // the run asked for with the stores and not after them: those take seconds
+  // to answer while a sweep runs, and prev and next wait on them every time.
+  // A run of a set is read where the set keeps it, and the cache is asked
+  // only when it is not there: a miss there costs seconds too
+  const cached = () => post('api/backtest', JSON.stringify({ ...saved.fields, cachedOnly: true }));
+  let [, data] = await Promise.all([loadStores(), saved
+    && (saved.sweep ? ask(`api/sweeps/${saved.sweep}/${saved.run}`) : cached())]);
   // not awaited: the stars can wait, the run cannot wait on them
   loadFavourites().catch((error) => message(String(error.message || error)));
-  const saved = fromAddress();
   if (!saved) {
     message('no run to show: open one from a simulation set', 'info');
     return;
@@ -2017,12 +2047,8 @@ async function start() {
   const about = state.about[unalias(saved.fields).strategy] || '';
   $('chart-about').textContent = about;
   $('chart-about').hidden = !about;
-  let data = await post('api/backtest',
-                        JSON.stringify({ ...saved.fields, cachedOnly: true }));
-  if (data.cached === false && saved.sweep) {
-    // a run of a simulation set, kept on disk with it
-    data = await ask(`api/sweeps/${saved.sweep}/${saved.run}`);
-  }
+  // a set older than its runs on disk: the service may still hold it
+  if (data.cached === false && saved.sweep) data = await cached();
   if (data.cached === false) {
     // not kept any more (a set older than its runs on disk): run it again,
     // which is what asking to look at it means; and kept with the set this time

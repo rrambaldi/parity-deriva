@@ -18,13 +18,20 @@
 
 <!--
   One run in full: a run of a simulation set, opened from the simulate page
-  (in its dialog with ?embed=1, or on its own), or a live form. What it is
+  or the mix page, or a live form. What it is
   comes in the address - the fields, and the set and number when it is one -
   and nothing here starts a run of its own: see start() in app.js.
 -->
 <header>
   <div id="brand">
     <h1>parity-deriva &middot; run</h1>
+    <!-- the runs of the table this one was opened from: see walkRuns() -->
+    <span id="run-nav" hidden>
+      <a id="run-back" href="./" title="the table this run was opened from">&lsaquo; table</a>
+      <button type="button" id="run-prev" title="the run above it in the table (&larr;)">&lsaquo; prev</button>
+      <span id="run-at"></span>
+      <button type="button" id="run-next" title="the run below it in the table (&rarr;)">next &rsaquo;</button>
+    </span>
   </div>
 </header>
 

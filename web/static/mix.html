@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>parity-deriva mix</title>
+<!-- relative, like the other pages: see run.html -->
+<link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+
+<header>
+  <div id="brand">
+    <h1>parity-deriva &middot; mix</h1>
+  </div>
+  <!--
+    A mix is runs of the saved sets traded side by side, each on its own
+    capital: its curve is theirs added up at every close, on one time axis
+    (web/service.py mix). It is kept as it is edited: there is no save.
+  -->
+  <form id="mix-controls" autocomplete="off">
+    <label>mix <select id="mix-pick"></select></label>
+    <label>name <input type="text" id="mix-name" placeholder="optional" size="16" maxlength="120"></label>
+    <button type="button" id="mix-delete" hidden title="delete this mix; its sets and their runs stay">delete</button>
+  </form>
+  <form id="mix-add" autocomplete="off">
+    <label>set <select id="add-set"></select></label>
+    <label>run <select id="add-run"></select></label>
+    <button type="submit">add to the mix</button>
+  </form>
+</header>
+
+<p id="message" hidden></p>
+
+<!-- the mix's capital in blue, and each run's profit drawn from the same
+     start in its own colour, so the parts read against the whole -->
+<section id="mix-chart-panel">
+  <div id="mix-head">
+    <span id="mix-title">no mix yet</span>
+    <span id="mix-readout"></span>
+  </div>
+  <canvas id="mix-equity" height="340"></canvas>
+  <p class="legend" id="mix-legend"></p>
+</section>
+
+<section id="mix-table-panel">
+  <table id="mix-table">
+    <thead><tr><th></th><th>run</th><th>strategy</th><th>on</th><th>parameters</th><th>period</th>
+      <th class="num">trades</th><th class="num">win rate</th><th class="num">start</th>
+      <th class="num">capital</th><th class="num">net</th><th class="num">ROI</th>
+      <th class="num">max DD</th><th class="num">Sharpe</th><th></th></tr></thead>
+    <tbody id="mix-rows"></tbody>
+  </table>
+</section>
+
+<script src="static/menu.js"></script>
+<script src="static/mix.js"></script>
+</body>
+</html>

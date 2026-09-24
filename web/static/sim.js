@@ -315,6 +315,7 @@ async function simulate(event) {
     state.pick = state.pinned = null;
     state.fields = fields;
     follow(await post('api/sweep', { fields, grid, name: $('sweep-name').value }));
+    keepAddress();
   } catch (error) {
     message(String(error.message || error));
   }
@@ -536,12 +537,11 @@ async function toggleFavourite(n) {
   await loadFavourites();
 }
 
-// the two ways out of a row; a click anywhere else on it only picks its curve
+// the way out of a row; a click anywhere else on it only picks its curve
 function actions(more = []) {
   const td = document.createElement('td');
   td.className = 'run-actions';
-  for (const [name, title] of [['view', 'this run in full, here'],
-                               ['page', 'this run on a page of its own'], ...more]) {
+  for (const [name, title] of [['view', 'this run in full, on its own page'], ...more]) {
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.action = name;
@@ -562,8 +562,7 @@ function rowClick(event) {
     return toggleFavourite(n).catch((error) => message(String(error.message || error)));
   }
   const action = event.target.dataset.action;
-  if (action === 'view') return openRun(n);
-  if (action === 'page') return openPage(n);
+  if (action === 'view') return openPage(n, event.currentTarget);
   if (action === 'analisi') return openAnalysis(n);
   state.pinned = state.pinned === n ? null : n;
   state.pick = n;
@@ -592,30 +591,34 @@ function runFields(n) {
 
 // where one run is drawn: the run page, with the set and number that find it
 // on disk once the service has let its cache go, instead of running it again
-function runAddress(n, extra = {}) {
+function runAddress(n) {
   return 'run?' + new URLSearchParams({
-    ...extra, ...(state.job.id ? { sweep: state.job.id, run: n } : {}), ...runFields(n) });
+    ...(state.job.id ? { sweep: state.job.id, run: n } : {}), ...runFields(n) });
 }
 
-// the run on a page of its own
-function openPage(n) {
-  location.href = runAddress(n);
+// The set on show and how its tables are sorted, in the address: the run
+// page is left with the back button, and comes back to the same table
+function keepAddress() {
+  const q = new URLSearchParams();
+  if (state.job && state.job.id) q.set('set', state.job.id);
+  q.set('sort', `${state.sort.col}:${state.sort.dir}`);
+  q.set('kpi', `${state.kpiSort.col}:${state.kpiSort.dir}`);
+  history.replaceState(null, '', '?' + q);
 }
 
-// the run in a full page dialog: the run page, results only
-function openRun(n) {
+// the run on a page of its own. The runs of the table it was picked from go
+// with it, in that table's order: the run page's prev and next walk them
+function openPage(n, body) {
   const row = state.rows.find((r) => r.n === n);
   if (!row || row.error) return;
-  const dialog = $('run-dialog');
-  dialog.dataset.n = n;
-  $('run-title').textContent = `${runId(n)} ${paramsText(row.params)}`;
-  $('run-frame').src = runAddress(n, { embed: '1' });
-  dialog.showModal();
+  keepAddress();
+  const ok = new Set(state.rows.filter((r) => !r.error).map((r) => r.n));
+  const runs = [...body.querySelectorAll('tr[data-n]')].map((tr) => Number(tr.dataset.n))
+    .filter((m) => ok.has(m)).map((m) => runAddress(m));
+  try { sessionStorage.setItem('run-list', JSON.stringify({ back: location.href, runs })); }
+  catch (error) { /* no storage, no prev and next: the run still opens */ }
+  location.href = runAddress(n);
 }
-
-$('run-page').addEventListener('click', () => openPage(Number($('run-dialog').dataset.n)));
-// an emptied frame stops drawing, and a run reopened starts from its top
-$('run-dialog').addEventListener('close', () => { $('run-frame').src = 'about:blank'; });
 
 $('sim-rows').addEventListener('mouseover', (event) => {
   const line = event.target.closest('tr');
@@ -1061,6 +1064,7 @@ async function loadSet(id) {
   $('sweep-name').value = job.name || '';
   countLater();
   follow(job);
+  keepAddress();
   return job;
 }
 
@@ -1105,8 +1109,18 @@ async function start() {
   // opened to see - one going on without anybody watching - and the stores
   // take seconds to answer while it runs, the sweep status milliseconds
   const stores = ask('api/stores');
-  const job = await ask('api/sweep?since=0')
+  // the address says which set was on show and how it was sorted, when the
+  // page is come back to from a run: that one, else the last one run
+  const address = new URLSearchParams(location.search);
+  for (const [key, name] of [['sort', 'sort'], ['kpi', 'kpiSort']]) {
+    // a column is itself 's:net', so the direction is after the last colon
+    const text = address.get(key) || '', cut = text.lastIndexOf(':');
+    if (cut > 0) state[name] = { col: text.slice(0, cut), dir: Number(text.slice(cut + 1)) || 1 };
+  }
+  let job = await ask('api/sweep?since=0')
     .catch((error) => { message(String(error.message || error)); return { total: 0 }; });
+  const wanted = address.get('set');
+  if (wanted && job.id !== wanted) job = await ask('api/sweeps/' + wanted).catch(() => job);
   if (job.total) {
     state.fields = job.fields || null;
     follow(job);

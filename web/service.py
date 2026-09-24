@@ -698,11 +698,12 @@ class Service(object):
 				'start': start, 'final': final, 'roi': kpi.get('roi'), 'car': kpi.get('car'),
 				'maxDrawdownPct': kpi.get('maxDrawdownPct'), 'sharpe': kpi.get('sharpe')}
 
-	def simulated(self, source):
+	def simulated(self, source, job=None):
 		"""
 		(fields, summary, name) of a simulated form, read off what the run
 		left on disk: {'kind': 'run', 'id'} is a saved backtest,
-		{'kind': 'sweep', 'id', 'n'} one run of a saved sweep.
+		{'kind': 'sweep', 'id', 'n'} one run of a saved sweep - of `job`,
+		when the sweep is already open.
 		"""
 		kind = (source or {}).get('kind')
 		if kind == 'run':
@@ -726,7 +727,7 @@ class Service(object):
 										  final, payload.get('from'), payload.get('to'),
 										  curve=curve), None
 		if kind == 'sweep':
-			job = self.savedSweep(source.get('id'))
+			job = job or self.savedSweep(source.get('id'))
 			try:
 				n = int(source.get('n'))
 			except (TypeError, ValueError):
@@ -780,6 +781,112 @@ class Service(object):
 				raise ServiceError("no such favourite")
 			row['note'] = (note or '').strip()
 			self._writeFavourites(rows)
+
+	# ----------------------------------------------------------------- mixes
+
+	def mixesPath(self):
+		return os.path.join(getattr(self.setup, 'DATA_DIR', '') or '.', 'mixes.json')
+
+	def mixes(self):
+		"""
+		The mixes kept, newest first: {id, name, saved, items}, an item being
+		one run of a saved sweep, {sweep, n}. A mix is those runs traded side
+		by side, each on its own capital: see mix().
+		"""
+		try:
+			with open(self.mixesPath()) as handle:
+				rows = json.load(handle)
+		except (OSError, ValueError):
+			return []
+		return sorted(rows, key=lambda r: r.get('saved', 0), reverse=True)
+
+	def _writeMixes(self, rows):
+		path = self.mixesPath()
+		os.makedirs(os.path.dirname(path), exist_ok=True)
+		self._write(path, json.dumps(rows, indent=1).encode())
+
+	def saveMix(self, mix):
+		"""Keep a mix, a new one when it comes without an id; every run is checked."""
+		items = []
+		for item in mix.get('items') or []:
+			if not isinstance(item, dict):
+				raise ServiceError("an item of a mix is {sweep, n}")
+			self.simulated({'kind': 'sweep', 'id': item.get('sweep'), 'n': item.get('n')})
+			items.append({'sweep': item['sweep'], 'n': int(item['n'])})
+		mix_id = mix.get('id') or secrets.token_hex(8)
+		if not re.fullmatch(r'[0-9a-f]{16}', str(mix_id)):
+			raise ServiceError("no such mix")
+		entry = {'id': mix_id, 'name': (mix.get('name') or '').strip()[:120],
+				 'saved': int(time.time() * 1000), 'items': items}
+		with self._jobLock:
+			self._writeMixes([r for r in self.mixes() if r.get('id') != mix_id] + [entry])
+		return entry
+
+	def dropMix(self, mix):
+		with self._jobLock:
+			self._writeMixes([r for r in self.mixes() if r.get('id') != mix])
+
+	def mix(self, mix):
+		"""
+		A mix drawn: each run's capital curve, and theirs added up on one
+		time axis - every run on its own account, the mix their sum. Before a
+		run starts it counts its opening capital, after it ends its last.
+
+		The trade figures of the whole are read off the curves' steps, which
+		are money: a report's own are price x units, and those of two
+		instruments do not add up.
+		"""
+		saved = next((m for m in self.mixes() if m.get('id') == mix), None)
+		if saved is None:
+			raise ServiceError("no such mix")
+		runs, jobs = [], {}
+		for item in saved['items']:
+			try:
+				if item['sweep'] not in jobs:
+					jobs[item['sweep']] = self.savedSweep(item['sweep'])
+				job = jobs[item['sweep']]
+				fields, summary, name = self.simulated(
+					{'kind': 'sweep', 'id': item['sweep'], 'n': item['n']}, job)
+			except ServiceError as exc:
+				runs.append(dict(item, error=str(exc)))
+				continue
+			row = next(r for r in job['done'] if r.get('n') == item['n'])
+			runs.append(dict(item, name=name, fields=fields, summary=summary,
+							 params=row.get('params'), varied=job.get('varied'),
+							 # by time alone: two trades closing on one bar keep
+							 # their order, which sorting on the balance too lost
+							 curve=sorted(row.get('curve') or [], key=lambda p: p[0])))
+		ok = [r for r in runs if not r.get('error') and r['summary']['start'] is not None]
+		if not ok:
+			return dict(saved, runs=runs, total=None)
+		start = sum(r['summary']['start'] for r in ok)
+		now = [r['summary']['start'] for r in ok]
+		curve, steps, total = [], [], start
+		for t, k, balance in sorted(((t, k, b) for k, r in enumerate(ok) for t, b in r['curve']),
+									key=lambda e: e[0]):
+			steps.append(balance - now[k])
+			total += balance - now[k]
+			now[k] = balance
+			curve.append([t, total])
+		wins = [s for s in steps if s > 0]
+		losses = [-s for s in steps if s < 0]
+		summary = {'winRate': len(wins) / len(steps) if steps else None,
+				   'profitFactor': sum(wins) / sum(losses) if losses else None,
+				   'expectancy': sum(steps) / len(steps) if steps else None,
+				   'averageWin': sum(wins) / len(wins) if wins else None,
+				   'averageLoss': sum(losses) / len(losses) if losses else None}
+		dtfrom = min(r['summary']['from'] for r in ok)
+		dtto = max(r['summary']['to'] for r in ok)
+		peak, worst = start, 0.0
+		for _, value in curve:
+			peak = max(peak, value)
+			worst = max(worst, peak - value)
+		kpi = report_module.kpis([(moment(t), b) for t, b in curve], float(start),
+								 moment(dtfrom), moment(dtto), summary)
+		return dict(saved, runs=runs, total=dict(
+			summary, kpi=kpi, start=start, final=total, net=total - start,
+			trades=len(steps), wins=len(wins), losses=len(losses), maxDrawdown=worst,
+			curve=curve, **{'from': dtfrom, 'to': dtto}))
 
 	# -------------------------------------------------------------- the work
 
@@ -2207,6 +2314,8 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendFile('settings.html')
 			if route == '/live':
 				return self.sendFile('live.html')
+			if route == '/mix':
+				return self.sendFile('mix.html')
 			if route == '/api/live':
 				return self.sendJSON({'sessions': self.service.live.sessions()})
 			if route == '/api/live/targets':
@@ -2230,6 +2339,10 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendJSON(self.service.liveTradeSkew())
 			if route == '/api/favourites':
 				return self.sendJSON({'favourites': self.service.favourites()})
+			if route == '/api/mixes':
+				return self.sendJSON({'mixes': self.service.mixes()})
+			if route.startswith('/api/mixes/'):
+				return self.sendJSON(self.service.mix(route[len('/api/mixes/'):]))
 			if route.startswith('/api/live/'):
 				return self.sendJSON(self.service.live.summary(
 					route[len('/api/live/'):], detail=True))
@@ -2409,6 +2522,23 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendJSON(self.service.renameSweep(sweep, body.get('name')))
 			if route == '/api/sweep/stop':
 				return self.sendJSON(self.service.stopSweep())
+			if route == '/api/mixes' or route.startswith('/api/mixes/'):
+				# {"id"?, "name", "items": [{"sweep", "n"}]} keeps a mix,
+				# {"delete": true} on /api/mixes/<id> removes one
+				length = int(self.headers.get('Content-Length') or 0)
+				try:
+					body = json.loads(self.rfile.read(length) or b'{}')
+				except ValueError:
+					body = None
+				if not isinstance(body, dict):
+					raise ServiceError('the body is {"name": ..., "items": [{"sweep": ..., "n": ...}]}')
+				if route == '/api/mixes':
+					return self.sendJSON({'mix': self.service.saveMix(body),
+										  'mixes': self.service.mixes()})
+				if body.get('delete'):
+					self.service.dropMix(route[len('/api/mixes/'):])
+					return self.sendJSON({'mixes': self.service.mixes()})
+				return self.sendError("no route %s" % route, 404)
 			if route == '/api/live':
 				# {"fields": the backtest form, "targets": [{provider, account}]}
 				length = int(self.headers.get('Content-Length') or 0)

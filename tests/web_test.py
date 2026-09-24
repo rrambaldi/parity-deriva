@@ -1401,6 +1401,39 @@ class FavouritesTest(StoreCase):
         with self.assertRaises(ServiceError):
             self.service.addFavourite({'kind': 'run', 'id': '../etc'})
 
+    def test_a_mix_adds_its_runs_capitals_up_in_time(self):
+        day = lambda d: millis(T0 + datetime.timedelta(days=d))
+        for sweep, curve in (('20260924-120000-aaaaaa', [[day(1), 1010.0], [day(3), 1005.0]]),
+                             # two closes on one bar, the loss after the win: their order stays
+            ('20260924-120000-bbbbbb', [[day(2), 1020.0], [day(2), 990.0]])):
+            self.service.saveSweep({'id': sweep, 'fields': self.FIELDS, 'total': 1, 'done': [
+                {'n': 1, 'params': {}, 'balance': 1000.0, 'final': curve[-1][1],
+                 'report': {'net': 0}, 'curve': curve}]})
+        mix = self.service.saveMix({'name': 'due', 'items': [
+            {'sweep': '20260924-120000-aaaaaa', 'n': 1},
+            {'sweep': '20260924-120000-bbbbbb', 'n': 1}]})
+        total = self.service.mix(mix['id'])['total']
+        # each on its own 1000, the mix their sum at every close of either
+        self.assertEqual(total['curve'], [[day(1), 2010.0], [day(2), 2030.0], [day(2), 2000.0],
+                                          [day(3), 1995.0]])
+        self.assertEqual((total['start'], total['final'], total['net'], total['trades']),
+                         (2000.0, 1995.0, -5.0, 4))
+        self.assertEqual((total['wins'], total['losses']), (2, 2))
+        self.assertEqual(total['maxDrawdown'], 35.0)
+        self.assertAlmostEqual(total['profitFactor'], 30 / 35)
+        self.assertAlmostEqual(total['kpi']['roi'], -0.25)
+        with self.assertRaises(ServiceError):
+            self.service.saveMix({'items': [{'sweep': '20260924-120000-aaaaaa', 'n': 9}]})
+        # a set deleted since is said, and the rest still adds up
+        self.service.deleteSweep('20260924-120000-bbbbbb')
+        drawn = self.service.mix(mix['id'])
+        self.assertIn('error', drawn['runs'][1])
+        self.assertEqual(drawn['total']['final'], 1005.0)
+        self.service.dropMix(mix['id'])
+        self.assertEqual(self.service.mixes(), [])
+        with self.assertRaises(ServiceError):
+            self.service.mix(mix['id'])
+
     def test_the_routes(self):
         run = self.saveARun()
         server = service_module.serve(host='127.0.0.1', port=0, setup=self.settings)
@@ -1424,6 +1457,13 @@ class FavouritesTest(StoreCase):
             self.assertEqual(call('/api/favourites/%s/delete' % run, {}), {'favourites': []})
             with self.assertRaises(urllib.error.HTTPError):
                 call('/api/favourites', {'nope': 1})
+            # a mix: kept, drawn, removed
+            sweep = self.saveASweep()
+            self.assertEqual(call('/api/mixes'), {'mixes': []})
+            kept = call('/api/mixes', {'name': 'm', 'items': [{'sweep': sweep, 'n': 1}]})
+            self.assertEqual(call('/api/mixes/' + kept['mix']['id'])['total']['start'], 1000.0)
+            self.assertEqual(call('/api/mixes/' + kept['mix']['id'], {'delete': True}),
+                             {'mixes': []})
         finally:
             server.shutdown()
             server.server_close()
@@ -1865,7 +1905,8 @@ class HTTPTest(HTTPCase):
                            ('/sim', b'<canvas id="sim-equity"'),
                            ('/run', b'<canvas id="chart"'),
                            ('/settings', b'<table id="data-files"'),
-                           ('/live', b'<table id="live-table"')):
+                           ('/live', b'<table id="live-table"'),
+                           ('/mix', b'<canvas id="mix-equity"')):
             status, body, headers = self.get(path)
             self.assertEqual(status, 200, path)
             self.assertIn('text/html', headers['Content-Type'])

@@ -1,5 +1,5 @@
 /*
- * The menu every page shares, fixed at the top right: simulate, live,
+ * The menu every page shares, fixed at the top right: simulate, mix, live,
  * settings. One copy here rather than one per page.
  *
  * There is no backtest entry: one backtest is a simulation of one set of
@@ -17,6 +17,7 @@
   const ICONS = {
     simulate: svg('<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/>'
       + '<circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>'),
+    mix: svg('<path d="m12 2 10 5-10 5L2 7l10-5z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/>'),
     live: svg('<circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7'
       + 'M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/>'),
     settings: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1'
@@ -27,7 +28,7 @@
       + ' 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
   };
   // the home page is the simulation, at / and at the older /sim
-  const page = { '': 'simulate', sim: 'simulate', live: 'live', settings: 'settings' }[
+  const page = { '': 'simulate', sim: 'simulate', mix: 'mix', live: 'live', settings: 'settings' }[
     location.pathname.split('/').pop()];
 
   const nav = document.createElement('nav');
@@ -43,12 +44,11 @@
     nav.appendChild(el);
   };
   item('simulate', './', "one run, or every combination of a strategy's parameters");
+  item('mix', 'mix', 'runs of different sets traded side by side: their capitals added up');
   item('live', 'live', 'the sessions trading on the accounts, as they go');
   item('settings', 'settings', 'data: stores and imports');
   document.body.prepend(nav);
 
-  // not inside the simulate page's run dialog: the page around it asks
-  if (new URLSearchParams(location.search).has('embed')) return;
   const titles = Object.fromEntries([...nav.children].map((el) => [el.dataset.page, el.title]));
   const light = async () => {
     // a tab in the background asks nothing; it asks again once shown

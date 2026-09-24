@@ -349,15 +349,15 @@ tbody tr.empty:hover { background: none; }
 #grid-account { border-left: 1px solid var(--line); padding-left: 12px; }
 .hint { text-transform: none; letter-spacing: 0; }
 #combos { color: var(--dim); align-self: center; }
-#sim-head { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 6px; color: var(--dim); }
-#sim-title { font-weight: 600; color: var(--text); }
+#sim-head, #mix-head { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 6px; color: var(--dim); }
+#sim-title, #mix-title { font-weight: 600; color: var(--text); }
 #sim-equity { display: block; width: 100%; }
 #sim-current { margin-top: 8px; color: #cfe6ff; }
 .k.sim-run { color: #e8a33d; }
 .k.sim-pick { color: var(--entry); }
 .k.sim-done { color: rgba(139, 149, 166, .6); }
-#sim-rows td.good { color: var(--up); }
-#sim-rows td.bad { color: var(--down); }
+#sim-rows td.good, #mix-rows td.good { color: var(--up); }
+#sim-rows td.bad, #mix-rows td.bad { color: var(--down); }
 #sim-thead th { cursor: pointer; }
 .run-actions { white-space: nowrap; }
 .run-actions button { padding: 1px 6px; font-size: 11px; }
@@ -365,9 +365,7 @@ tbody tr.empty:hover { background: none; }
   #grid-account { border-left: 0; padding-left: 0; }
   #sim-table-panel { overflow-x: auto; }
 }
-/* the results alone, inside the simulate page's run dialog */
-.embed header { display: none; }
-#sim-table-panel { overflow-x: auto; }
+#sim-table-panel, #mix-table-panel { overflow-x: auto; }
 #grid-strategy:empty + #grid-account { border-left: 0; padding-left: 0; }
 
 /* the saved sets of simulations */
@@ -383,16 +381,18 @@ tbody tr.empty:hover { background: none; }
 .set-delete:hover { border-color: var(--down); }
 #sets-open { margin-left: auto; }
 
-/* one run of a set, full page, with the run page inside */
-#run-dialog { width: calc(100vw - 24px); height: calc(100vh - 24px); max-width: none;
-  max-height: none; padding: 8px 12px 12px; display: none; flex-direction: column;
-  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
-#run-dialog[open] { display: flex; }
-#run-dialog::backdrop { background: rgba(0, 0, 0, .6); }
-#run-dialog .dialog-head { margin-bottom: 8px; }
-#run-page { margin-left: auto; }
-#run-page + button { margin-left: 0; }
-#run-frame { flex: 1; width: 100%; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); }
+/* the run page's walk through the table it was opened from */
+#run-nav { display: inline-flex; align-items: center; gap: 8px; margin-left: 16px; color: var(--dim); }
+#run-nav[hidden] { display: none; }
+#run-back { color: var(--entry); text-decoration: none; }
+
+/* the mix page: its whole, under its runs */
+#add-set { max-width: 34em; }
+#add-run { max-width: 26em; }
+/* the run's name and its parameters wrap, rather than widen the table */
+#mix-rows td:nth-child(2), #mix-rows td:nth-child(5) { white-space: normal; }
+#mix-rows tr.mix-total td { font-weight: 600; border-top: 1px solid var(--line); }
+#mix-rows tr.mix-total { cursor: default; }
 
 /* the KPI comparison: a verdict colour always comes with its mark */
 #kpi-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; margin-bottom: 6px; }
@@ -489,7 +489,6 @@ tbody tr.empty:hover { background: none; }
 #menu a:hover, #menu button:hover { color: var(--text); border-color: var(--line); }
 #menu [aria-current="page"] { color: var(--text); border-color: var(--entry); background: #1d222b; }
 #menu a:focus-visible, #menu button:focus-visible { outline: 2px solid var(--entry); outline-offset: 1px; }
-.embed #menu { display: none; }
 /* something going on in the service - a sweep, a live session - lights its
    entry up on every page (menu.js, api/busy) */
 #menu a.busy { color: var(--up); }
