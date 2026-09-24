@@ -287,7 +287,13 @@ function follow(job) {
   $('rerun').hidden = running || !job.total;
   if (running) $('stop').disabled = !!job.cancel;
   if (job.error) message(job.error);
-  else if (running) message(`run ${job.current ? job.current.n : state.rows.length} of ${job.total}`, 'info');
+  else if (running) {
+    // just the values that change from run to run, the rest is in the title
+    const c = job.current;
+    const params = c ? Object.fromEntries((job.varied || []).map((k) => [k, c.params[k]])) : {};
+    const text = paramsText(params);
+    message(`run ${c ? c.n : state.rows.length} of ${job.total}` + (text ? ` · ${text}` : ''), 'info');
+  }
   else if (job.total) message(job.cancel ? `stopped after ${state.rows.length} of ${job.total} runs` : '');
   const f = job.fields || {};
   $('sim-title').textContent = (job.id ? `[${job.id}] ` : '') + (job.name ? `${job.name} · ` : '')
