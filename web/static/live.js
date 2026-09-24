@@ -102,7 +102,7 @@ function renderTable() {
     td.textContent = 'no session yet: start one below, or from the backtest page';
     return;
   }
-  let net = 0, running = 0;
+  let running = 0;
   for (const s of state.sessions) {
     const row = body.insertRow();
     row.dataset.id = s.id;
@@ -129,13 +129,9 @@ function renderTable() {
     button.textContent = s.running ? 'stop & close' : 'delete';
     button.disabled = !!(s.running && s.stopped);
     actions.appendChild(button);
-    net += s.net || 0;
     if (s.running) running += 1;
   }
-  const total = foot.insertRow();
-  cell(total, `${running} running of ${state.sessions.length}`).colSpan = 11;
-  cell(total, money(net), 'num' + (net > 0 ? ' good' : net < 0 ? ' bad' : ''));
-  cell(total, '');
+  cell(foot.insertRow(), `${running} running of ${state.sessions.length}`).colSpan = 13;
 }
 
 $('live-rows').addEventListener('click', async (event) => {
@@ -169,7 +165,9 @@ function renderDetail() {
   if (!d) return;
   const f = d.fields || {};
   $('detail-title').textContent = `${d.id} · ${f.strategy} on ${f.instrument} ${f.granularity}`
-    + ` · ${d.provider} ${d.account} (${d.accountName || ''}) · capital at start ${money(d.balance)} ${d.currency || ''}`
+    + ` · ${d.provider} ${d.account} (${d.accountName || ''})`
+    + (f.capital ? ` · capitale ${money(Number(f.capital))} (saldo del conto ${money(d.balance)} ${d.currency || ''})`
+                 : ` · capital at start ${money(d.balance)} ${d.currency || ''}`)
     + (f.capital ? ` · risk taken on ${money(Number(f.capital))} ${d.currency || ''}` : '');
   $('detail-params').textContent = paramsText(f);
 
@@ -297,6 +295,7 @@ const PERIOD_MS = { M1: 60e3, M5: 300e3, M15: 900e3, M30: 1800e3, H1: 3600e3, H4
 const periodOf = (granularity) => PERIOD_MS[granularity] || 300e3;
 const clock = (ms) => new Date(ms).toISOString().slice(11, 19);
 const pips = (v) => v === null || v === undefined ? '' : Number(v).toFixed(1);
+const pct2 = (v) => v === null || v === undefined ? '' : `${Number(v).toFixed(2)}%`;
 const feedOf = (s) => `${s.provider}:${s.account}`;
 const groupKey = (f) => `${f.strategy}|${f.instrument}|${f.granularity}`;
 
@@ -369,12 +368,15 @@ function renderBoard(groups) {
       cell(row, session ? pips(sm.meanEntryDiff) : '', 'num');
       cell(row, session ? String(sm.outcomeMismatch ?? 0) : '', 'num');
       cell(row, session ? String(unpaired) : '', 'num' + (unpaired ? ' bad' : ''));
+      cell(row, session ? money(sm.plDiff) : '', 'num');
+      cell(row, session ? pips(sm.plDiffPips) : '', 'num');
+      cell(row, session ? pct2(sm.plDiffPct) : '', 'num');
       cell(row, session ? `${parity.divergences ?? 0} divergenze${alarm ? ' · ALARM' : ''}` : '', alarm ? 'bad' : '');
     };
     if (g.reference) line(g.reference.id, g.reference.provider, g.reference.account, null);
     for (const s of g.sessions || []) if (!g.reference || s.id !== g.reference.id) line(s.id, s.provider, s.account, s);
   }
-  if (!body.rows.length) cell(body.insertRow(), 'nessuna sessione', 'hint').colSpan = 9;
+  if (!body.rows.length) cell(body.insertRow(), 'nessuna sessione', 'hint').colSpan = 12;
 
   const td = Object.values(state.skew).map((s) => s.twelvedata).find(Boolean);
   const g = groups.find((x) => x.key === state.group) || groups[0];
@@ -399,7 +401,8 @@ function renderTradeSkew() {
     const head = table.createTHead().insertRow();
     for (const [label, cls] of [['segnale', ''], ['sim entry', 'num'], ['sim exit', 'num'], ['sim esito', ''], ['sim P&L', 'num'],
         ['broker', ''], ['entry', 'num'], ['exit', 'num'], ['esito', ''], ['P&L', 'num'], ['Δentry pip', 'num'],
-        ['Δexit pip', 'num'], ['ΔP&L', 'num'], ['esito uguale', ''], ['spaiato', '']]) {
+        ['Δexit pip', 'num'], ['ΔP&L EUR', 'num'], ['ΔP&L pip', 'num'], ['ΔP&L %', 'num'],
+        ['esito uguale', ''], ['spaiato', '']]) {
       const th = document.createElement('th');
       th.textContent = label;
       th.className = cls;
@@ -421,10 +424,11 @@ function renderTradeSkew() {
       cell(row, String(bk.entry ?? ''), 'num'); cell(row, String(bk.exit ?? ''), 'num');
       cell(row, bk.reason || ''); cell(row, money(bk.pl), 'num');
       cell(row, pips(r.entryDiff), 'num'); cell(row, pips(r.exitDiff), 'num'); cell(row, money(r.plDiff), 'num');
+      cell(row, pips(r.plDiffPips), 'num'); cell(row, pct2(r.plDiffPct), 'num');
       cell(row, r.outcomeMatch === null || r.outcomeMatch === undefined ? '' : r.outcomeMatch ? 'sì' : 'no');
       cell(row, r.unpaired || '');
     }
-    if (!body.rows.length) cell(body.insertRow(), 'nessun trade', 'hint').colSpan = 15;
+    if (!body.rows.length) cell(body.insertRow(), 'nessun trade', 'hint').colSpan = 17;
     box.append(h, table);
   }
   if (!box.children.length) {
@@ -608,6 +612,8 @@ function applyChosen() {
   fill($('new-instrument'), instruments, d.instrument || instruments[0]);
   fill($('new-granularity'), LIVE_GRANULARITIES, d.granularity || 'H1');
   if (c.fields.risk) $('new-risk').value = c.fields.risk;
+  // the capital the simulation ran on, the same on every account ticked
+  $('new-capital').value = c.fields.capital || c.fields.balance || (c.summary || {}).start || stores.equity || '';
   $('new-description').textContent = (stores.descriptions || {})[c.fields.strategy] || '';
   fillStrategies();
   renderSummary();
@@ -911,9 +917,9 @@ $('new-form').addEventListener('submit', async (event) => {
   fields.instrument = $('new-instrument').value;
   fields.granularity = $('new-granularity').value;
   fields.risk = $('new-risk').value;
-  // the capital the risk is a percentage of, in the account's currency;
-  // empty, the account's whole balance (scripts/live.py quoteBalance)
-  if ($('new-capital').value) fields.capital = $('new-capital').value; else delete fields.capital;
+  // the capital the risk is a percentage of: one number for every account,
+  // a USD one taking it 1:1 (web/livesessions.start, scripts/live.py quoteBalance)
+  fields.capital = $('new-capital').value;
   $('new-start').disabled = true;
   newSay('starting…');
   try {

@@ -31,6 +31,7 @@ import sys
 import time
 
 from parity_deriva.trading import providers
+from parity_deriva.etc import settings
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(ROOT, 'scripts', 'live.py')
@@ -209,6 +210,12 @@ class LiveSessions(object):
         """One session per {provider, account}; returns their summaries."""
         if not targets:
             raise LiveError("no account chosen")
+        # every account trades the same capital - the form's, else the one
+        # the backtest ran on - so the sessions' P&L compare number for
+        # number; one in USD takes it 1:1 (scripts/live.quoteBalance)
+        fields = dict(fields)
+        if fields.get('capital') in (None, ''):
+            fields['capital'] = fields.get('balance') or str(settings.EQUITY)
         known = dict(((t['provider'], a['id']), a)
                      for t in self.targets() for a in t['accounts'])
         for target in targets:
@@ -357,8 +364,9 @@ class LiveSessions(object):
         out = dict(meta, running=self.alive(meta), **state)
         if out['running'] is False and meta.get('stopped') is None:
             out['exited'] = True
-        if out['balance'] is not None:
-            out['curve'] = [[meta['started'], meta['balance']]]
+        start = capitalOf(meta)
+        if start is not None:
+            out['curve'] = [[meta['started'], start]]
             for trade in state['closed']:
                 if trade.get('pl') is not None:
                     out['curve'].append([trade['time'], out['curve'][-1][1] + trade['pl']])
@@ -418,6 +426,7 @@ def fills(events, kind='TRANSACTION'):
                      or event.get('price'),
                      'pl': event.get('pl'), 'reason': event.get('reason'),
                      'opened': opened.get('time'),
+                     'side': _side(opened.get('units')),
                      'signal': event.get('signalNumber') or opened.get('signal')}
             if trade['pl'] is None and None not in (trade['entry'], trade['exit'],
                                                     trade['units']):
@@ -503,13 +512,33 @@ def groupKey(fields):
     return "|".join(head + rest)
 
 
+def _side(units):
+    """+1 long, -1 short, None when the opening fill is not in the log."""
+    try:
+        units = float(units)
+    except (TypeError, ValueError):
+        return None
+    return 1 if units > 0 else -1 if units < 0 else None
+
+
+def capitalOf(session):
+    """The capital a session sizes on: its reference, else the account's balance."""
+    for value in ((session.get('fields') or {}).get('capital'), session.get('balance')):
+        try:
+            if value not in (None, '') and float(value) > 0:
+                return float(value)
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
 def _pips(a, b, pip):
     if a is None or b is None:
         return None
     return round((float(a) - float(b)) / pip, 3)
 
 
-def compareTrades(broker, sim, pip):
+def compareTrades(broker, sim, pip, capitals=(None, None)):
     """
     A broker session's closed trades against the reference's, joined on the
     signal key.
@@ -520,7 +549,10 @@ def compareTrades(broker, sim, pip):
     has not is the finding this exists for: one feed's candles made the
     strategy signal and the other's did not, or one account never filled.
     Differences are in pips of the instrument, positive when the broker
-    paid more than the simulator.
+    paid more than the simulator. The P&L difference three ways: in the
+    accounts' money (the same capital on every account, a USD one taken
+    1:1), in pips - the price the broker gave, whatever the size - and in
+    percent of each side's `capitals` (broker, sim).
     """
     mine = dict((t['signal'], t) for t in broker if t.get('signal'))
     theirs = dict((t['signal'], t) for t in sim if t.get('signal'))
@@ -529,7 +561,8 @@ def compareTrades(broker, sim, pip):
             (mine.get(k) or theirs.get(k) or {}).get('opened') or 0, k)):
         b, s = mine.get(key), theirs.get(key)
         row = {'signal': key, 'broker': b, 'sim': s, 'entryDiff': None,
-               'exitDiff': None, 'plDiff': None, 'outcomeMatch': None,
+               'exitDiff': None, 'plDiff': None, 'plDiffPips': None,
+               'plDiffPct': None, 'outcomeMatch': None,
                'entryLagMs': None, 'unpaired': None}
         if b is None:
             row['unpaired'] = 'broker'
@@ -540,6 +573,12 @@ def compareTrades(broker, sim, pip):
             row['exitDiff'] = _pips(b.get('exit'), s.get('exit'), pip)
             if b.get('pl') is not None and s.get('pl') is not None:
                 row['plDiff'] = round(float(b['pl']) - float(s['pl']), 4)
+                if all(capitals):
+                    row['plDiffPct'] = round(float(b['pl']) / capitals[0] * 100
+                                             - float(s['pl']) / capitals[1] * 100, 4)
+            side = s.get('side') or b.get('side')
+            if side and None not in (row['entryDiff'], row['exitDiff']):
+                row['plDiffPips'] = round(side * (row['exitDiff'] - row['entryDiff']), 3)
             if b.get('reason') and s.get('reason'):
                 row['outcomeMatch'] = (b['reason'] == s['reason'])
             if b.get('opened') and s.get('opened'):
@@ -557,6 +596,8 @@ def compareTrades(broker, sim, pip):
         'meanExitDiff': round(sum(exits) / len(exits), 3) if exits else None,
         'outcomeMismatch': sum(1 for r in paired if r['outcomeMatch'] is False),
         'plDiff': round(sum(r['plDiff'] for r in paired if r['plDiff'] is not None), 4),
+        'plDiffPips': round(sum(r['plDiffPips'] for r in paired if r['plDiffPips'] is not None), 3),
+        'plDiffPct': round(sum(r['plDiffPct'] for r in paired if r['plDiffPct'] is not None), 4),
     }
     return rows, summary
 
@@ -590,7 +631,8 @@ def tradeSkew(sessions, setup=None):
             rows, summary = ([], None)
             if reference is not None:
                 rows, summary = compareTrades(s.get('closed') or [],
-                                              reference.get('closed') or [], pip)
+                                              reference.get('closed') or [], pip,
+                                              (capitalOf(s), capitalOf(reference)))
             group['sessions'].append({
                 'id': s['id'], 'provider': s.get('provider'), 'account': s.get('account'),
                 'running': s.get('running'), 'summary': summary, 'rows': rows,

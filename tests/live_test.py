@@ -238,6 +238,12 @@ class QuoteBalanceTest(unittest.TestCase):
                                            amount=1000), 1140.0)
         self.assertEqual(live.quoteBalance(self.Provider('USD'), 'A', 'EUR_USD', 'H1', rows,
                                            amount=1000), 1000.0)
+        # a third currency: the account's balance has no rate, the reference
+        # capital is one number every account trades, 1:1
+        self.assertEqual(live.quoteBalance(self.Provider('USD'), 'A', 'DE30_EUR', 'H1', rows,
+                                           amount=1000), 1000.0)
+        with self.assertRaises(SystemExit):
+            live.quoteBalance(self.Provider('USD'), 'A', 'DE30_EUR', 'H1', rows)
 
     def test_the_form_s_capital_is_read_and_a_bad_one_refused(self):
         form = {'strategy': 'AG01', 'instrument': 'EUR_USD', 'granularity': 'H1'}

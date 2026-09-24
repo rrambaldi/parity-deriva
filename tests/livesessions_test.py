@@ -54,9 +54,11 @@ class LiveSessionsTest(unittest.TestCase):
 
     def test_started_read_and_stopped(self):
         with mock.patch.object(livesessions, 'SCRIPT', self.script):
-            started = self.live.start({'strategy': 'AB-INVERSA'},
+            started = self.live.start({'strategy': 'AB-INVERSA', 'balance': '1000'},
                                       [{'provider': 'ig', 'account': 'Z1'}])
         session = started[0]['id']
+        # the backtest's capital, as every account's reference
+        self.assertEqual(self.live.meta(session)['fields']['capital'], '1000')
         for _ in range(50):
             if self.live.summary(session)['closed']:
                 break
@@ -83,6 +85,9 @@ class LiveSessionsTest(unittest.TestCase):
         with mock.patch.object(livesessions, 'SCRIPT', self.script):
             session = self.live.start({'strategy': 'AB-INVERSA'},
                                       [{'provider': 'ig', 'account': 'Z1'}])[0]['id']
+            # no capital and no backtest's: the default equity, on every account
+            self.assertEqual(float(self.live.meta(session)['fields']['capital']),
+                             float(livesessions.settings.EQUITY))
             first = self.live.meta(session)['pid']
             # what systemctl restart does: the process goes, the service is new
             os.killpg(first, 9)
@@ -234,6 +239,38 @@ class TradeSkewTest(unittest.TestCase):
         self.assertEqual(summary['maxEntryDiff'], 1.0)
         self.assertEqual(summary['outcomeMismatch'], 0)
         self.assertEqual(summary['plDiff'], -6.0)
+
+    def test_the_p_and_l_difference_in_money_pips_and_percent(self):
+        # the same capital on both: a long filled 1 pip worse and closed
+        # 2 pips worse is 3 pips less, 30 of money on 10 units a pip
+        sim = self.session('p', 'twelvedata', 'paper',
+                           [dict(self.trade('S1', 1.1000, 1.1020, 200.0), side=1)],
+                           fields={'capital': '10000'})
+        ig = self.session('i', 'ig', 'Z1',
+                          [dict(self.trade('S1', 1.1001, 1.1018, 170.0), side=1)],
+                          fields={'capital': '10000'})
+        # a short: the broker's worse exit is a higher price
+        sim['closed'].append(dict(self.trade('S2', 1.2000, 1.1980, 200.0, opened=2000), side=-1))
+        ig['closed'].append(dict(self.trade('S2', 1.2000, 1.1985, 150.0, opened=2000), side=-1))
+        session = livesessions.tradeSkew([ig, sim])['groups'][0]['sessions'][0]
+        rows = dict((r['signal'], r) for r in session['rows'])
+        self.assertEqual(rows['S1']['plDiff'], -30.0)
+        self.assertEqual(rows['S1']['plDiffPips'], -3.0)
+        self.assertEqual(rows['S1']['plDiffPct'], -0.3)
+        self.assertEqual(rows['S2']['plDiffPips'], -5.0)
+        self.assertEqual(session['summary']['plDiffPips'], -8.0)
+        self.assertEqual(session['summary']['plDiff'], -80.0)
+        self.assertEqual(session['summary']['plDiffPct'], -0.8)
+
+    def test_a_trade_s_side_is_its_opening_fill_s(self):
+        events = [
+            {'_type': 'TRANSACTION', 'type': 'ORDER_FILL', 'id': 'D1', 'price': 1.1,
+             'units': -2.0, 'time': '2026-09-24T11:00:00'},
+            {'_type': 'TRANSACTION', 'type': 'ORDER_FILL', 'id': 'D1', 'price': 1.09,
+             'units': 2.0, 'pl': 2.0, 'tradesClosed': [{'price': 1.09}],
+             'time': '2026-09-24T12:00:00'}]
+        _open, closed = livesessions.fills(events, 'TRANSACTION')
+        self.assertEqual(closed[0]['side'], -1)
 
     def test_without_a_paper_session_there_is_no_reference(self):
         ig = self.session('i', 'ig', 'Z1', [self.trade('S1', 1.1, 1.2, 1.0)])
