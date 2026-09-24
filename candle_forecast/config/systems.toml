@@ -1,0 +1,52 @@
+# Livello 0. Ogni voce porta il codice della decisione da cui viene
+# (tabella completa nel README). DA-CONFERMARE = scelta tecnica non coperta dal
+# prompt, messa per poter partire: la decide Roberto.
+
+results_dir = "results"
+parity_deriva_root = "../.."   # cartella che contiene il pacchetto parity_deriva (store, indicatori)
+
+[split]                        # DEC-6, L0-P1
+train = 0.75
+val = 0.125
+test = 0.125                   # bloccato: si apre solo con --open-test
+early_stop_tail = 0.10         # L0-P9: ultimo 10% del training
+
+[instruments.EURUSD]
+tick = 0.00001                 # DEC-3
+# DEC-1, APERTO-1: store HDF5 già caricato. `pack-stores` lo zippa da parity_deriva
+# settings.DATA_DIR in stores/EUR_USD.hd5.zip (in git); `prepare` usa solo lo zip.
+# APERTO-2: indice in UTC, timestamp = inizio barra (prima barra 22:00 UTC = 17:00 NY)
+store = "EUR_USD.hd5"
+
+[grid]
+instruments = ["EURUSD"]       # APERTO-4: primo sistema scelto dall'utente
+timeframes = ["M5"]            # APERTO-4 (M5, H1, H4, D1, W1 supportati)
+N = [21, 37, 42, 108]          # DEC-4
+M = [1, 2]                     # DEC-5
+models = ["lgbm", "gru"]       # Parte 5
+price_series = "mid"           # L0-P2: mid | bid | ask
+# APERTO-3: la candela mancante non esiste, la sequenza continua per indice.
+# true = torna a L0-P6 (finestre che attraversano un buco escluse e contate)
+exclude_gap_windows = false
+# APERTO-5: canali oltre alle candele, calcolati sulla serie di prezzo (close; ATR su h/l/c).
+# sma/ema: delta dal close di riferimento; atr: ampiezza, in unità minime senza togliere ref.
+# Riscaldamento: si scartano le candele finché l'indicatore più lungo (SMA100) non è pronto.
+indicators = ["sma100", "atr14", "ema21"]
+
+[lgbm]                         # L0-P8
+n_estimators = 1000
+learning_rate = 0.05
+num_leaves = 31
+seed = 42
+early_stopping_rounds = 50     # DA-CONFERMARE
+num_threads = 2                # DA-CONFERMARE (macchina a 2 core)
+
+[gru]                          # L0-P8
+hidden = 32
+layers = 1
+lr = 0.001
+batch = 256
+seeds = [0, 1, 2]
+max_epochs = 30                # DA-CONFERMARE
+patience = 3                   # DA-CONFERMARE
+num_threads = 2                # DA-CONFERMARE

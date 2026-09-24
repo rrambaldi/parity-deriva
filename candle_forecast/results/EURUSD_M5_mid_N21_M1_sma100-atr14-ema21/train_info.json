@@ -1,0 +1,11 @@
+{
+ "lgbm": {
+  "seed": 42,
+  "best_iterations": [
+   145,
+   213,
+   4
+  ],
+  "seconds": 208.0
+ }
+}

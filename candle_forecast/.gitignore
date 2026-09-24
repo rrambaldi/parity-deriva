@@ -1,0 +1,8 @@
+# gli store scompattati si rigenerano dallo zip (stores/*.zip va in git)
+stores/*.hd5
+stores/*.sha256
+stores/*.tmp
+# grossi e rigenerabili con prepare/run; modelli, summary e report invece si tengono
+results/**/predictions_*.csv
+results/**/*.npz
+.pytest_cache/
