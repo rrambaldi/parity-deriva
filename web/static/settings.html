@@ -4,14 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>parity-deriva settings</title>
-<!-- relative, like the other pages: see run.html -->
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="static/fonts.css">
+<link rel="stylesheet" href="static/tokens.css">
 <link rel="stylesheet" href="static/app.css">
+<link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="static/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="static/apple-touch-icon.png">
+<!--
+  The theme the switch forced, before the first paint. Here and not in
+  menu.js because the scripts load at the bottom of the page: without it a
+  page forced to light would show the dark one for a moment, or the other way.
+-->
+<script>
+  try {
+    const theme = localStorage.getItem('parity-deriva.theme');
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  } catch (error) { /* nothing kept: the system's theme */ }
+</script>
 </head>
 <body>
 
 <header>
   <div id="brand">
-    <h1>parity-deriva &middot; settings</h1>
+    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="201" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="201" height="28"></h1>
+    <span id="page-name">settings</span>
+    <span id="env-badge" class="badge">offline &middot; no orders</span>
   </div>
 </header>
 
@@ -34,7 +52,7 @@
       <input type="file" id="data-file" accept=".csv,text/csv" multiple>
     </label>
     <button type="button" id="data-upload">upload</button>
-    <button type="button" id="data-import">import selected</button>
+    <button type="button" id="data-import" class="primary">import selected</button>
   </div>
   <!--
     The economic calendar. Collected by the browser and not by the service:

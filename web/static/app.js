@@ -373,10 +373,13 @@ function levels(trade) {
  * payload offers and colours the bars each side of it. `state.slope` is a
  * place in that list and not a number, because a number typed here would be
  * a threshold chosen by the viewer.
+ *
+ * A bar moving up is tinted in the theme's up colour, one moving down in its
+ * down colour, a flat one in grey - faintly, because the candles go on top
+ * and are what is being read.
  */
-const SLOPE_UP = 'rgba(60,163,112,.16)';
-const SLOPE_DOWN = 'rgba(200,85,61,.16)';
-const SLOPE_FLAT = 'rgba(125,133,144,.10)';
+const SLOPE_ALPHA = 0.16;
+const SLOPE_FLAT_ALPHA = 0.10;
 
 function slopeLevel() {
   const info = state.data && state.data.slope;
@@ -396,7 +399,7 @@ function slopeSide(value, level) {
  * the candles and over the grid: the shading answers "was this bar
  * directional", and a bar it hides is a bar it cannot answer for.
  */
-function shade(view, plotH, step) {
+function shade(view, plotH, step, p) {
   const chosen = slopeLevel();
   if (!chosen) { $('slope-note').textContent = ''; return; }
   const values = state.data.slope.values;
@@ -410,9 +413,11 @@ function shade(view, plotH, step) {
     counts[side]++;
     if (was !== null && side !== was) flips++;
     was = side;
-    ctx.fillStyle = side > 0 ? SLOPE_UP : side < 0 ? SLOPE_DOWN : SLOPE_FLAT;
+    ctx.fillStyle = side > 0 ? p.up : side < 0 ? p.down : p.text3;
+    ctx.globalAlpha = side ? SLOPE_ALPHA : SLOPE_FLAT_ALPHA;
     ctx.fillRect(AXIS.left + i * step, AXIS.top, Math.max(1, step), plotH);
   }
+  ctx.globalAlpha = 1;
   const moving = counts[1] + counts['-1'];
   $('slope-note').textContent = known
     ? `slope \u2265 ${chosen.value} \u00b7 ${moving} of ${known} bars `
@@ -426,25 +431,26 @@ function shade(view, plotH, step) {
  * candle list. Computed by the service from the strategy's own declaration -
  * see web/service.py - so this file knows how to draw a line and nothing
  * about what any of them mean.
+ *
+ * All of them grey, each told from the others by its dash: the chart's
+ * colours already mean up, down and entry, and a curve is none of those.
  */
-const CURVE_COLOURS = ['#e8a33d', '#7ee787', '#79c0ff', '#ff7b72'];
-
 function flatten(wanted) {
-  // every line of one axis, flattened: a Bollinger band is three of them, and
-  // the band between the outer two is drawn separately. The colour is taken
-  // from the curve's place in the declared list and not from its place here,
-  // so it matches the name the legend prints.
+  // every line of one axis, flattened: a Bollinger band is three of them, all
+  // in the band's own dash - above, middle and below is what tells them
+  // apart. The dash is taken from the curve's place in the declared list and
+  // not from its place here, so it matches the sample the legend prints.
   const out = [];
   const list = (state.data && state.data.indicators) || [];
   list.forEach((curve, i) => {
     if (!!curve.panel !== wanted) return;
-    const colour = CURVE_COLOURS[i % CURVE_COLOURS.length];
+    const dash = DASHES[i % DASHES.length];
     if (curve.kind === 'bollinger') {
-      out.push({ values: curve.upper, colour, dash: [4, 3] },
-               { values: curve.middle, colour, dash: [] },
-               { values: curve.lower, colour, dash: [4, 3] });
+      out.push({ values: curve.upper, dash },
+               { values: curve.middle, dash },
+               { values: curve.lower, dash });
     } else {
-      out.push({ values: curve.values, colour, dash: [], label: curve.label });
+      out.push({ values: curve.values, dash, label: curve.label });
     }
   });
   return out;
@@ -499,6 +505,7 @@ function resize() {
 }
 
 function draw() {
+  const p = palette();
   const { width, height } = resize();
   ctx.clearRect(0, 0, width, height);
   if (!state.data || !state.data.candles.length) return;
@@ -523,10 +530,10 @@ function draw() {
 
   drawPanel();
 
-  grid(width, height, range, y);
-  shade(view, plotH, step);
-  curves(view, x, y);
-  if (state.levels) supports(view, x, y, plotW, n, range);
+  grid(width, height, range, y, p);
+  shade(view, plotH, step, p);
+  curves(view, x, y, p);
+  if (state.levels) supports(view, x, y, plotW, n, range, p);
 
   // the holding period, behind everything: the bars the trade was open for
   const held = trade ? tradeBar(trade, 'entry') : null;
@@ -535,36 +542,36 @@ function draw() {
     const a = Math.max(0, held - view.from);
     const b = (out === null || out === undefined ? n - 1 : out - view.from);
     if (b >= 0 && a <= n) {
-      ctx.fillStyle = 'rgba(88,166,255,.07)';
+      ctx.fillStyle = p.span;
       const left = AXIS.left + Math.max(0, a) * step;
       const right = AXIS.left + Math.min(n, b + 1) * step;
       ctx.fillRect(left, AXIS.top, Math.max(1, right - left), plotH);
     }
   }
 
-  candles(view, x, y, bodyW, zoomed);
-  if (trade) setupBox(trade, view, x, y, n, step);
-  arrows(view, x, y, step);
-  if (trade) overlay(trade, view, x, y, plotW, n, step);
-  times(view, x, height, n, step);
+  candles(view, x, y, bodyW, zoomed, p);
+  if (trade) setupBox(trade, view, x, y, n, step, p);
+  arrows(view, x, y, step, p);
+  if (trade) overlay(trade, view, x, y, plotW, n, step, p);
+  times(view, x, height, n, step, p);
 }
 
-function grid(width, height, range, y) {
+function grid(width, height, range, y, p) {
   const lines = 6;
   ctx.lineWidth = 1;
-  ctx.font = '11px ui-monospace, Menlo, Consolas, monospace';
+  ctx.font = '11px ' + p.mono;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
   for (let i = 0; i <= lines; i++) {
-    const p = range.low + (range.high - range.low) * (i / lines);
-    const py = Math.round(y(p)) + 0.5;
-    ctx.strokeStyle = '#232932';
+    const v = range.low + (range.high - range.low) * (i / lines);
+    const py = Math.round(y(v)) + 0.5;
+    ctx.strokeStyle = p.grid;
     ctx.beginPath();
     ctx.moveTo(AXIS.left, py);
     ctx.lineTo(width - AXIS.right, py);
     ctx.stroke();
-    ctx.fillStyle = '#8b95a6';
-    ctx.fillText(price(p), AXIS.left - 8, py);
+    ctx.fillStyle = p.text3;
+    ctx.fillText(price(v), AXIS.left - 8, py);
   }
 }
 
@@ -576,11 +583,11 @@ function grid(width, height, range, y) {
  * indicator had nothing to say about - which is exactly the stretch somebody
  * checking an early trade is looking at.
  */
-function curves(view, x, y) {
+function curves(view, x, y, p) {
   for (const line of indicatorSeries()) {
     if (!line.values) continue;
     ctx.save();
-    ctx.strokeStyle = line.colour;
+    ctx.strokeStyle = p.text3;
     ctx.lineWidth = 1.25;
     ctx.setLineDash(line.dash);
     ctx.beginPath();
@@ -703,7 +710,7 @@ function levelsOf() {
   return state.swings;
 }
 
-function supports(view, x, y, plotW, n, range) {
+function supports(view, x, y, plotW, n, range, p) {
   ctx.save();
   ctx.lineWidth = 1;
   for (const l of levelsOf()) {
@@ -714,7 +721,7 @@ function supports(view, x, y, plotW, n, range) {
     if (at >= n) continue;
     const left = x(at) - 0.5;
     const width = AXIS.left + plotW - left;
-    band(ctx, l, left, width, y);
+    band(ctx, l, left, width, y, p);
   }
   ctx.restore();
 }
@@ -728,22 +735,28 @@ function supports(view, x, y, plotW, n, range) {
  * instead would be a picture of something the code never reasons about, and
  * it would read as "price stopped here, to the pip", which is not what a
  * swing high says.
+ *
+ * Grey, both kinds: red and green on this chart are target and stop, down
+ * and up, and a level is neither. A resistance is a dashed line through its
+ * band, a support a dotted one.
  */
-function band(context, l, left, width, y) {
+function band(context, l, left, width, y, p) {
   const top = y(l.price + l.near), bottom = y(l.price - l.near);
-  context.fillStyle = l.up ? 'rgba(226,85,90,.13)' : 'rgba(63,182,139,.13)';
+  context.fillStyle = context.strokeStyle = p.text3;
+  context.globalAlpha = 0.13;
   context.fillRect(left, top, width, Math.max(1, bottom - top));
-  context.strokeStyle = l.up ? 'rgba(226,85,90,.75)' : 'rgba(63,182,139,.75)';
-  context.setLineDash([3, 3]);
+  context.globalAlpha = 0.75;
+  context.setLineDash(l.up ? [6, 4] : [2, 3]);
   const py = Math.round(y(l.price)) + 0.5;
   context.beginPath();
   context.moveTo(left, py);
   context.lineTo(left + width, py);
   context.stroke();
   context.setLineDash([]);
+  context.globalAlpha = 1;
 }
 
-function candles(view, x, y, bodyW, zoomed) {
+function candles(view, x, y, bodyW, zoomed, p) {
   for (let i = 0; i < view.candles.length; i++) {
     const c = view.candles[i];
     const [, o, h, l, close, askH, askL, bidH, bidL] = c;
@@ -755,15 +768,17 @@ function candles(view, x, y, bodyW, zoomed) {
     // touched on the ask, its stop and target on the bid - so this is where
     // "the bar reached the level" can be checked rather than taken on trust.
     if (zoomed) {
-      ctx.strokeStyle = 'rgba(139,149,166,.45)';
+      ctx.strokeStyle = p.text3;
+      ctx.globalAlpha = 0.45;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(cx, y(askH));
       ctx.lineTo(cx, y(bidL));
       ctx.stroke();
+      ctx.globalAlpha = 1;
     }
 
-    ctx.strokeStyle = ctx.fillStyle = up ? '#3fb68b' : '#e2555a';
+    ctx.strokeStyle = ctx.fillStyle = up ? p.up : p.down;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(Math.round(cx) + 0.5, y(h));
@@ -787,7 +802,7 @@ function candles(view, x, y, bodyW, zoomed) {
  * filled days after the decision was made, and the candles worth looking at
  * are the ones up to the decision.
  */
-function setupBox(trade, view, x, y, n, step) {
+function setupBox(trade, view, x, y, n, step, p) {
   const wide = state.data.setupBars;
   if (!wide) return;
   const at = trade.signalIndex;
@@ -814,7 +829,8 @@ function setupBox(trade, view, x, y, n, step) {
   const pad = 4;
 
   ctx.save();
-  ctx.strokeStyle = 'rgba(230,237,243,.6)';
+  ctx.strokeStyle = p.text;
+  ctx.globalAlpha = 0.6;
   ctx.setLineDash([4, 3]);
   ctx.lineWidth = 1;
   ctx.strokeRect(Math.round(left) + 0.5, Math.round(top - pad) + 0.5,
@@ -822,18 +838,19 @@ function setupBox(trade, view, x, y, n, step) {
   ctx.restore();
 }
 
-function overlay(trade, view, x, y, plotW, n, step) {
+function overlay(trade, view, x, y, plotW, n, step, p) {
   // The levels asked for are labelled on the right, the prices actually got
   // on the left. A trade that closed at its target has an exit and a target
   // at the same price, and two labels on the same side would sit on top of
   // each other - which is exactly the case worth being able to read.
-  const line = (value, colour, dash, label, side) => {
+  const line = (value, colour, dash, label, side, width = 1.5, alpha = 1) => {
     if (value === null || value === undefined) return;
     const py = Math.round(y(value)) + 0.5;
     ctx.save();
     ctx.setLineDash(dash);
     ctx.strokeStyle = colour;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = width;
+    ctx.globalAlpha = alpha;
     ctx.beginPath();
     ctx.moveTo(AXIS.left, py);
     ctx.lineTo(AXIS.left + plotW, py);
@@ -841,7 +858,7 @@ function overlay(trade, view, x, y, plotW, n, step) {
     ctx.restore();
 
     ctx.fillStyle = colour;
-    ctx.font = '11px ui-monospace, Menlo, Consolas, monospace';
+    ctx.font = '11px ' + p.mono;
     ctx.textBaseline = 'bottom';
     if (side === 'right') {
       ctx.textAlign = 'right';
@@ -852,29 +869,31 @@ function overlay(trade, view, x, y, plotW, n, step) {
     }
   };
 
-  line(trade.takeProfit, '#3fb68b', [5, 4], 'target', 'right');
-  line(trade.stopLoss, '#e2555a', [5, 4], 'stop', 'right');
+  line(trade.takeProfit, p.up, [5, 4], 'target', 'right');
+  line(trade.stopLoss, p.down, [5, 4], 'stop', 'right');
   // Where a walking stop ended up, drawn only when it is not where it was
   // ordered. Usually it is also the exit - but not when the bar gapped
   // through it, and that is the case worth being able to see: the fill is
   // past the level, never short of it.
   if (trade.stopFinal !== null && trade.stopFinal !== undefined
       && trade.stopFinal !== trade.stopLoss) {
-    line(trade.stopFinal, '#ff9f45', [2, 3], 'stop moved to', 'right');
+    line(trade.stopFinal, p.trail, [2, 3], 'stop moved to', 'right');
   }
-  line(trade.entryPrice, '#58a6ff', [], 'entry', 'left');
-  line(trade.exitPrice, '#c8a2ff', [], 'exit', 'left');
+  line(trade.entryPrice, p.entry, [], 'entry', 'left');
+  // thinner and faded: the exit is the text colour, and at full strength it
+  // would be the loudest line on the chart
+  line(trade.exitPrice, p.exit, [], 'exit', 'left', 1, 0.55);
 
-  const marker = (index, value, colour) => {
+  // The entry a triangle pointing the way the trade was taken, the exit a
+  // square: told apart by shape, since the exit has no colour of its own.
+  // Each is ringed in the panel's colour so it stands off the candle under it,
+  // and drawn over its guide line rather than crossed by it.
+  const marker = (index, value, colour, shape) => {
     if (index === null || index === undefined || value === null) return;
     const i = index - view.from;
     if (i < 0 || i >= n) return;
     const cx = x(i);
     const cy = y(value);
-    ctx.fillStyle = colour;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
-    ctx.fill();
     ctx.strokeStyle = colour;
     ctx.globalAlpha = 0.5;
     ctx.beginPath();
@@ -882,12 +901,32 @@ function overlay(trade, view, x, y, plotW, n, step) {
     ctx.lineTo(Math.round(cx) + 0.5, AXIS.top + (canvas.clientHeight - AXIS.top - AXIS.bottom));
     ctx.stroke();
     ctx.globalAlpha = 1;
+
+    ctx.save();
+    ctx.beginPath();
+    if (shape === 'square') ctx.rect(cx - 4, cy - 4, 8, 8);
+    else {
+      const tip = shape === 'up' ? -5 : 5;
+      ctx.moveTo(cx, cy + tip);
+      ctx.lineTo(cx - 5, cy - tip);
+      ctx.lineTo(cx + 5, cy - tip);
+      ctx.closePath();
+    }
+    // twice the ring's width, half of it then covered by the fill
+    ctx.strokeStyle = p.panel;
+    ctx.lineWidth = 4;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    ctx.fillStyle = colour;
+    ctx.fill();
+    ctx.restore();
   };
-  marker(tradeBar(trade, 'entry'), trade.entryPrice, '#58a6ff');
-  marker(tradeBar(trade, 'exit'), trade.exitPrice, '#c8a2ff');
+  marker(tradeBar(trade, 'entry'), trade.entryPrice, p.entry,
+         trade.direction === 'long' ? 'up' : 'down');
+  marker(tradeBar(trade, 'exit'), trade.exitPrice, p.exit, 'square');
 
   // Entry to exit, so the trade is one movement across the chart rather than
-  // two dots the eye has to join. Green or red by what it made, because the
+  // two marks the eye has to join. Green or red by what it made, because the
   // slope does not say on its own: a short that fell is an arrow pointing
   // down and a trade that won.
   const a = tradeBar(trade, 'entry') - view.from,
@@ -898,7 +937,7 @@ function overlay(trade, view, x, y, plotW, n, step) {
   const toX = x(b), toY = y(trade.exitPrice);
   ctx.save();
   ctx.strokeStyle = ctx.fillStyle =
-    trade.pl > 0 ? '#3fb68b' : trade.pl < 0 ? '#e2555a' : '#8b95a6';
+    trade.pl > 0 ? p.up : trade.pl < 0 ? p.down : p.text3;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(fromX, fromY);
@@ -926,7 +965,7 @@ function overlay(trade, view, x, y, plotW, n, step) {
  * a third of a pixel per bar, so the arrows shrink to marks rather than
  * disappearing, and the selected one stays the largest of them.
  */
-function arrows(view, x, y, step) {
+function arrows(view, x, y, step, p) {
   const trades = state.data.trades;
   const room = step >= 4;
   for (let i = 0; i < trades.length; i++) {
@@ -949,19 +988,19 @@ function arrows(view, x, y, step) {
     ctx.lineTo(cx - size * 0.45, base);
     ctx.lineTo(cx + size * 0.45, base);
     ctx.closePath();
-    ctx.fillStyle = long ? '#58a6ff' : '#e8a33d';
+    ctx.fillStyle = long ? p.up : p.down;
     ctx.fill();
     if (i === state.selected) {
-      ctx.strokeStyle = '#e6edf3';
+      ctx.strokeStyle = p.text;
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
   }
 }
 
-function times(view, x, height, n, step) {
-  ctx.fillStyle = '#8b95a6';
-  ctx.font = '11px ui-monospace, Menlo, Consolas, monospace';
+function times(view, x, height, n, step, p) {
+  ctx.fillStyle = p.text3;
+  ctx.font = '11px ' + p.mono;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   const wanted = Math.max(2, Math.floor((canvas.clientWidth - AXIS.left) / 120));
@@ -1029,6 +1068,7 @@ function amountDecimals(span) {
 }
 
 function drawEquity() {
+  const p = palette();
   const panel = $('equity-panel');
   const points = equityPoints();
   panel.hidden = points.length < 2;
@@ -1053,25 +1093,25 @@ function drawEquity() {
   const x = (i) => EQ_AXIS.left + (i + 0.5) * step;
   const y = (v) => EQ_AXIS.top + (high - v) / (high - low) * plotH;
 
-  ectx.font = '11px ui-monospace, Menlo, Consolas, monospace';
+  ectx.font = '11px ' + p.mono;
   ectx.textAlign = 'right';
   ectx.textBaseline = 'middle';
   ectx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
     const v = low + (high - low) * (i / 4);
     const py = Math.round(y(v)) + 0.5;
-    ectx.strokeStyle = '#232932';
+    ectx.strokeStyle = p.grid;
     ectx.beginPath();
     ectx.moveTo(EQ_AXIS.left, py);
     ectx.lineTo(width - EQ_AXIS.right, py);
     ectx.stroke();
-    ectx.fillStyle = '#8b95a6';
+    ectx.fillStyle = p.text3;
     ectx.fillText(amount(v, decimals), EQ_AXIS.left - 8, py);
   }
 
   // where it started, so profit and loss are read against a line rather than
   // against the axis labels
-  ectx.strokeStyle = '#8b95a6';
+  ectx.strokeStyle = p.text3;
   ectx.setLineDash([4, 4]);
   ectx.beginPath();
   ectx.moveTo(EQ_AXIS.left, Math.round(y(start)) + 0.5);
@@ -1082,7 +1122,7 @@ function drawEquity() {
   // A step, not a slope: the realised balance does not drift between closes,
   // it sits still and then jumps. Drawing it as a slope would invent a
   // reading for every bar in between.
-  ectx.strokeStyle = last >= start ? '#3fb68b' : '#e2555a';
+  ectx.strokeStyle = last >= start ? p.up : p.down;
   ectx.lineWidth = 1.5;
   ectx.beginPath();
   ectx.moveTo(x(points[0][0]), y(points[0][1]));
@@ -1102,8 +1142,8 @@ function drawEquity() {
   const trade = state.selected === null ? null : state.data.trades[state.selected];
   if (trade && trade.entryIndex !== null && trade.entryIndex !== undefined) {
     let level = points[0][1];
-    for (const p of points) if (p[0] <= trade.entryIndex) level = p[1];
-    ectx.fillStyle = '#58a6ff';
+    for (const point of points) if (point[0] <= trade.entryIndex) level = point[1];
+    ectx.fillStyle = p.entry;
     ectx.beginPath();
     ectx.arc(x(trade.entryIndex), y(level), 3.5, 0, Math.PI * 2);
     ectx.fill();
@@ -1144,6 +1184,7 @@ function drawEquity() {
  * of what is visible and not of the whole run, for the same reason.
  */
 function drawPanel() {
+  const p = palette();
   const section = $('curve-panel');
   const lines = panelSeries();
   section.hidden = !state.data || !state.data.candles.length || !lines.length;
@@ -1174,7 +1215,7 @@ function drawPanel() {
   const x = (i) => PN_AXIS.left + (i + 0.5) * step;
   const y = (v) => PN_AXIS.top + (high - v) / (high - low) * plotH;
 
-  pctx.font = '11px ui-monospace, Menlo, Consolas, monospace';
+  pctx.font = '11px ' + p.mono;
   pctx.textBaseline = 'middle';
   pctx.textAlign = 'right';
   pctx.lineWidth = 1;
@@ -1182,18 +1223,19 @@ function drawPanel() {
   // number at the top, and a grid of five would be most of its height
   for (const v of [high, low]) {
     const py = Math.round(y(v)) + 0.5;
-    pctx.strokeStyle = '#232932';
+    pctx.strokeStyle = p.grid;
     pctx.beginPath();
     pctx.moveTo(PN_AXIS.left, py);
     pctx.lineTo(PN_AXIS.left + plotW, py);
     pctx.stroke();
-    pctx.fillStyle = '#8b95a6';
+    pctx.fillStyle = p.text3;
     pctx.fillText(price(v), PN_AXIS.left - 8, py);
   }
 
   for (const line of lines) {
-    pctx.strokeStyle = line.colour;
+    pctx.strokeStyle = p.text3;
     pctx.lineWidth = 1.25;
+    pctx.setLineDash(line.dash);
     pctx.beginPath();
     let drawing = false;
     for (let i = view.from; i <= view.to; i++) {
@@ -1206,6 +1248,7 @@ function drawPanel() {
     }
     pctx.stroke();
   }
+  pctx.setLineDash([]);
 
   const last = lines[0].values[runIndex(view.to)];
   $('curve-note').textContent = lines.map((l) => l.label).join(', ')
@@ -1213,6 +1256,7 @@ function drawPanel() {
 }
 
 function drawLevels() {
+  const p = palette();
   const panel = $('levels-panel');
   const list = levelsOf();
   panel.hidden = !state.data || !list.length;
@@ -1233,25 +1277,25 @@ function drawLevels() {
   const x = (i) => LV_AXIS.left + (i + 0.5) * step;
   const y = (p) => LV_AXIS.top + (high - p) / (high - low) * plotH;
 
-  lctx.font = '11px ui-monospace, Menlo, Consolas, monospace';
+  lctx.font = '11px ' + p.mono;
   lctx.textBaseline = 'middle';
   lctx.lineWidth = 1;
   lctx.textAlign = 'right';
   for (let i = 0; i <= 4; i++) {
     const v = low + (high - low) * (i / 4);
     const py = Math.round(y(v)) + 0.5;
-    lctx.strokeStyle = '#232932';
+    lctx.strokeStyle = p.grid;
     lctx.beginPath();
     lctx.moveTo(LV_AXIS.left, py);
     lctx.lineTo(LV_AXIS.left + plotW, py);
     lctx.stroke();
-    lctx.fillStyle = '#8b95a6';
+    lctx.fillStyle = p.text3;
     lctx.fillText(price(v), LV_AXIS.left - 8, py);
   }
 
   // the closes, thin and grey: a level means nothing without the price that
   // made it, and a line is all the context this panel needs
-  lctx.strokeStyle = '#4a545f';
+  lctx.strokeStyle = p.border;
   lctx.beginPath();
   for (let i = 0; i < bars.length; i++) {
     const py = y(bars[i][4]);
@@ -1261,8 +1305,9 @@ function drawLevels() {
 
   for (const l of list) {
     const left = x(l.at);
-    band(lctx, l, left, LV_AXIS.left + plotW - left, y);
-    lctx.fillStyle = l.up ? '#e2555a' : '#3fb68b';
+    band(lctx, l, left, LV_AXIS.left + plotW - left, y, p);
+    // the label beside the band's own dash, which already says which kind it is
+    lctx.fillStyle = p.text3;
     lctx.textAlign = 'left';
     lctx.fillText(`${price(l.price)} \u00d7${l.touches}`,
                   LV_AXIS.left + plotW + 6, Math.round(y(l.price)) + 0.5);
@@ -1467,9 +1512,9 @@ function renderCurves() {
   box.hidden = !list.length;
   list.forEach((curve, i) => {
     const tag = document.createElement('span');
-    tag.className = 'k curve';
-    tag.style.color = CURVE_COLOURS[i % CURVE_COLOURS.length];
-    tag.textContent = curve.label;
+    tag.className = 'k series';
+    tag.innerHTML = dashSample(DASHES[i % DASHES.length]);
+    tag.append(curve.label);
     box.appendChild(tag);
   });
 }
@@ -1513,6 +1558,14 @@ function renderReport() {
     stat('run of losses', String(r.maxConsecutiveLosses)),
     ...heldStats(),
   );
+  // what the account needed on margin, and whether it always had room (report.margin)
+  const m = state.data.margin;
+  if (m) {
+    const box = stat(`margin ${m.leverage}:1`, `${m.ok ? '\u2713' : '\u2717'} peak ${m.peakMarginPct.toFixed(1)}%`,
+                     m.ok ? '' : 'bad');
+    box.title = marginText(m);
+    report.append(box);
+  }
 
   const counts = $('counts');
   counts.textContent = '';

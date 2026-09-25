@@ -456,6 +456,43 @@ class LoadStrategyTest(unittest.TestCase):
             ledger_module.load_strategy('nope')
 
 
+class MarginTest(unittest.TestCase):
+    """report.margin and report.together: an account on margin."""
+
+    LONG = {'entryTime': 1, 'exitTime': 3, 'units': 100000, 'entryPrice': 1.1,
+            'stopLoss': 1.09, 'pl': 50.0}
+    SHORT = {'entryTime': 2, 'exitTime': 4, 'units': -50000, 'entryPrice': 1.2,
+             'stopLoss': 1.21, 'pl': -30.0}
+
+    def test_the_open_positions_hold_their_margin_and_their_stops(self):
+        m = report_module.margin([self.LONG, self.SHORT], 10000.0, 30)
+        # 100000 x 1.1 / 30 and 50000 x 1.2 / 30, both open at 2
+        self.assertAlmostEqual(m['peakMargin'], 110000 / 30 + 2000)
+        # less what both lose at their stops, 1000 and 500
+        self.assertAlmostEqual(m['minFree'], 10000 - 1500 - (110000 / 30 + 2000))
+        self.assertEqual((m['minFreeAt'], m['maxOpen'], m['ok']), (2, 2, True))
+
+    def test_too_little_leverage_is_out_of_margin(self):
+        m = report_module.margin([self.LONG], 10000.0, 5)
+        self.assertEqual((m['breachAt'], m['ok']), (1, False))
+        # and a run out of margin scores nothing
+        kpi = report_module.kpis([], 10000.0, datetime.datetime(2020, 1, 1),
+                                 datetime.datetime(2020, 2, 1),
+                                 {'closedTrades': 50, 'margin': m})
+        self.assertEqual(kpi['score'], 0.0)
+
+    def test_together_resizes_on_the_shared_balance_and_refuses_what_does_not_fit(self):
+        sized = {'trades': [{'entryTime': 1, 'exitTime': 3, 'units': 1000, 'entryPrice': 1.0,
+                             'stopLoss': 0.99, 'pl': 10.0}], 'start': 1000.0, 'scaled': True}
+        big = {'trades': [{'entryTime': 2, 'exitTime': 4, 'units': 1000000, 'entryPrice': 1.0,
+                           'stopLoss': 0.99, 'pl': 99.0}], 'start': 1000.0, 'scaled': False}
+        got = report_module.together([sized, big], 2000.0, 30)
+        # twice the run's capital, twice its units and its profit
+        self.assertEqual(got['curve'], [[3, 2020.0]])
+        self.assertEqual((got['taken'], got['refused']), ([1, 0], [0, 1]))
+        self.assertTrue(got['margin']['ok'])
+
+
 class ReportTest(unittest.TestCase):
 
     def trades(self, *pls):
@@ -1401,7 +1438,7 @@ class FavouritesTest(StoreCase):
         with self.assertRaises(ServiceError):
             self.service.addFavourite({'kind': 'run', 'id': '../etc'})
 
-    def test_a_mix_adds_its_runs_capitals_up_in_time(self):
+    def test_a_mix_adds_its_runs_profits_up_on_one_capital(self):
         day = lambda d: millis(T0 + datetime.timedelta(days=d))
         for sweep, curve in (('20260924-120000-aaaaaa', [[day(1), 1010.0], [day(3), 1005.0]]),
                              # two closes on one bar, the loss after the win: their order stays
@@ -1412,23 +1449,43 @@ class FavouritesTest(StoreCase):
         mix = self.service.saveMix({'name': 'due', 'items': [
             {'sweep': '20260924-120000-aaaaaa', 'n': 1},
             {'sweep': '20260924-120000-bbbbbb', 'n': 1}]})
-        total = self.service.mix(mix['id'])['total']
-        # each on its own 1000, the mix their sum at every close of either
-        self.assertEqual(total['curve'], [[day(1), 2010.0], [day(2), 2030.0], [day(2), 2000.0],
-                                          [day(3), 1995.0]])
+        drawn = self.service.mix(mix['id'])
+        total = drawn['total']
+        # each run's profit on the one account of EQUITY, at every close of either
+        self.assertEqual(total['curve'], [[day(1), 100010.0], [day(2), 100030.0],
+                                          [day(2), 100000.0], [day(3), 99995.0]])
         self.assertEqual((total['start'], total['final'], total['net'], total['trades']),
-                         (2000.0, 1995.0, -5.0, 4))
+                         (100000.0, 99995.0, -5.0, 4))
         self.assertEqual((total['wins'], total['losses']), (2, 2))
         self.assertEqual(total['maxDrawdown'], 35.0)
         self.assertAlmostEqual(total['profitFactor'], 30 / 35)
-        self.assertAlmostEqual(total['kpi']['roi'], -0.25)
+        self.assertAlmostEqual(total['kpi']['roi'], -0.005)
+        # no saved trades yet: no margin, and which runs lack them is said
+        self.assertIsNone(total['margin'])
+        self.assertEqual(len(drawn['missing']), 2)
+        self.assertEqual([r['net'] for r in drawn['analysis']['runs']], [5.0, -10.0])
+        self.assertEqual(drawn['analysis']['currencies'], ['USD'])
+        # with them, the account's margin over both, and the mix together
+        for sweep, legs in (('20260924-120000-aaaaaa', [(0, 1, 10.0), (2, 3, -5.0)]),
+                            ('20260924-120000-bbbbbb', [(1, 2, 20.0), (1, 2, -30.0)])):
+            self.service.saveSweepRun(sweep, 1, {'trades': [
+                {'entryTime': day(a), 'exitTime': day(b), 'units': 1000, 'entryPrice': 1.0,
+                 'stopLoss': 0.99, 'pl': pl} for a, b, pl in legs]})
+        margin = self.service.mix(mix['id'])['total']['margin']
+        self.assertTrue(margin['ok'])
+        # a close frees its margin before the entries of its moment: two at most
+        self.assertEqual(margin['maxOpen'], 2)
+        together = self.service.startTogether(mix['id'])
+        self.assertFalse(together['running'])
+        self.assertEqual((together['result']['total']['trades'], together['result']['refused']),
+                         (4, 0))
         with self.assertRaises(ServiceError):
             self.service.saveMix({'items': [{'sweep': '20260924-120000-aaaaaa', 'n': 9}]})
         # a set deleted since is said, and the rest still adds up
         self.service.deleteSweep('20260924-120000-bbbbbb')
         drawn = self.service.mix(mix['id'])
         self.assertIn('error', drawn['runs'][1])
-        self.assertEqual(drawn['total']['final'], 1005.0)
+        self.assertEqual(drawn['total']['final'], 100005.0)
         self.service.dropMix(mix['id'])
         self.assertEqual(self.service.mixes(), [])
         with self.assertRaises(ServiceError):
@@ -1461,7 +1518,8 @@ class FavouritesTest(StoreCase):
             sweep = self.saveASweep()
             self.assertEqual(call('/api/mixes'), {'mixes': []})
             kept = call('/api/mixes', {'name': 'm', 'items': [{'sweep': sweep, 'n': 1}]})
-            self.assertEqual(call('/api/mixes/' + kept['mix']['id'])['total']['start'], 1000.0)
+            self.assertEqual(call('/api/mixes/' + kept['mix']['id'])['total']['start'], 100000.0)
+            self.assertEqual(call('/api/mixes/together'), {'running': False})
             self.assertEqual(call('/api/mixes/' + kept['mix']['id'], {'delete': True}),
                              {'mixes': []})
         finally:
@@ -1919,6 +1977,16 @@ class HTTPTest(HTTPCase):
             self.assertEqual(status, 200)
             self.assertIn(kind, headers['Content-Type'])
 
+    def test_the_fonts_logo_and_icons_are_served(self):
+        # web/DESIGN.md: no CDN, so the page's fonts and pictures come from
+        # web/static like its script does, each with its own type
+        for path, kind in (('/static/IBMPlexSans-Regular.woff2', 'font/woff2'),
+                           ('/static/logo-chiaro.svg', 'image/svg+xml'),
+                           ('/static/favicon-32.png', 'image/png')):
+            status, _body, headers = self.get(path)
+            self.assertEqual(status, 200, path)
+            self.assertEqual(headers['Content-Type'], kind, path)
+
     def test_the_busy_route(self):
         # what the menu lights up: nothing, in a service that runs nothing
         status, payload = self.json('/api/busy')
@@ -2101,8 +2169,18 @@ class HTTPTest(HTTPCase):
             status, _body, _headers = self.get(path)
             self.assertIn(status, (400, 404), path)
 
-    def test_only_the_three_asset_types_are_served(self):
-        status, _body, _headers = self.get('/static/__init__.py')
+    def test_only_the_six_asset_types_are_served(self):
+        # Was: only the three asset types, and __init__.py was the case.
+        # Now: six types, and the fonts' licence - a file that is there, next
+        # to them - is refused like the source is.
+        for path in ('/static/__init__.py', '/static/OFL-IBM-Plex.txt'):
+            status, _body, _headers = self.get(path)
+            self.assertEqual(status, 404, path)
+
+    def test_the_static_handler_serves_no_subdirectory(self):
+        # the fonts sit flat in web/static: a folder of them is not served,
+        # however right its extension
+        status, _body, _headers = self.get('/static/fonts/IBMPlexSans-Regular.woff2')
         self.assertEqual(status, 404)
 
 

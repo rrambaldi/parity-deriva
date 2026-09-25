@@ -1,0 +1,143 @@
+/*
+ * parity-deriva — token di design dell'applicativo.
+ *
+ * Tema: segue il sistema operativo. Un interruttore lo forza scrivendo
+ * data-theme="light" o data-theme="dark" su <html>; togliendo l'attributo si
+ * torna al sistema. Regole d'uso di ogni colore in web/DESIGN.md.
+ *
+ * Ogni colore ha un solo compito. L'ocra è del marchio e dell'azione
+ * principale e non entra mai in grafici, tabelle o stati.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* marchio: uguale nei due temi */
+  --brand-ochre: #C98A45;
+  --brand-ink: #152C3A;
+  --brand-ivory: #F4EFE4;
+  --brand-night: #0B1A26;
+
+  /* tipografia */
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-label: 11px;   /* etichette maiuscole, intestazioni di tabella */
+  --fs-small: 12px;   /* note, legenda, assi */
+  --fs-body: 13px;    /* testo, celle, campi */
+  --fs-title: 15px;   /* titoli di pannello, nome pagina */
+  --fs-stat: 17px;    /* valori secondari */
+  --fs-kpi: 22px;     /* valori principali */
+  --lh: 1.45;
+  --tracking-label: 0.06em;
+
+  /* spazi e forme */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --gutter: 28px;
+  --radius-s: 6px;    /* campi, pulsanti */
+  --radius-m: 10px;   /* pannelli */
+  --radius-l: 14px;
+  --radius-pill: 999px;
+  --control-h: 34px;
+
+  /* riservati: uguali nei due temi */
+  --live: #C9423A;     /* badge LIVE, solo quello */
+  --on-live: #FFFFFF;  /* 4.86:1 */
+}
+
+/* ---- tema chiaro (predefinito se il sistema non chiede lo scuro) ---- */
+:root,
+:root[data-theme="light"] {
+  --bg: #F6F3EC;
+  --panel: #FFFFFF;
+  --raised: #FBF9F5;
+  --line: #E3DED3;       /* separatori */
+  --border: #7D8E99;     /* bordi dei campi, 3.4:1 su panel */
+  --grid: #EEEAE2;       /* griglia dei grafici */
+
+  --text: #152C3A;       /* 14.5:1 su panel */
+  --text-2: #4A5B67;     /* 7.0:1 */
+  --text-3: #5E6E78;     /* 5.3:1 — etichette, note, assi */
+
+  --accent: #C98A45;     /* riempimento del pulsante principale */
+  --on-accent: #152C3A;  /* testo sul pulsante, 4.96:1 */
+  --accent-text: #9A5F22;/* ocra come testo (link, ghost), 5.2:1 */
+  --focus: #A8702F;      /* anello di focus, 4.2:1 */
+
+  --entry: #2A74C7;      /* entry, selezione riga↔grafico, info, practice */
+  --up: #15855F;         /* long, target, guadagno, candela su */
+  --down: #C9423A;       /* short, stop, perdita, candela giù, errori */
+  --mark-exit: var(--text);
+  --mark-trail: var(--text-3);
+
+  --row-selected: #EAF1FA;
+  --info-bg: #EAF1FA;
+  --error-bg: #FBEAE8;
+  --trade-span: rgba(42, 116, 199, 0.07);
+}
+
+/* ---- tema scuro dal sistema ---- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0B1A26;
+    --panel: #102433;
+    --raised: #16304A;
+    --line: #22394B;
+    --border: #52708A;   /* 3.1:1 su panel */
+    --grid: #1A3244;
+
+    --text: #F4EFE4;     /* 13.9:1 */
+    --text-2: #B3BFC7;   /* 8.5:1 */
+    --text-3: #8E9CA6;   /* 5.6:1 */
+
+    --accent: #C98A45;
+    --on-accent: #0B1A26;   /* 6.05:1 */
+    --accent-text: #E7A45E; /* 7.5:1 */
+    --focus: #C98A45;       /* 5.5:1 */
+
+    --entry: #3F8FDB;    /* 4.7:1 */
+    --up: #26A37A;       /* 5.0:1 */
+    --down: #E5655C;     /* 4.8:1 */
+    --mark-exit: var(--text);
+    --mark-trail: var(--text-3);
+
+    --row-selected: #173049;
+    --info-bg: #12304A;
+    --error-bg: #3A1F24;
+    --trade-span: rgba(63, 143, 219, 0.09);
+  }
+}
+
+/* ---- tema scuro forzato dall'interruttore (vince sul sistema) ---- */
+:root[data-theme="dark"] {
+  --bg: #0B1A26;
+  --panel: #102433;
+  --raised: #16304A;
+  --line: #22394B;
+  --border: #52708A;
+  --grid: #1A3244;
+
+  --text: #F4EFE4;
+  --text-2: #B3BFC7;
+  --text-3: #8E9CA6;
+
+  --accent: #C98A45;
+  --on-accent: #0B1A26;
+  --accent-text: #E7A45E;
+  --focus: #C98A45;
+
+  --entry: #3F8FDB;
+  --up: #26A37A;
+  --down: #E5655C;
+  --mark-exit: var(--text);
+  --mark-trail: var(--text-3);
+
+  --row-selected: #173049;
+  --info-bg: #12304A;
+  --error-bg: #3A1F24;
+  --trade-span: rgba(63, 143, 219, 0.09);
+}

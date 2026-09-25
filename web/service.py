@@ -164,12 +164,18 @@ LOGGER = 'parity_deriva.web'
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
 
 #: extensions the static handler will serve, and as what. A map rather than
-#: mimetypes.guess_type: this directory holds three files, and a handler that
-#: will serve anything is a handler that will serve whatever ends up here.
+#: mimetypes.guess_type: a handler that will serve anything is a handler that
+#: will serve whatever ends up here.
+#: Was: three - the page, its style, its script. Now: six - the fonts, the logo
+#: and the icons of web/DESIGN.md are served from here too, since nothing comes
+#: from a CDN. Still no .txt: the fonts' licence sits next to them unserved.
 CONTENT_TYPES = {
 	'.html': 'text/html; charset=utf-8',
 	'.css': 'text/css; charset=utf-8',
 	'.js': 'application/javascript; charset=utf-8',
+	'.woff2': 'font/woff2',
+	'.svg': 'image/svg+xml',
+	'.png': 'image/png',
 }
 
 #: the one origin allowed to push to this service, and the one route it may
@@ -817,7 +823,9 @@ class Service(object):
 		if not re.fullmatch(r'[0-9a-f]{16}', str(mix_id)):
 			raise ServiceError("no such mix")
 		entry = {'id': mix_id, 'name': (mix.get('name') or '').strip()[:120],
-				 'saved': int(time.time() * 1000), 'items': items}
+				 'saved': int(time.time() * 1000), 'items': items,
+				 # the account's n:1, None the setting's (report.margin)
+				 'leverage': parseLeverage(_text(mix.get('leverage')))}
 		with self._jobLock:
 			self._writeMixes([r for r in self.mixes() if r.get('id') != mix_id] + [entry])
 		return entry
@@ -828,9 +836,11 @@ class Service(object):
 
 	def mix(self, mix):
 		"""
-		A mix drawn: each run's capital curve, and theirs added up on one
-		time axis - every run on its own account, the mix their sum. Before a
-		run starts it counts its opening capital, after it ends its last.
+		A mix drawn: each run's capital curve, and their profits added up on
+		one account of the default capital (setup.EQUITY) - not their
+		capitals added up. Before a run starts it has made nothing, after it
+		ends its last. The account's margin (report.margin) is checked on
+		every run's trades at once, at the mix's leverage.
 
 		The trade figures of the whole are read off the curves' steps, which
 		are money: a report's own are price x units, and those of two
@@ -839,6 +849,7 @@ class Service(object):
 		saved = next((m for m in self.mixes() if m.get('id') == mix), None)
 		if saved is None:
 			raise ServiceError("no such mix")
+		leverage = saved.get('leverage') or self.leverage()
 		runs, jobs = [], {}
 		for item in saved['items']:
 			try:
@@ -853,13 +864,15 @@ class Service(object):
 			row = next(r for r in job['done'] if r.get('n') == item['n'])
 			runs.append(dict(item, name=name, fields=fields, summary=summary,
 							 params=row.get('params'), varied=job.get('varied'),
+							 margin=row.get('margin'),
 							 # by time alone: two trades closing on one bar keep
 							 # their order, which sorting on the balance too lost
 							 curve=sorted(row.get('curve') or [], key=lambda p: p[0])))
 		ok = [r for r in runs if not r.get('error') and r['summary']['start'] is not None]
+		out = dict(saved, leverage=leverage, runs=runs, total=None, missing=[])
 		if not ok:
-			return dict(saved, runs=runs, total=None)
-		start = sum(r['summary']['start'] for r in ok)
+			return out
+		start = float(self.setup.EQUITY)
 		now = [r['summary']['start'] for r in ok]
 		curve, steps, total = [], [], start
 		for t, k, balance in sorted(((t, k, b) for k, r in enumerate(ok) for t, b in r['curve']),
@@ -868,25 +881,153 @@ class Service(object):
 			total += balance - now[k]
 			now[k] = balance
 			curve.append([t, total])
+		trades = [self.sweepTrades(r['sweep'], r['n']) for r in ok]
+		out['missing'] = [{'sweep': r['sweep'], 'n': r['n']} for r, t in zip(ok, trades) if t is None]
+		margin = None if out['missing'] else report_module.margin(
+			[t for some in trades for t in some], start, leverage)
+		out['total'] = self._whole(curve, steps, start,
+								   min(r['summary']['from'] for r in ok),
+								   max(r['summary']['to'] for r in ok), margin)
+		out['analysis'] = self._mixAnalysis(
+			ok, out['total'], [(r['curve'], r['summary']['start']) for r in ok])
+		return out
+
+	def _whole(self, curve, steps, start, dtfrom, dtto, margin):
+		"""The figures of a mix's account, from its curve and the money of each close."""
 		wins = [s for s in steps if s > 0]
 		losses = [-s for s in steps if s < 0]
 		summary = {'winRate': len(wins) / len(steps) if steps else None,
 				   'profitFactor': sum(wins) / sum(losses) if losses else None,
 				   'expectancy': sum(steps) / len(steps) if steps else None,
 				   'averageWin': sum(wins) / len(wins) if wins else None,
-				   'averageLoss': sum(losses) / len(losses) if losses else None}
-		dtfrom = min(r['summary']['from'] for r in ok)
-		dtto = max(r['summary']['to'] for r in ok)
-		peak, worst = start, 0.0
-		for _, value in curve:
-			peak = max(peak, value)
-			worst = max(worst, peak - value)
+				   'averageLoss': sum(losses) / len(losses) if losses else None,
+				   'closedTrades': len(steps), 'margin': margin}
+		final = curve[-1][1] if curve else start
 		kpi = report_module.kpis([(moment(t), b) for t, b in curve], float(start),
 								 moment(dtfrom), moment(dtto), summary)
-		return dict(saved, runs=runs, total=dict(
-			summary, kpi=kpi, start=start, final=total, net=total - start,
-			trades=len(steps), wins=len(wins), losses=len(losses), maxDrawdown=worst,
-			curve=curve, **{'from': dtfrom, 'to': dtto}))
+		return dict(summary, kpi=kpi, start=start, final=final, net=final - start,
+					trades=len(steps), wins=len(wins), losses=len(losses),
+					maxDrawdown=report_module.drawdown([b for _, b in curve], start)[0],
+					curve=curve, **{'from': dtfrom, 'to': dtto})
+
+	def _mixAnalysis(self, runs, total, parts):
+		"""
+		The mix read as a whole: what each run made of it, how their days
+		move together, and what trading them together saved on the drawdown.
+		`parts` is each run's (curve, opening capital), in the order of `runs`.
+		"""
+		dtfrom, dtto = moment(total['from']), moment(total['to'])
+		daily = []
+		for curve, start in parts:
+			days = [b for _, b in report_module.days(
+				[(moment(t), b) for t, b in curve], start, dtfrom, dtto)]
+			daily.append([b - a for a, b in zip([start] + days, days)])
+		rows = []
+		for i, (run, (curve, start)) in enumerate(zip(runs, parts)):
+			net = (curve[-1][1] if curve else start) - start
+			rest = [sum(d[j] for k, d in enumerate(daily) if k != i) for j in range(len(daily[i]))]
+			rows.append({'sweep': run['sweep'], 'n': run['n'], 'net': net,
+						 'share': net / total['net'] * 100 if total['net'] else None,
+						 'maxDrawdown': report_module.drawdown([b for _, b in curve], start)[0],
+						 'withRest': report_module.correlation(daily[i], rest) if len(runs) > 1 else None})
+		alone = sum(r['maxDrawdown'] for r in rows)
+		# ponytail: P&L is in each instrument's quote currency and is added
+		# up as it is; convert at the day's rate if the mixes ever span them
+		currencies = sorted({(r['summary'].get('instrument') or '').rpartition('_')[2] for r in runs} - {''})
+		return {'runs': rows,
+				'matrix': [[report_module.correlation(a, b) if i != j else 1.0
+							for j, b in enumerate(daily)] for i, a in enumerate(daily)],
+				'drawdownAlone': alone,
+				'diversification': (1 - total['maxDrawdown'] / alone) * 100 if alone else None,
+				'currencies': currencies}
+
+	def sweepTrades(self, sweep, n):
+		"""
+		The trades of a saved sweep run, only what report.margin and
+		report.together read; None when the run has no file.
+		"""
+		path = self.sweepRunPath(sweep, n)
+		try:
+			stamp = os.path.getmtime(path)
+		except OSError:
+			return None
+		return _slimTrades(path, stamp)
+
+	def mixTogether(self, mix):
+		"""
+		The mix's runs traded on one account (report.together), drawn in
+		the shape mix() draws the summed one. Every run needs its trades.
+		"""
+		drawn = self.mix(mix)
+		if drawn['missing'] or not drawn['total']:
+			raise ServiceError("some runs of the mix have no saved trades")
+		ok = [r for r in drawn['runs'] if not r.get('error') and r['summary']['start'] is not None]
+		start = float(self.setup.EQUITY)
+		got = report_module.together(
+			[{'trades': self.sweepTrades(r['sweep'], r['n']), 'start': r['summary']['start'],
+			  # sized off its capital: a risk, or a plugin's engine, which sizes on its own
+			  'scaled': bool(r['fields'].get('risk'))
+						or r['fields'].get('strategy') in plugins.viewers()} for r in ok],
+			start, drawn['leverage'])
+		total = self._whole(got['curve'], got['steps'], start,
+							drawn['total']['from'], drawn['total']['to'], got['margin'])
+		parts = [{'sweep': r['sweep'], 'n': r['n'], 'curve': got['parts'][i], 'start': start,
+				  'taken': got['taken'][i], 'refused': got['refused'][i]}
+				 for i, r in enumerate(ok)]
+		analysis = self._mixAnalysis(ok, total, [(p['curve'], start) for p in parts])
+		for row, part in zip(analysis['runs'], parts):
+			row['refused'] = part['refused']
+		return {'id': mix, 'total': total, 'runs': parts, 'analysis': analysis,
+				'refused': sum(got['refused'])}
+
+	def startTogether(self, mix):
+		"""
+		Simulate the mix together: at once when every run has its trades
+		saved, else in the background, running the runs that have none
+		first (as the run page does) - togetherStatus() follows it.
+		"""
+		drawn = self.mix(mix)
+		if not drawn['missing']:
+			return {'running': False, 'mix': mix, 'result': self.mixTogether(mix)}
+		with self._jobLock:
+			if getattr(self, '_together', None) and self._together.get('running'):
+				raise ServiceError("a mix is being simulated already")
+			self._together = {'running': True, 'mix': mix, 'total': len(drawn['missing']),
+							  'done': 0, 'current': None}
+		thread = threading.Thread(target=self._runTogether,
+								  args=(self._together, drawn['missing']))
+		thread.daemon = True
+		thread.start()
+		return self.togetherStatus()
+
+	def _runTogether(self, job, missing):
+		try:
+			for item in missing:
+				job['current'] = item
+				fields, _, _ = self.simulated({'kind': 'sweep', 'id': item['sweep'], 'n': item['n']})
+				payload = self.backtest(confirmed=True,
+										**backtestArgs(lambda name: _text(fields.get(name))))
+				self.saveSweepRun(item['sweep'], item['n'], payload)
+				job['done'] += 1
+			job['result'] = self.mixTogether(job['mix'])
+		except ServiceError as exc:
+			job['error'] = str(exc)
+		except Exception as exc:
+			self.logger.exception("mix %s together failed" % job['mix'])
+			job['error'] = "%s: %s" % (type(exc).__name__, exc)
+		finally:
+			job['current'] = None
+			job['running'] = False
+
+	def togetherStatus(self):
+		"""Where simulating a mix together has got to, and its result when done."""
+		job = getattr(self, '_together', None)
+		if job is None:
+			return {'running': False}
+		out = dict(job)
+		if job.get('current'):
+			out['progress'] = self.progress()
+		return out
 
 	# -------------------------------------------------------------- the work
 
@@ -961,9 +1102,11 @@ class Service(object):
 				 maxStopPips=None, session=None, intraday=False, news=None,
 				 newsImpacts=None, maxBars=None, strategyArgs=None,
 				 slScale=None, tpScale=None, inverse=False, trailing=None,
-				 trailProfit=False, trailPips=None, cachedOnly=False, confirmed=False):
+				 trailProfit=False, trailPips=None, cachedOnly=False, confirmed=False,
+				 leverage=None):
 		"""
-		Run one backtest and return the payload the page reads. cachedOnly
+		Run one backtest and return the payload the page reads, with the
+		margin its account needed at `leverage` (withMargin). cachedOnly
 		answers from the cache or with None, and never starts a run: it is
 		what a reloaded page asks, so a refresh redraws the last run rather
 		than running it again. confirmed lifts the candle ceiling: the page
@@ -991,11 +1134,11 @@ class Service(object):
 					   news, newsImpacts, maxBars, strategyArgs, slScale, tpScale,
 				   inverse, trailing, trailProfit, trailPips)
 		if key in self._cache or cachedOnly:
-			return self._cache.get(key)
+			return self.withMargin(self._cache.get(key), leverage)
 
 		with self._lock:
 			if key in self._cache:
-				return self._cache[key]
+				return self.withMargin(self._cache[key], leverage)
 			started = time.time()
 			ahead = self.estimate(instrument, granularity, dtfrom, dtto)
 			state = {'running': True, 'instrument': instrument,
@@ -1100,8 +1243,30 @@ class Service(object):
 			payload = self.payload(result, time.time() - started,
 								   self.indicatorSpecs(strategy, params),
 								   self.setupBars(strategy))
+			payload = self.withMargin(payload, leverage)
 			self.remember(key, payload)
 			return payload
+
+	def withMargin(self, payload, leverage=None):
+		"""
+		The payload with what its account needed on margin (report.margin),
+		at `leverage` or the setting's. Not part of the cache's key, as the
+		trades do not depend on it: the cached payload is answered as it is
+		when its leverage is the one asked, a copy with its own when not.
+		"""
+		leverage = leverage or self.leverage()
+		if not payload or (payload.get('margin') or {}).get('leverage') == leverage:
+			return payload
+		trades = payload.get('trades') or []
+		start = opening(payload.get('balance'), next(
+			(t['balance'] for t in reversed(trades) if t.get('balance') is not None), None),
+			(payload.get('report') or {}).get('net'))
+		if start is None:
+			return payload
+		return dict(payload, margin=report_module.margin(trades, start, leverage))
+
+	def leverage(self):
+		return getattr(self.setup, 'LEVERAGE', None) or 30
 
 	def series(self, instrument, granularity, dtfrom=None, dtto=None):
 		"""
@@ -1366,7 +1531,9 @@ class Service(object):
 		else - no event log, no candles.
 		"""
 		sweep = getattr(self, '_sweep', None) or {}
-		return {'simulate': bool(sweep.get('running') or self._progress.get('running')),
+		together = getattr(self, '_together', None) or {}
+		return {'simulate': bool(sweep.get('running') or together.get('running')
+								 or self._progress.get('running')),
 				'live': self.live.running()}
 
 	def progress(self):
@@ -1444,7 +1611,7 @@ class Service(object):
 							   curve=[[t['exitTime'], t['balance']] for t in trades
 									  if t['exitTime'] is not None
 									  and t['balance'] is not None],
-							   elapsed=payload['elapsed'])
+							   elapsed=payload['elapsed'], margin=payload.get('margin'))
 					row['kpi'] = rowKpi(row, payload['from'], payload['to'])
 					try:
 						self.saveSweepRun(job['id'], n, payload)
@@ -1488,6 +1655,7 @@ class Service(object):
 				'granularity': fields.get('granularity'),
 				'from': fields.get('from'), 'to': fields.get('to'),
 				'runs': len(job['done']), 'total': job['total'],
+				'leverage': fields.get('leverage'),
 				'stopped': bool(job.get('cancel')), 'varied': job.get('varied'),
 				'best': top and top.get('final'),
 				'bestParams': top and top.get('params')}
@@ -1535,6 +1703,26 @@ class Service(object):
 				fields = job.get('fields') or {}
 				row['kpi'] = rowKpi(row, millis(parseDate(fields.get('from'), 'from')),
 									millis(parseDate(fields.get('to'), 'to', end=True)))
+			# and one saved before the score, the score from its KPIs
+			if row.get('kpi') and 'score' not in row['kpi']:
+				row['kpi']['score'] = report_module.score(
+					row['kpi'], (row.get('report') or {}).get('closedTrades'))
+		# a set saved before the margin check gets it from its saved runs,
+		# and keeps it; a run with no file is looked for again next time
+		late = [row for row in job['done'] if row.get('margin') is None and not row.get('error')]
+		found = False
+		leverage = parseLeverage(_text((job.get('fields') or {}).get('leverage')))
+		for row in late:
+			payload = self.withMargin(self.sweepPayload(sweep, row['n']), leverage)
+			row['margin'] = (payload or {}).get('margin')
+			found = found or row['margin'] is not None
+			if row['margin'] and not row['margin']['ok'] and row.get('kpi'):
+				row['kpi']['score'] = 0.0
+		if found:
+			try:
+				self.saveSweep(job)
+			except OSError:
+				self.logger.exception("cannot keep the margins of sweep %s" % sweep)
 		return dict(job, running=False, since=0, count=len(job['done']))
 
 	def renameSweep(self, sweep, name):
@@ -1579,12 +1767,24 @@ class Service(object):
 		return os.path.join(self.sweepPath(sweep, ''), '%d.json.gz' % int(n))
 
 	def sweepRun(self, sweep, n):
-		"""A run saved by saveSweepRun, or {'cached': False}."""
+		"""A run saved by saveSweepRun, with its margin, or {'cached': False}."""
+		payload = self.sweepPayload(sweep, n)
+		if payload is None:
+			return {'cached': False}
+		try:
+			with open(self.sweepPath(sweep, '.meta.json')) as handle:
+				leverage = json.load(handle).get('leverage')
+		except (OSError, ValueError):
+			leverage = None
+		return self.withMargin(payload, parseLeverage(_text(leverage)))
+
+	def sweepPayload(self, sweep, n):
+		"""A run saved by saveSweepRun as it was saved, or None."""
 		try:
 			with gzip.open(self.sweepRunPath(sweep, n), 'rb') as handle:
 				return json.loads(handle.read())
 		except FileNotFoundError:
-			return {'cached': False}
+			return None
 
 	def sweepStatus(self, since=0):
 		"""
@@ -2110,7 +2310,38 @@ def backtestArgs(get):
 		news=parseNews(get('newsBefore'), get('newsAfter')),
 		newsImpacts=parseImpacts(get('newsImpacts')),
 		params=pluginParams(strategy, get),
-		strategyArgs=handlerArgs(strategy, get))
+		strategyArgs=handlerArgs(strategy, get),
+		leverage=parseLeverage(get('leverage')))
+
+
+def parseLeverage(text):
+	"""The account's leverage, n for n:1; None is the setting's."""
+	value = parseInt(text, 'leverage', None)
+	if value is not None and value < 1:
+		raise ServiceError("leverage: %d is not n:1 with n at least 1" % value)
+	return value
+
+
+def opening(balance, final, net):
+	"""
+	A run's opening capital. A viewer plugin keeps a balance per trade but
+	declares no opening one: that is the last balance less what the trades
+	made, which is exact.
+	"""
+	if balance is None and final is not None and net is not None:
+		return final - net
+	return balance
+
+
+# ponytail: 256 runs' trades held, a few hundred KB each; smaller if memory minds
+@functools.lru_cache(maxsize=256)
+def _slimTrades(path, stamp):
+	"""A saved run's trades, the fields a margin reads; `stamp` is the file's
+	mtime, so a run saved again is read again. Shared: never changed."""
+	with gzip.open(path, 'rb') as handle:
+		trades = json.loads(handle.read()).get('trades') or ()
+	keep = ('entryTime', 'exitTime', 'units', 'entryPrice', 'stopLoss', 'pl')
+	return tuple(dict((k, t.get(k)) for k in keep) for t in trades)
 
 
 def rowKpi(row, dtfrom, dtto):
@@ -2120,15 +2351,12 @@ def rowKpi(row, dtfrom, dtto):
 	A viewer plugin keeps a balance per trade but declares no opening one;
 	that is the last balance less what the trades made, which is exact.
 	"""
-	start = row.get('balance')
-	net = (row.get('report') or {}).get('net')
-	if start is None and row.get('final') is not None and net is not None:
-		start = row['final'] - net
+	start = opening(row.get('balance'), row.get('final'), (row.get('report') or {}).get('net'))
 	if start is None or dtfrom is None or dtto is None:
 		return None
 	return report_module.kpis([(moment(t), b) for t, b in row.get('curve') or ()],
 							  float(start), moment(dtfrom), moment(dtto),
-							  row.get('report'))
+							  dict(row.get('report') or {}, margin=row.get('margin')))
 
 
 def _text(value):
@@ -2276,8 +2504,10 @@ class Handler(BaseHTTPRequestHandler):
 
 		The path is rebuilt from its basename after being normalised, so
 		neither a '..' nor an absolute path nor a symlink planted in the
-		directory can reach outside it - and only the three extensions in
-		CONTENT_TYPES are served at all.
+		directory can reach outside it - and only the extensions in
+		CONTENT_TYPES are served at all. Was: three extensions, for three
+		files. Now: six, for the fonts, logo and icons as well; still no
+		subdirectory, so those sit flat next to the page.
 		"""
 		safe = posixpath.normpath('/' + name).lstrip('/')
 		if '/' in safe or not safe:
@@ -2344,6 +2574,8 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendJSON({'favourites': self.service.favourites()})
 			if route == '/api/mixes':
 				return self.sendJSON({'mixes': self.service.mixes()})
+			if route == '/api/mixes/together':
+				return self.sendJSON(self.service.togetherStatus())
 			if route.startswith('/api/mixes/'):
 				return self.sendJSON(self.service.mix(route[len('/api/mixes/'):]))
 			if route.startswith('/api/live/'):
@@ -2383,7 +2615,9 @@ class Handler(BaseHTTPRequestHandler):
 					# the starting balance the page puts in its field, read
 					# from the setting rather than typed into the markup,
 					# where it would be a second figure to keep in step
-					'equity': float(self.service.setup.EQUITY)})
+					'equity': float(self.service.setup.EQUITY),
+					# and the leverage its account is checked on (report.margin)
+					'leverage': self.service.leverage()})
 			if route == '/api/candles':
 				return self.sendJSON(self.service.series(
 					self.one(query, 'instrument', 'EUR_USD'),
@@ -2424,7 +2658,8 @@ class Handler(BaseHTTPRequestHandler):
 				saved = self.service.savedRun(route[len('/api/runs/'):])
 				if saved is None:
 					return self.sendError("no such run", 404)
-				return self.sendJSON(saved)
+				return self.sendJSON(dict(saved, payload=self.service.withMargin(
+					saved['payload'], parseLeverage(_text(saved['fields'].get('leverage'))))))
 			if route.startswith('/static/'):
 				return self.sendFile(route[len('/static/'):])
 			return self.sendError("no route %s" % route, 404)
@@ -2488,7 +2723,8 @@ class Handler(BaseHTTPRequestHandler):
 				if payload is None:
 					# a reload after the service restarted: the run on disk
 					saved = self.service.savedRun(self.service.runId(form))
-					payload = saved and saved['payload']
+					payload = saved and self.service.withMargin(
+						saved['payload'], parseLeverage(_text(form.get('leverage'))))
 				elif not cachedOnly:
 					self.service.saveRun(form, payload)
 					if sweep and str(sweepRun).isdigit() and os.path.exists(
@@ -2538,6 +2774,10 @@ class Handler(BaseHTTPRequestHandler):
 				if route == '/api/mixes':
 					return self.sendJSON({'mix': self.service.saveMix(body),
 										  'mixes': self.service.mixes()})
+				if route.endswith('/together'):
+					# {} simulates the mix's runs on one account (startTogether)
+					return self.sendJSON(self.service.startTogether(
+						route[len('/api/mixes/'):-len('/together')]))
 				if body.get('delete'):
 					self.service.dropMix(route[len('/api/mixes/'):])
 					return self.sendJSON({'mixes': self.service.mixes()})

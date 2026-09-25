@@ -30,7 +30,11 @@ const AXIS = { left: 66, right: 14, top: 12, bottom: 26 };
 // the strip shares the chart's margins: a bar of one sits over the same bar
 // of the other or the strip is worse than nothing
 const STRIP = { left: AXIS.left, right: AXIS.right, top: 14, bottom: 6 };
-const FONT = '11px ui-monospace, Menlo, Consolas, monospace';
+// a feed is told apart by a fixed dash, not a colour of its own: the data has
+// three colours and a fourth does not pass (web/DESIGN.md § 3)
+const PROVIDER_DASH = { twelvedata: DASHES[0], ig: DASHES[1], capital: DASHES[2], etoro: DASHES[3],
+                        mt5: DASHES[4], ib: DASHES[5], oanda: DASHES[6] };
+const dashOf = (provider) => PROVIDER_DASH[provider] || DASHES[7];
 
 const chart = $('live-chart'), strip = $('live-skew');
 const ctx = chart.getContext('2d'), sctx = strip.getContext('2d');
@@ -51,12 +55,6 @@ const state = {
 
 /* ------------------------------------------------------------- helpers */
 
-const css = () => getComputedStyle(document.documentElement);
-function colour(provider) {
-  // one colour per provider, from the stylesheet so the tables can use the
-  // same ones; a provider nobody named there is drawn dim rather than black
-  return css().getPropertyValue('--feed-' + provider).trim() || css().getPropertyValue('--dim').trim();
-}
 const price = (v) => (v === null || v === undefined) ? '' : Number(v).toFixed(state.decimals);
 const signed = (v) => (v > 0 ? '+' : '') + v.toFixed(1);
 const p2 = (n) => String(n).padStart(2, '0');
@@ -170,12 +168,13 @@ function zoomToTrade(signal) {
 /* ---------------------------------------------------------------- draw */
 
 function draw() {
+  const pal = palette();
   const { width, height } = fit(chart, ctx, 380);
   ctx.clearRect(0, 0, width, height);
   if (!state.bars.length) {
     fit(strip, sctx, 120);   // sizing it clears it
-    ctx.fillStyle = colour('');
-    ctx.font = '12px ui-monospace, monospace';
+    ctx.fillStyle = pal.text3;
+    ctx.font = '12px ' + pal.mono;
     ctx.fillText('nessuna candela ancora', 12, 24);
     return;
   }
@@ -187,18 +186,18 @@ function draw() {
   const range = priceRange(view);
   const y = (p) => AXIS.top + (range.high - p) / (range.high - range.low) * plotH;
 
-  grid(width, range, y);
-  times(view, x, height, n, step);
+  grid(pal, width, range, y);
+  times(pal, view, x, height, n, step);
   ctx.save();
   ctx.beginPath();
   ctx.rect(AXIS.left, AXIS.top, plotW, plotH);
   ctx.clip();
-  candles(view, x, y, step);
-  closes(view, x, y);
-  markers(x, y, step);
-  hairline(ctx, x, AXIS.top, AXIS.top + plotH);
+  candles(pal, view, x, y, step);
+  closes(pal, view, x, y);
+  markers(pal, x, y, step);
+  hairline(pal, ctx, x, AXIS.top, AXIS.top + plotH);
   ctx.restore();
-  drawStrip(view, x, step);
+  drawStrip(pal, view, x, step);
 }
 
 function priceRange(view) {
@@ -230,28 +229,28 @@ function priceRange(view) {
   return { high: high + pad, low: low - pad };
 }
 
-function grid(width, range, y) {
+function grid(pal, width, range, y) {
   const lines = 6;
   ctx.lineWidth = 1;
-  ctx.font = FONT;
+  ctx.font = '11px ' + pal.mono;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
   for (let i = 0; i <= lines; i++) {
     const p = range.low + (range.high - range.low) * (i / lines);
     const py = Math.round(y(p)) + 0.5;
-    ctx.strokeStyle = '#232932';
+    ctx.strokeStyle = pal.grid;
     ctx.beginPath();
     ctx.moveTo(AXIS.left, py);
     ctx.lineTo(width - AXIS.right, py);
     ctx.stroke();
-    ctx.fillStyle = '#8b95a6';
+    ctx.fillStyle = pal.text3;
     ctx.fillText(price(p), AXIS.left - 8, py);
   }
 }
 
-function times(view, x, height, n, step) {
-  ctx.fillStyle = '#8b95a6';
-  ctx.font = FONT;
+function times(pal, view, x, height, n, step) {
+  ctx.fillStyle = pal.text3;
+  ctx.font = '11px ' + pal.mono;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   const wanted = Math.max(2, Math.floor((chart.clientWidth - AXIS.left) / 120));
@@ -265,17 +264,16 @@ function times(view, x, height, n, step) {
   }
 }
 
-function candles(view, x, y, step) {
+function candles(pal, view, x, y, step) {
   const pick = state.feeds.find((f) => f.feed === state.pick);
   if (!pick) return;
   const bodyW = Math.max(1, Math.min(14, step * 0.7));
-  const up = css().getPropertyValue('--up').trim(), down = css().getPropertyValue('--down').trim();
   for (let i = view.from; i <= view.to; i++) {
     const c = pick.at.get(state.bars[i]);
     if (!c) continue;
     const [, o, h, l, close] = c;
     const cx = x(i);
-    ctx.strokeStyle = ctx.fillStyle = close >= o ? up : down;
+    ctx.strokeStyle = ctx.fillStyle = close >= o ? pal.up : pal.down;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(Math.round(cx) + 0.5, y(h));
@@ -286,15 +284,17 @@ function candles(view, x, y, step) {
   }
 }
 
-// every other feed's close as a thin line on the same axis; a bar a feed
-// has not served is a gap, not a line drawn through where it ought to be
-function closes(view, x, y) {
+// every other feed's close as a thin line on the same axis, told apart by its
+// dash and not a colour of its own; a bar a feed has not served is a gap, not
+// a line drawn through where it ought to be
+function closes(pal, view, x, y) {
   ctx.save();
   ctx.lineWidth = 1;
   ctx.globalAlpha = 0.9;
+  ctx.strokeStyle = pal.text3;
   for (const f of state.feeds) {
     if (f.feed === state.pick) continue;
-    ctx.strokeStyle = colour(f.provider);
+    ctx.setLineDash(dashOf(f.provider));
     ctx.beginPath();
     let drawing = false;
     for (let i = view.from; i <= view.to; i++) {
@@ -314,21 +314,22 @@ function closes(view, x, y) {
  * made. The reference session's are hollow and dashed - simulated, not
  * placed - so the eye separates the two copies of the same signal.
  */
-function markers(x, y, step) {
+function markers(pal, x, y, step) {
   const pick = state.feeds.find((f) => f.feed === state.pick);
-  const up = css().getPropertyValue('--up').trim(), down = css().getPropertyValue('--down').trim();
   const size = step >= 4 ? 7 : 4;
   for (const t of state.trades) {
     const a = barAt(t.entryTime), b = barAt(t.exitTime);
     if (a === null) continue;
-    const c = colour(t.provider);
+    // the marker cannot carry a dash (it is filled, not a line), so it is
+    // coloured by direction instead - the triangle already points that way
+    const long = t.units > 0;
+    const c = long ? pal.up : pal.down;
     ctx.save();
     ctx.strokeStyle = ctx.fillStyle = c;
     ctx.lineWidth = 1.5;
     const shape = () => t.isRef ? ctx.stroke() : ctx.fill();
 
     const candle = pick && pick.at.get(state.bars[a]);
-    const long = t.units > 0;
     const tip = candle ? (long ? y(candle[3]) + 5 : y(candle[2]) - 5) : y(t.entry);
     const base = long ? tip + size : tip - size;
     ctx.beginPath();
@@ -343,7 +344,7 @@ function markers(x, y, step) {
       ctx.arc(x(b), y(t.exit), 3.5, 0, Math.PI * 2);
       shape();
       if (t.entry !== null && t.entry !== undefined) {
-        ctx.strokeStyle = t.pl > 0 ? up : t.pl < 0 ? down : colour('');
+        ctx.strokeStyle = t.pl > 0 ? pal.up : t.pl < 0 ? pal.down : pal.text3;
         if (t.isRef) ctx.setLineDash([4, 3]);
         ctx.beginPath();
         ctx.moveTo(x(a), y(t.entry));
@@ -355,10 +356,11 @@ function markers(x, y, step) {
   }
 }
 
-function hairline(context, x, top, bottom) {
+function hairline(pal, context, x, top, bottom) {
   if (state.hover === null) return;
   context.save();
-  context.strokeStyle = 'rgba(223,228,236,.35)';
+  context.strokeStyle = pal.text;
+  context.globalAlpha = 0.35;
   context.lineWidth = 1;
   context.beginPath();
   context.moveTo(Math.round(x(state.hover)) + 0.5, top);
@@ -369,7 +371,7 @@ function hairline(context, x, top, bottom) {
 
 /* ------------------------------------------------------------- the strip */
 
-function drawStrip(view, x, step) {
+function drawStrip(pal, view, x, step) {
   const { width, height } = fit(strip, sctx, 120);
   sctx.clearRect(0, 0, width, height);
   const plotW = width - STRIP.left - STRIP.right, plotH = height - STRIP.top - STRIP.bottom;
@@ -388,18 +390,18 @@ function drawStrip(view, x, step) {
   high += pad; low -= pad;
   const y = (v) => STRIP.top + (high - v) / (high - low) * plotH;
 
-  sctx.font = FONT;
+  sctx.font = '11px ' + pal.mono;
   sctx.textBaseline = 'middle';
   sctx.textAlign = 'right';
   sctx.lineWidth = 1;
   for (const v of [high, 0, low]) {
     const py = Math.round(y(v)) + 0.5;
-    sctx.strokeStyle = v === 0 ? '#3a4250' : '#232932';
+    sctx.strokeStyle = v === 0 ? pal.border : pal.grid;
     sctx.beginPath();
     sctx.moveTo(STRIP.left, py);
     sctx.lineTo(STRIP.left + plotW, py);
     sctx.stroke();
-    sctx.fillStyle = '#8b95a6';
+    sctx.fillStyle = pal.text3;
     sctx.fillText(signed(v), STRIP.left - 8, py);
   }
 
@@ -408,8 +410,9 @@ function drawStrip(view, x, step) {
   sctx.rect(STRIP.left, STRIP.top, plotW, plotH);
   sctx.clip();
   for (const l of state.skew) {
-    sctx.strokeStyle = colour(l.provider);
+    sctx.strokeStyle = pal.text3;
     sctx.lineWidth = 1.25;
+    sctx.setLineDash(dashOf(l.provider));
     sctx.beginPath();
     let drawing = false;
     for (let i = view.from; i <= view.to; i++) {
@@ -419,32 +422,49 @@ function drawStrip(view, x, step) {
       else { sctx.moveTo(x(i), y(v)); drawing = true; }
     }
     sctx.stroke();
+    sctx.setLineDash([]);
   }
-  // each paired trade: how far from the simulated entry the broker filled
+  // each paired trade: how far from the simulated entry the broker filled -
+  // a filled bar cannot carry a dash, and the sign is not long/short, so it
+  // stays neutral (web/DESIGN.md § 3)
   const barW = Math.max(2, Math.min(6, step * 0.5));
   sctx.globalAlpha = 0.85;
+  sctx.fillStyle = pal.text3;
   for (const p of state.pairs) {
     const i = barAt(p.time);
     if (!inView(i)) continue;
-    sctx.fillStyle = colour(p.provider);
     const top = Math.min(y(0), y(p.entryDiff));
     sctx.fillRect(x(i) - barW / 2, top, barW, Math.max(1, Math.abs(y(0) - y(p.entryDiff))));
   }
   sctx.globalAlpha = 1;
-  hairline(sctx, x, STRIP.top, STRIP.top + plotH);
+  hairline(pal, sctx, x, STRIP.top, STRIP.top + plotH);
   sctx.restore();
 
   sctx.textAlign = 'left';
   sctx.textBaseline = 'top';
   let lx = STRIP.left + 6;
-  const legend = (text, c) => {
-    sctx.fillStyle = c;
+  // a feed's key here is its dash, drawn as a short sample line, same as its
+  // trace above - there is no DOM legend on this canvas to carry a dashSample
+  const label = (text) => {
+    sctx.fillStyle = pal.text3;
     sctx.fillText(text, lx, 2);
     lx += sctx.measureText(text).width + 12;
   };
-  legend(`Δ close vs ${state.reference || 'riferimento'} (pip)`, '#8b95a6');
-  for (const l of state.skew) legend(l.feed, colour(l.provider));
-  if (!state.skew.length) legend('nessuna serie di skew', '#8b95a6');
+  const legend = (text, dash) => {
+    sctx.strokeStyle = pal.text3;
+    sctx.lineWidth = 1.5;
+    sctx.setLineDash(dash);
+    sctx.beginPath();
+    sctx.moveTo(lx, 6);
+    sctx.lineTo(lx + 16, 6);
+    sctx.stroke();
+    sctx.setLineDash([]);
+    lx += 20;
+    label(text);
+  };
+  label(`Δ close vs ${state.reference || 'riferimento'} (pip)`);
+  for (const l of state.skew) legend(l.feed, dashOf(l.provider));
+  if (!state.skew.length) label('nessuna serie di skew');
 }
 
 /* ------------------------------------------------------------ gestures */

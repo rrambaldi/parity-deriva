@@ -29,7 +29,16 @@ const STATS = [
   ['run of wins', (r) => r.report.maxConsecutiveWins, String],
   ['run of losses', (r) => r.report.maxConsecutiveLosses, String],
   ['capital', (r) => r.final, amount],
+  // the peak margin, in per cent of the capital; out of margin last (marginCell)
+  ['margin', (r) => r.margin ? (r.margin.ok ? r.margin.peakMarginPct : Infinity) : null, String],
 ];
+
+// a run's margin in a cell: its peak, and whether the account always had room
+function marginCell(td, m) {
+  td.textContent = m ? `${m.ok ? '\u2713' : '\u2717'} ${m.peakMarginPct.toFixed(1)}%` : 'n/a';
+  td.className = 'num' + (m && !m.ok ? ' bad' : '');
+  td.title = marginText(m);
+}
 
 const state = {
   forms: {}, defaults: {}, instruments: [],
@@ -41,6 +50,8 @@ const state = {
   sort: { col: 'n', dir: 1 },
   polling: false,
   favourites: [],    // the runs starred to trade live, from /api/favourites
+  light: { param: '', value: null },   // the value whose curves are lit, see renderLight
+  effectsParam: null,                  // the parameter whose values are listed, see renderEffects
 };
 
 const $ = (id) => document.getElementById(id);
@@ -76,7 +87,7 @@ function runId(n) {
 
 function paramsText(params) {
   return Object.entries(params || {})
-    .map(([k, v]) => `${k}=${v === '' ? 'none' : v}`).join(' ');
+    .map(([k, v]) => `${k}=${paramValue(k, v)}`).join(' ');
 }
 
 /* ----------------------------------------------------------------- fetch */
@@ -109,17 +120,39 @@ function message(text, kind) {
   box.className = kind === 'info' ? 'info' : '';
 }
 
-// a yes or no asked on the page, as in app.js
+/*
+ * The page out of reach but for its menu and theme, top right: while a
+ * simulate is being asked for, from the click to the question answered,
+ * nothing on it can start a second one or change the form under the first.
+ * inert rather than disabled: it takes the mouse and the keyboard both, and
+ * hands every control back as it was.
+ */
+function lock(on) {
+  for (const el of [...document.body.children, $('sets-open')]) {
+    if (!['HEADER', 'DIALOG', 'SCRIPT'].includes(el.tagName)) el.inert = on;
+  }
+}
+
+// a yes or no asked on the page, as in app.js. Not modal, so the menu stays
+// in reach: the rest of the page is locked instead - unless it is asked from
+// a dialog that is modal already, which would hide a plain one behind it
 function askUser(text, yes = 'run it anyway') {
   const dialog = $('ask-dialog');
   $('ask-text').textContent = text;
   $('ask-yes').textContent = yes;
   dialog.returnValue = '';
-  dialog.showModal();
+  if (document.querySelector('dialog:modal')) dialog.showModal();
+  else { lock(true); dialog.show(); }
   $('ask-yes').focus();
-  return new Promise((resolve) => dialog.addEventListener('close',
-    () => resolve(dialog.returnValue === 'yes'), { once: true }));
+  return new Promise((resolve) => dialog.addEventListener('close', () => {
+    lock(false);
+    resolve(dialog.returnValue === 'yes');
+  }, { once: true }));
 }
+// a modal dialog closes on escape by itself, a plain one has to be told
+$('ask-dialog').addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !$('ask-dialog').matches(':modal')) $('ask-dialog').close();
+});
 
 /* ------------------------------------------------------------------ form */
 
@@ -222,6 +255,7 @@ function fixedFields() {
     strategy: $('strategy').value, instrument: $('instrument').value,
     granularity: $('granularity').value, from: $('from').value,
     to: $('to').value, risk: $('risk').value, balance: $('balance').value,
+    leverage: $('leverage').value,
     newsBefore: $('newsBefore').value, newsAfter: $('newsAfter').value,
     newsImpacts: $('newsImpacts').value,
   };
@@ -259,7 +293,7 @@ function fillForm(f) {
     $('granularity').value = f.granularity;
     onGranularity();
   }
-  for (const id of ['from', 'to', 'risk', 'balance']) if (f[id]) $(id).value = f[id];
+  for (const id of ['from', 'to', 'risk', 'balance', 'leverage']) if (f[id]) $(id).value = f[id];
   // a set made before these were on this page had no news rule
   $('newsBefore').value = f.newsBefore || '';
   $('newsAfter').value = f.newsAfter || '';
@@ -290,34 +324,41 @@ function countLater() {
 
 async function simulate(event) {
   event.preventDefault();
-  const fields = fixedFields();
-  const grid = gridFields();
-  let combos;
+  // locked from the click: the count and the estimate can take a while,
+  // and the page must not take a second click meanwhile
+  lock(true);
   try {
-    ({ combos } = await post('api/sweep', { dry: true, fields, grid }));
-  } catch (error) { message(String(error.message || error)); return; }
-  try {
-    const ahead = await ask('api/estimate?' + new URLSearchParams({
-      instrument: fields.instrument, granularity: fields.granularity,
-      from: fields.from, to: fields.to }));
-    if (ahead.ticks * combos > TICK_WARNING) {
-      const question = `${combos} runs, each walking ${ahead.ticks.toLocaleString()} bars`
-        + ` from ${fields.from || 'the start'} to ${fields.to || 'the end'}`
-        + (ahead.fine ? ` (${ahead.granularity} candles and the ${ahead.fine} bars under them)` : '')
-        + `.\n\nAt the ${ahead.rate.toLocaleString()} bars a second the last run managed,`
-        + ` that is about ${howLong(ahead.seconds * combos)} in all.\n\nRun it anyway?`;
-      if (!await askUser(question)) return;
-    }
-  } catch (error) { /* no estimate, no warning, still a sweep */ }
+    const fields = fixedFields();
+    const grid = gridFields();
+    let combos;
+    try {
+      ({ combos } = await post('api/sweep', { dry: true, fields, grid }));
+    } catch (error) { message(String(error.message || error)); return; }
+    try {
+      const ahead = await ask('api/estimate?' + new URLSearchParams({
+        instrument: fields.instrument, granularity: fields.granularity,
+        from: fields.from, to: fields.to }));
+      if (ahead.ticks * combos > TICK_WARNING) {
+        const question = `${combos} runs, each walking ${ahead.ticks.toLocaleString()} bars`
+          + ` from ${fields.from || 'the start'} to ${fields.to || 'the end'}`
+          + (ahead.fine ? ` (${ahead.granularity} candles and the ${ahead.fine} bars under them)` : '')
+          + `.\n\nAt the ${ahead.rate.toLocaleString()} bars a second the last run managed,`
+          + ` that is about ${howLong(ahead.seconds * combos)} in all.\n\nRun it anyway?`;
+        if (!await askUser(question)) return;
+      }
+    } catch (error) { /* no estimate, no warning, still a sweep */ }
 
-  try {
-    state.rows = [];
-    state.pick = state.pinned = null;
-    state.fields = fields;
-    follow(await post('api/sweep', { fields, grid, name: $('sweep-name').value }));
-    keepAddress();
-  } catch (error) {
-    message(String(error.message || error));
+    try {
+      state.rows = [];
+      state.pick = state.pinned = null;
+      state.fields = fields;
+      follow(await post('api/sweep', { fields, grid, name: $('sweep-name').value }));
+      keepAddress();
+    } catch (error) {
+      message(String(error.message || error));
+    }
+  } finally {
+    lock(false);
   }
 }
 
@@ -355,6 +396,8 @@ function follow(job) {
   renderCurrent();
   renderTable();
   renderKpi();
+  renderLight();
+  renderEffects();
   draw();
   if (running && !state.polling) {
     state.polling = true;
@@ -478,8 +521,7 @@ function renderTable() {
       const td = document.createElement('td');
       if (c === 'n') td.textContent = row.n + (row === top ? ' ★' : '');
       else if (c.startsWith('p:')) {
-        const v = row.params[c.slice(2)];
-        td.textContent = v === '' ? 'none' : v;
+        td.textContent = paramValue(c.slice(2), row.params[c.slice(2)]);
       } else if (row.error) {
         td.textContent = c === 's:trades' ? row.error : '';
         td.className = 'bad';
@@ -488,6 +530,7 @@ function renderTable() {
         const v = get(row);
         td.textContent = format(v);
         td.className = 'num' + (label === 'net' ? (v > 0 ? ' good' : v < 0 ? ' bad' : '') : '');
+        if (label === 'margin') marginCell(td, row.margin);
       }
       line.appendChild(td);
     }
@@ -690,16 +733,17 @@ function draw() {
   const y = (v) => AXIS.top + (high - v) / (high - low) * plotH;
   geometry = { from, to, x, y, low, high, curves, plotW };
 
+  const p = palette();
   // grid and the axes' labels, recessive
-  ctx.font = '11px ui-monospace, Menlo, Consolas, monospace';
+  ctx.font = '11px ' + p.mono;
   ctx.lineWidth = 1;
-  ctx.fillStyle = '#8b95a6';
+  ctx.fillStyle = p.text3;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
   for (let i = 0; i <= 4; i++) {
     const v = low + (high - low) * (i / 4);
     const py = Math.round(y(v)) + 0.5;
-    ctx.strokeStyle = '#232932';
+    ctx.strokeStyle = p.grid;
     ctx.beginPath(); ctx.moveTo(AXIS.left, py); ctx.lineTo(width - AXIS.right, py); ctx.stroke();
     ctx.fillText(amount(v), AXIS.left - 6, py);
   }
@@ -712,15 +756,16 @@ function draw() {
   }
   // the opening capital, which every curve starts from
   const start = all[0][0][1];
-  ctx.strokeStyle = '#3a414d';
+  ctx.strokeStyle = p.border;
   ctx.setLineDash([4, 4]);
   ctx.beginPath(); ctx.moveTo(AXIS.left, y(start)); ctx.lineTo(width - AXIS.right, y(start)); ctx.stroke();
   ctx.setLineDash([]);
 
   // a step: the balance moves when a trade closes and not in between
-  const line = (points, colour, widthPx, end) => {
+  const line = (points, colour, widthPx, end, alpha = 1) => {
     ctx.strokeStyle = colour;
     ctx.lineWidth = widthPx;
+    ctx.globalAlpha = alpha;
     ctx.beginPath();
     points.forEach(([ms, v], i) => {
       if (i === 0) ctx.moveTo(x(ms), y(v));
@@ -729,14 +774,82 @@ function draw() {
     const last = points[points.length - 1];
     ctx.lineTo(x(end), y(last[1]));
     ctx.stroke();
+    ctx.globalAlpha = 1;
   };
+  // a value lit under the chart (renderLight): its runs in ink over the rest,
+  // which fade further
+  const lit = litRuns();
   for (const [n, points] of curves) {
-    if (n !== state.pick) line(points, 'rgba(139,149,166,.38)', 1, to);
+    // finished runs, recessive: the one running now and the pick stand out below
+    if (n !== state.pick && !lit.has(n)) line(points, p.text3, 1, to, lit.size ? 0.15 : 0.38);
   }
-  if (live) line(live, '#e8a33d', 2, live[live.length - 1][0]);
+  for (const [n, points] of curves) {
+    if (n !== state.pick && lit.has(n)) line(points, p.text, 1.25, to, 0.85);
+  }
+  if (live) line(live, p.text, 2, live[live.length - 1][0]);
   const picked = curves.find(([n]) => n === state.pick);
-  if (picked) line(picked[1], '#58a6ff', 2, to);
+  if (picked) line(picked[1], p.entry, 2, to);
 }
+
+/*
+ * The highlight under the chart: one of the parameters the set varies, and a
+ * button per value it took, with how many runs took it. A value pressed
+ * lights its runs' curves; pressed again, none is lit. Rebuilt only when
+ * what it shows changes: the poll comes every PROGRESS_MS, and a button
+ * replaced between the press and the release loses the click.
+ */
+function renderLight() {
+  const varied = (state.job && state.job.varied) || [];
+  const box = $('sim-light');
+  box.hidden = !varied.length || !state.rows.length;
+  if (!varied.includes(state.light.param)) state.light = { param: varied[0] || '', value: null };
+  const counts = new Map();
+  for (const row of state.rows) {
+    if (row.error) continue;
+    const v = String(row.params[state.light.param]);
+    counts.set(v, (counts.get(v) || 0) + 1);
+  }
+  if (!counts.has(state.light.value)) state.light.value = null;
+  // by number where they are numbers, 'none' first
+  const key = (v) => v === '' ? -Infinity : Number(v);
+  const values = [...counts.keys()].sort((a, b) => (key(a) - key(b)) || a.localeCompare(b));
+  const shown = JSON.stringify([varied, state.light, values.map((v) => [v, counts.get(v)])]);
+  if (box.dataset.shown === shown) return;
+  box.dataset.shown = shown;
+  fill($('light-param'), varied);
+  $('light-param').value = state.light.param;
+  const buttons = $('light-values');
+  buttons.textContent = '';
+  for (const v of values) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.value = v;
+    button.textContent = `${paramValue(state.light.param, v)} (${counts.get(v)})`;
+    button.setAttribute('aria-pressed', String(v === state.light.value));
+    buttons.append(button);
+  }
+}
+
+// the runs of the value lit, by number: none with nothing lit
+function litRuns() {
+  const { param, value } = state.light;
+  if (!param || value === null) return new Set();
+  return new Set(state.rows.filter((r) => !r.error && String(r.params[param]) === value)
+    .map((r) => r.n));
+}
+
+$('light-param').addEventListener('change', () => {
+  state.light = { param: $('light-param').value, value: null };
+  renderLight();
+  draw();
+});
+$('light-values').addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-value]');
+  if (!button) return;
+  state.light.value = state.light.value === button.dataset.value ? null : button.dataset.value;
+  renderLight();
+  draw();
+});
 
 // the curve nearest the cursor, at the cursor's time
 function balanceAt(points, ms) {
@@ -752,7 +865,10 @@ canvas.addEventListener('mousemove', (event) => {
   const { from, to, plotW, y } = geometry;
   const ms = from + (px - AXIS.left) / plotW * (to - from);
   let nearest = null, gap = Infinity;
+  // with a value lit, the cursor picks among its runs only
+  const lit = litRuns();
   for (const [n, points] of geometry.curves) {
+    if (lit.size && !lit.has(n)) continue;
     const d = Math.abs(y(balanceAt(points, ms)) - py);
     if (d < gap) { gap = d; nearest = [n, balanceAt(points, ms)]; }
   }
@@ -774,37 +890,14 @@ window.addEventListener('resize', draw);
 
 /* -------------------------------------------------------- KPI comparison */
 
-// [label, key in row.kpi, format, verdict(v) -> 'good' | 'ok' | 'bad' | '', target text]
-const pct = (v) => v.toFixed(1) + '%';
-const num = (v) => v.toFixed(2);
-const KPIS = [
-  ['ROI', 'roi', pct, (v) => v > 0 ? 'good' : 'bad', '> 0 over the window'],
-  ['CAR', 'car', pct, (v) => v > 15 ? 'good' : v > 0 ? 'ok' : 'bad', '> 15% a year'],
-  ['profit factor', 'profitFactor', num, (v) => v > 2 ? 'good' : v > 1.5 ? 'ok' : 'bad', '> 1.5 good, > 2 excellent'],
-  ['expectancy', 'expectancy', amount, (v) => v > 0 ? 'good' : 'bad', '> 0 a trade'],
-  ['win rate', 'winRate', percent, () => '', '40-60% for most, depends on the strategy'],
-  ['max DD', 'maxDrawdownPct', pct, (v) => v < 20 ? 'good' : 'bad', '< 20% peak to trough'],
-  ['risk-reward', 'riskReward', num, (v) => v >= 2 ? 'good' : v >= 1 ? 'ok' : 'bad', 'avg win / avg loss >= 2'],
-  ['Sharpe', 'sharpe', num, (v) => v > 2 ? 'good' : v > 1 ? 'ok' : 'bad', '> 1 good, > 2 excellent'],
-  ['CAR/MDD', 'carMdd', num, (v) => v > 1 ? 'good' : v > 0 ? 'ok' : 'bad', 'higher is better'],
-  ['Ulcer', 'ulcer', num, (v) => v < 5 ? 'good' : v < 10 ? 'ok' : 'bad', 'depth and length of drawdowns, lower is better'],
-];
-const MARK = { good: ' \u2713', ok: ' ~', bad: ' \u2717' };
-state.kpiSort = { col: 'targets', dir: -1 };
-
-// the targets a run meets: 'good' counts, 'ok' (the lower bar) counts half
-function targets(row) {
-  let met = 0;
-  for (const [, key, , verdict] of KPIS) {
-    const v = row.kpi && row.kpi[key];
-    if (v === null || v === undefined) continue;
-    const said = verdict(v);
-    met += said === 'good' ? 1 : said === 'ok' ? 0.5 : 0;
-  }
-  return met;
-}
+// Was: ranked by the targets met. Now: by the score, the rank of a run
+// (report.score on the server), the targets met still a column to click
+state.kpiSort = { col: 'score', dir: -1 };
+const SCORE_PARTS = 'CAR 35% · max DD and Ulcer 25% · profit factor 20% · Sharpe 20%, less under 30 trades, 0 out of margin';
 
 function kpiValue(row, col) {
+  // the margin sorts by its peak, a run out of it last whichever way
+  if (col === 'margin') return row.margin ? (row.margin.ok ? row.margin.peakMarginPct : Infinity) : Infinity;
   if (col === 'n') return row.n;
   if (col === 'targets') return targets(row);
   if (col.startsWith('p:')) return sortValue(row, col);
@@ -818,7 +911,9 @@ function renderKpi() {
   if (!rows.length) return;
   const varied = (state.job && state.job.varied) || [];
   const cols = [['#', 'n', '']].concat(varied.map((v) => [v, 'p:' + v, '']))
+    .concat([['score', 'score', '0-100: ' + SCORE_PARTS]])
     .concat(KPIS.map(([label, key, , , target]) => [label, key, target]))
+    .concat([['margin', 'margin', 'peak margin of the capital; \u2717 out of margin scores 0']])
     .concat([['targets met', 'targets', 'good counts 1, the lower bar half']]);
   const head = $('kpi-thead');
   head.textContent = '';
@@ -850,10 +945,15 @@ function renderKpi() {
       const td = document.createElement('td');
       if (c === 'n') td.textContent = row.n + (i === 0 ? ' \u2605' : '');
       else if (c.startsWith('p:')) {
-        const v = row.params[c.slice(2)];
-        td.textContent = v === '' ? 'none' : v;
+        td.textContent = paramValue(c.slice(2), row.params[c.slice(2)]);
       } else if (c === 'targets') {
         td.textContent = `${targets(row)} / ${KPIS.length - 1}`;
+        td.className = 'num';
+      } else if (c === 'margin') {
+        marginCell(td, row.margin);
+      } else if (c === 'score') {
+        const v = row.kpi.score;
+        td.textContent = v === null || v === undefined ? 'n/a' : v.toFixed(1);
         td.className = 'num';
       } else {
         const [, , format, verdict] = KPIS.find(([, key]) => key === c);
@@ -875,7 +975,8 @@ function renderKpi() {
 $('kpi-thead').addEventListener('click', (event) => {
   const col = event.target.dataset && event.target.dataset.col;
   if (!col) return;
-  const lowFirst = col === 'maxDrawdownPct' || col === 'ulcer' || col === 'n' || col.startsWith('p:');
+  const lowFirst = col === 'maxDrawdownPct' || col === 'ulcer' || col === 'margin' || col === 'n'
+    || col.startsWith('p:');
   state.kpiSort = { col, dir: state.kpiSort.col === col ? -state.kpiSort.dir : (lowFirst ? 1 : -1) };
   renderKpi();
 });
@@ -887,116 +988,261 @@ $('kpi-rows').addEventListener('mouseover', (event) => {
   draw();
 });
 
-/* ---------------------------------------------------------- KPI analysis */
+/* ---------------------------------------------------- parameter analysis */
 
-// Each KPI judged against its usual benchmark, then a verdict in words.
-// The thresholds are the ones given with the procedure, and they are not the
-// table's own marks (KPIS above): the table ranks, this reads one run.
-const JUDGE = [
-  ['ROI', 'roi', pct, (v) => v <= 0 ? ['\u2717', 'Negativo'] : ['\u2713', 'Positivo']],
-  ['CAR', 'car', pct, (v) => v <= 0 ? ['\u2717', 'Negativo'] : ['\u2713', 'Positivo']],
-  ['Profit Factor', 'profitFactor', num, (v) => v < 1 ? ['\u2717', 'Non profittevole (PF < 1)']
-    : v < 1.5 ? ['\u2717', 'Debole: edge esiguo, sensibile a costi/slippage']
-    : v < 2 ? ['\u2713', 'Buono'] : ['\u2713', 'Ottimo']],
-  ['Expectancy', 'expectancy', amount, (v) => v <= 0 ? ['\u2717', 'Non sostenibile (expectancy \u2264 0)'] : ['\u2713', 'Positiva']],
-  ['Win Rate', 'winRate', percent, (v) => (v *= 100) >= 40 && v <= 60 ? ['~', 'Nella media per strategie direzionali']
-    : v < 40 ? ['\u2717', 'Basso'] : ['\u2713', 'Alto']],
-  ['Max Drawdown', 'maxDrawdownPct', pct, (v) => v < 10 ? ['\u2713', 'Drawdown basso']
-    : v < 15 ? ['~', 'Drawdown moderato'] : v < 20 ? ['\u2717', 'Drawdown alto']
-    : ['\u2717', 'Drawdown molto alto, psicologicamente difficile']],
-  ['Risk-Reward', 'riskReward', num, (v) => v < 1 ? ['\u2717', 'Sfavorevole: perdite medie > guadagni medi']
-    : v < 2 ? ['~', 'Neutro/moderato'] : ['\u2713', 'Favorevole']],
-  ['Sharpe', 'sharpe', num, (v) => v < 1 ? ['\u2717', 'Sub-par: rendimento aggiustato per volatilit\u00e0 debole']
-    : v < 2 ? ['\u2713', 'Buono'] : ['\u2713', 'Ottimo']],
-  ['CAR/MDD', 'carMdd', num, (v) => v < 0.3 ? ['~', 'Basso: rendimento \u201ccostoso\u201d in termini di drawdown']
-    : v < 0.6 ? ['~', 'Moderato'] : ['\u2713', 'Buono']],
-  ['Ulcer', 'ulcer', num, (v) => v < 6 ? ['\u2713', 'Stress da drawdown contenuto']
-    : v < 8 ? ['~', 'Moderato'] : ['\u2717', 'Elevato: periodi di sofferenza prolungati']],
-];
+// what the runs can be ranked on: the score first, then the KPIs that say how
+// a run went. The last two are better low, as their first click in the table
+const EFFECT_METRICS = [['score', 'score', (v) => v.toFixed(1)], ['CAR', 'car', kpiPct],
+  ['ROI', 'roi', kpiPct], ['max DD', 'maxDrawdownPct', kpiPct], ['Sharpe', 'sharpe', kpiNum],
+  ['profit factor', 'profitFactor', kpiNum], ['Ulcer', 'ulcer', kpiNum]];
+const LOW_BETTER = ['maxDrawdownPct', 'ulcer'];
+// ponytail: thresholds of my choosing, not a statistical test - a set of a few
+// dozen runs does not carry one. eta² from which a parameter decides or matters
+// little, and the consistency it has to hold to decide or under which the
+// others decide for it
+const VERDICT = { decides: 0.20, holds: 0.75, little: 0.05, depends: 0.60 };
 
-// the procedure itself: {summary, table, strengths, weaknesses, verdict, todo}
-function analyse(row) {
-  // a figure the run cannot have is read as 0, except the two ratios with
-  // nothing under them - no losing trade - which are then at their best
-  const k = { ...row.kpi };
-  for (const key of Object.keys(k)) k[key] = k[key] ?? 0;
-  for (const key of ['profitFactor', 'riskReward']) k[key] = row.kpi[key] ?? Infinity;
-  const { roi, car, profitFactor: pf, expectancy, winRate, maxDrawdownPct: mdd,
-          riskReward: rr, sharpe, ulcer } = k;
-  const win = winRate * 100;
-  const profitable = pf > 1 && expectancy > 0 && roi > 0;
-  const weak = pf < 1.5 || mdd > 20 || sharpe < 1;
-  const met = targets(row), total = KPIS.length - 1, ratio = total ? met / total : 0;
-
-  const table = JUDGE.map(([label, key, format, judge]) => {
-    const v = row.kpi[key];
-    return v === null || v === undefined ? [label, 'n/a', '', 'non calcolabile su questo run']
-      : [label, format(v), ...judge(v)];
-  });
-  table.push(['Targets Met', `${met}/${total}`, ...(ratio >= 0.66 ? ['\u2713', 'Buona percentuale di target soddisfatti']
-    : ratio >= 0.33 ? ['~', 'Solo una parte dei target soddisfatti'] : ['\u2717', 'Pochi target soddisfatti'])]);
-
-  const strengths = [];
-  if (expectancy > 0) strengths.push('Expectancy positiva: ogni trade genera valore atteso.');
-  if (roi > 0 && car > 0) strengths.push('ROI e CAR positivi: la strategia \u00e8 redditizia nel periodo analizzato.');
-  if (win >= 40 && win <= 60) strengths.push('Win rate nella media per strategie direzionali.');
-  const weaknesses = [];
-  if (pf < 1.5) weaknesses.push('Profit factor debole: edge esiguo, sensibile a costi e slippage in live.');
-  if (mdd > 20) weaknesses.push('Max drawdown molto alto: psicologicamente difficile e rischioso.');
-  if (sharpe < 1) weaknesses.push('Sharpe ratio sub-par: rendimento aggiustato per volatilit\u00e0 debole.');
-  if (rr < 1) weaknesses.push('Risk-reward sfavorevole: perdite medie superiori ai guadagni medi.');
-  if (ulcer > 8) weaknesses.push('Ulcer index elevato: stress da drawdown significativo.');
-  const todo = [];
-  if (rr < 1) todo.push('Migliorare il risk-reward (es. trailing stop, take-profit pi\u00f9 ampi, filtri di ingresso).');
-  if (mdd > 15) todo.push('Ridurre il drawdown (position sizing dinamico, stop pi\u00f9 stretti, filtri di regime).');
-  todo.push('Validare su out-of-sample e con walk-forward analysis per verificare robustezza.');
-
-  return {
-    summary: !profitable
-      ? 'Strategia non profittevole o con edge non chiaro: alcune metriche fondamentali (profit factor, expectancy, ROI) non sono positive.'
-      : weak ? 'Strategia profittevole ma debole: edge reale ma margini di sicurezza ridotti. Quasi tutte le metriche risk-adjusted e di rischio sono sotto i target tipici per una strategia robusta.'
-      : 'Strategia profittevole e complessivamente solida: edge chiaro e metriche risk-adjusted accettabili.',
-    table, strengths, weaknesses, todo,
-    verdict: !profitable ? 'Non adatta per live trading; richiede riprogettazione o scarto.'
-      : weak ? 'Accettabile per ricerca / paper trading, ma non pronta per live con capitale significativo.'
-      : 'Candidata per live trading, previa validazione out-of-sample e controlli operativi.',
-  };
+// the window in equal slices, [[from, to], ...]: quarters, or months under a
+// year, and never fewer than 4 or more than 12
+function timeSlices(span) {
+  if (!span) return [];
+  const [from, to] = span, years = (to - from) / (365.25 * 864e5);
+  const n = Math.min(12, Math.max(4, Math.round(years >= 1 ? years * 4 : years * 12)));
+  return Array.from({ length: n }, (_, i) => [from + (to - from) * i / n,
+                                              from + (to - from) * (i + 1) / n]);
 }
+
+/*
+ * Which varied parameter moves the result, and which of its values does best,
+ * four ways over the same runs:
+ *
+ *   effect       the best value's median less the worst's, in the metric;
+ *   consistency  among the runs alike in every other varied parameter - a
+ *                context - how often the best value is the first (a tie
+ *                counts shared), and its edge over the rest there: whether
+ *                the advantage is its own or the others' doing;
+ *   eta2         the share of the metric's spread the values account for,
+ *                between groups over the total sum of squares;
+ *   slicesWon    per value, in how many slices of the window its runs grew
+ *                the most - all along, or one lucky stretch. Off the capital
+ *                curves, whatever the metric.
+ *
+ * Pure: `metric(row)` is the figure or null, `low` a lower one better, `span`
+ * [from, to] in ms or null. Runs in error or without the figure are left out.
+ * Sorted by effect, largest first.
+ */
+function paramEffects(rows, varied, metric, low, span) {
+  const sign = low ? -1 : 1;
+  const ok = rows.filter((r) => !r.error && Number.isFinite(metric(r)));
+  const better = (r) => sign * metric(r);
+  const median = (xs) => {
+    const s = xs.slice().sort((a, b) => a - b), m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+  // as renderLight orders them: by number where they are numbers, none first
+  const key = (v) => v === '' ? -Infinity : Number(v);
+  const order = (a, b) => (key(a) - key(b)) || a.localeCompare(b);
+  const slices = timeSlices(span);
+  const growth = new Map(ok.map((r) => {
+    if (!slices.length) return [r.n, []];
+    const points = curveOf(r, span[0]);
+    return [r.n, slices.map(([a, b]) => {
+      const start = balanceAt(points, a);
+      return start > 0 ? balanceAt(points, b) / start - 1 : 0;
+    })];
+  }));
+  const mean = ok.reduce((s, r) => s + better(r), 0) / (ok.length || 1);
+  const total = ok.reduce((s, r) => s + (better(r) - mean) ** 2, 0);
+
+  return varied.map((param) => {
+    const of = (r) => String(r.params[param]);
+    const groups = new Map();
+    for (const r of ok) groups.set(of(r), [...(groups.get(of(r)) || []), r]);
+    const values = [...groups.keys()].sort(order).map((value) => {
+      const runs = groups.get(value);
+      return { value, runs: runs.length, median: median(runs.map(metric)),
+               rank: median(runs.map(better)), first: 0, contexts: 0, slicesWon: 0 };
+    });
+    const best = values.reduce((a, v) => (a && a.rank >= v.rank ? a : v), null);
+    const worst = values.reduce((a, v) => (a && a.rank <= v.rank ? a : v), null);
+
+    const between = values.reduce((s, v) => {
+      const m = groups.get(v.value).reduce((a, r) => a + better(r), 0) / v.runs;
+      return s + v.runs * (m - mean) ** 2;
+    }, 0);
+
+    const contexts = new Map();
+    for (const r of ok) {
+      const alike = JSON.stringify(varied.filter((p) => p !== param).map((p) => r.params[p]));
+      contexts.set(alike, [...(contexts.get(alike) || []), r]);
+    }
+    const edges = [];
+    for (const runs of contexts.values()) {
+      const here = new Map();
+      for (const r of runs) here.set(of(r), [...(here.get(of(r)) || []), better(r)]);
+      if (here.size < 2) continue;
+      const scores = [...here].map(([v, xs]) => [v, median(xs)]);
+      const top = Math.max(...scores.map(([, s]) => s));
+      const tied = scores.filter(([, s]) => s === top).length;
+      for (const [v, s] of scores) {
+        const entry = values.find((e) => e.value === v);
+        entry.contexts += 1;
+        if (s === top) entry.first += 1 / tied;
+      }
+      const mine = scores.find(([v]) => v === best.value);
+      const rest = scores.filter(([v]) => v !== best.value);
+      if (mine) edges.push(mine[1] - rest.reduce((a, [, s]) => a + s, 0) / rest.length);
+    }
+
+    // a slice two values tie on is shared, as a context is
+    slices.forEach((_, i) => {
+      const grew = values.map((v) => median(groups.get(v.value).map((r) => growth.get(r.n)[i])));
+      const top = Math.max(...grew);
+      const tied = grew.filter((g) => g === top).length;
+      values.forEach((v, k) => { if (grew[k] === top) v.slicesWon += 1 / tied; });
+    });
+
+    const eta2 = total > 0 ? between / total : 0;
+    const consistency = best && best.contexts ? best.first / best.contexts : null;
+    const verdict = values.length < 2 ? 'one value'
+      : eta2 < VERDICT.little ? 'matters little'
+      : consistency !== null && consistency < VERDICT.depends ? 'depends on the others'
+      : eta2 >= VERDICT.decides && (consistency === null || consistency >= VERDICT.holds)
+        ? 'decides' : 'middling';
+    return { param, values, best, worst, effect: best ? best.rank - worst.rank : 0,
+             consistency, edge: edges.length ? median(edges) : null, eta2,
+             slices: slices.length, verdict };
+  }).sort((a, b) => b.effect - a.effect);
+}
+
+/*
+ * The analysis on the page: a row a parameter, and under it the values of the
+ * one picked. A row picked lights its best value in the chart (renderLight),
+ * a value row that value. Worked out again only when the runs, the metric or
+ * the pick change, not on every poll.
+ */
+function renderEffects() {
+  const varied = (state.job && state.job.varied) || [];
+  const box = $('sim-effects');
+  const pick = $('effects-metric');
+  if (!pick.options.length) {
+    fill(pick, EFFECT_METRICS.map(([, k]) => k), (k) => EFFECT_METRICS.find((m) => m[1] === k)[0]);
+  }
+  const metricKey = pick.value || 'score';
+  const format = EFFECT_METRICS.find((m) => m[1] === metricKey)[2];
+  const shown = [state.job && state.job.id, state.rows.length, metricKey,
+                 state.effectsParam, varied.join()].join('|');
+  if (box.dataset.shown === shown) return;
+  box.dataset.shown = shown;
+  box.hidden = !varied.length || !state.rows.some((r) => !r.error);
+  if (box.hidden) return;
+
+  const f = state.fields;
+  const span = f ? [Date.parse(f.from + 'T00:00:00Z'), Date.parse(f.to + 'T23:59:59Z')] : null;
+  const metric = (r) => (r.kpi ? r.kpi[metricKey] ?? null : null);
+  const effects = paramEffects(state.rows, varied, metric, LOW_BETTER.includes(metricKey), span);
+  const label = paramValue;
+  const signed = (v) => (v > 0 ? '+' : '') + format(v);
+  const count = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+  const row = (body, cells, data) => {
+    const line = document.createElement('tr');
+    Object.assign(line.dataset, data);
+    for (const [text, cls] of cells) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      if (cls) td.className = cls;
+      line.appendChild(td);
+    }
+    body.appendChild(line);
+    return line;
+  };
+
+  const body = $('effects-rows');
+  body.textContent = '';
+  if (!effects.length || !effects[0].values.length) {
+    // a set saved before the score, on a service that has not added it yet
+    const empty = row(body, [[`no run of this set has a ${EFFECT_METRICS.find((m) => m[1] === metricKey)[0]}`
+      + ': pick another metric', 'hint']], {});
+    empty.className = 'empty';
+    empty.firstChild.colSpan = 8;
+  }
+  for (const e of effects) {
+    if (!e.best) continue;
+    const line = row(body, [
+      [e.param],
+      [`${label(e.param, e.best.value)} (${format(e.best.median)})`],
+      [`${label(e.param, e.worst.value)} (${format(e.worst.median)})`],
+      [format(e.effect), 'num'],
+      [e.consistency === null ? 'n/a' : `${Math.round(e.consistency * 100)}% of ${e.best.contexts}`
+        + (e.edge === null ? '' : ` · ${signed(e.edge)}`), 'num'],
+      [`${Math.round(e.eta2 * 100)}%`, 'num'],
+      [`${count(e.best.slicesWon)}/${e.slices}`, 'num'],
+      [e.verdict, 'verdict ' + (e.verdict === 'decides' ? 'strong' : e.verdict === 'matters little' ? 'weak' : '')],
+    ], { param: e.param, best: e.best.value });
+    if (e.param === state.effectsParam) line.className = 'selected';
+  }
+
+  const picked = effects.find((e) => e.param === state.effectsParam && e.best);
+  $('effects-values').hidden = !picked;
+  const values = $('effects-value-rows');
+  values.textContent = '';
+  if (!picked) return;
+  $('effects-values-param').textContent = picked.param;
+  for (const v of picked.values) {
+    row(values, [
+      [label(picked.param, v.value)], [String(v.runs), 'num'], [format(v.median), 'num'],
+      [v.contexts ? `${count(v.first)} of ${v.contexts}` : 'n/a', 'num'],
+      [`${count(v.slicesWon)}/${picked.slices}`, 'num'],
+      [[v === picked.best ? 'best' : v === picked.worst ? 'worst' : '',
+        v.runs < 3 ? 'few runs' : ''].filter(Boolean).join(' · '), 'hint'],
+    ], { value: v.value });
+  }
+}
+
+$('effects-metric').addEventListener('change', renderEffects);
+$('effects-rows').addEventListener('click', (event) => {
+  const line = event.target.closest('tr[data-param]');
+  if (!line) return;
+  state.effectsParam = line.dataset.param;
+  state.light = { param: line.dataset.param, value: line.dataset.best };
+  renderLight();
+  renderEffects();
+  draw();
+});
+$('effects-value-rows').addEventListener('click', (event) => {
+  const line = event.target.closest('tr[data-value]');
+  if (!line) return;
+  state.light = { param: state.effectsParam, value: line.dataset.value };
+  renderLight();
+  draw();
+});
+
+/* ---------------------------------------------------------- KPI analysis */
 
 function openAnalysis(n) {
   const row = state.rows.find((r) => r.n === n);
   if (!row || !row.kpi) return;
-  const a = analyse(row);
   const el = (tag, text, cls) => {
     const node = document.createElement(tag);
     if (text !== undefined) node.textContent = text;
     if (cls) node.className = cls;
     return node;
   };
-  const list = (items) => {
-    const ul = el('ul');
-    for (const item of items.length ? items : ['nessuno']) ul.append(el('li', item));
-    return ul;
-  };
   const body = $('analysis-body');
   body.textContent = '';
-  body.append(el('p', a.summary, 'analysis-summary'));
-  const table = el('table');
-  table.append(el('thead'));
-  table.tHead.insertRow().append(...['KPI', 'Valore', 'Giudizio', 'Motivazione'].map((h) => el('th', h)));
-  const tbody = el('tbody');
-  const cls = { '\u2713': 'good', '~': 'ok', '\u2717': 'bad' };
-  for (const [label, value, mark, reason] of a.table) {
-    const tr = tbody.insertRow();
-    tr.append(el('td', label), el('td', value, 'num'), el('td', mark, cls[mark]), el('td', reason));
+  // the parameters on top, each name over its value
+  const params = Object.entries(row.params || {});
+  if (params.length) {
+    const dl = el('dl', undefined, 'run-params');
+    for (const [k, v] of params) {
+      const pair = el('div');
+      pair.append(el('dt', k), el('dd', paramValue(k, v)));
+      dl.append(pair);
+    }
+    body.append(dl);
   }
-  table.append(tbody);
-  body.append(table,
-    el('h3', 'Valutazione complessiva'), el('p', 'Punti di forza:'), list(a.strengths),
-    el('p', 'Punti deboli critici:'), list(a.weaknesses),
-    el('h3', 'Cosa farei / Raccomandazioni'), el('p', 'Classificazione: ' + a.verdict),
-    el('p', 'Azioni concrete suggerite:'), list(a.todo));
-  $('analysis-title').textContent = `analisi KPI \u00b7 ${runId(n)} ${paramsText(row.params)}`;
+  body.append(...analysisNodes(row));
+  $('analysis-title').textContent = `analisi KPI \u00b7 ${runId(n)}`;
   $('analysis-dialog').showModal();
 }
 
@@ -1130,6 +1376,7 @@ async function start() {
   state.forms = s.params || {};
   state.defaults = s.defaults || {};
   if (s.equity !== undefined && s.equity !== null) $('balance').value = s.equity;
+  if (s.leverage) $('leverage').value = s.leverage;
   fill($('strategy'), s.strategies || []);
   fill($('instrument'), state.instruments.map((r) => r.instrument));
   onStrategy();

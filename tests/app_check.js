@@ -19,6 +19,12 @@
 const fs = require('fs'), vm = require('vm'), path = require('path'), assert = require('assert');
 const src = fs.readFileSync(
   path.join(__dirname, '..', 'web', 'static', 'app.js'), 'utf8');
+// Was: app.js alone. Now: menu.js's shared globals first - palette() and the
+// dashes, which the run page's canvases read since the layout of DESIGN.md -
+// and not its menu, which is wiring over a page this sandbox does not have
+const menu = fs.readFileSync(
+  path.join(__dirname, '..', 'web', 'static', 'menu.js'), 'utf8');
+const shared = menu.slice(0, menu.indexOf('\n(function () {'));
 
 // every canvas call is recorded rather than performed, so "it drew something"
 // is a question that can be asked
@@ -55,7 +61,9 @@ const sandbox = {
   console, Math, Number, String, Array, JSON, Date, isFinite, URLSearchParams,
   document: { getElementById: (id) => (nodes[id] || (nodes[id] = element())),
               createElement: element, querySelector: () => null,
-              addEventListener() {} },
+              addEventListener() {}, documentElement: {} },
+  // no stylesheet here: every colour of the theme reads as empty
+  getComputedStyle: () => ({ getPropertyValue: () => '' }),
   window: { devicePixelRatio: 2, addEventListener() {} },
   history: { replaceState() {} }, location: { search: '' },
   // the timeframe ladder debounces its fetch; here it is run inline, because
@@ -65,6 +73,7 @@ const sandbox = {
     { instruments: [], strategies: ['AG01'], params: {}, equity: 100000 }) }),
 };
 vm.createContext(sandbox);
+vm.runInContext(shared, sandbox);
 vm.runInContext(src, sandbox);
 const run = (code) => vm.runInContext(code, sandbox);
 
@@ -131,13 +140,16 @@ assert.strictEqual(arrows(), 2, 'wide bars: one arrow per trade');
 run(`state.data.candles = new Array(4000).fill(${CANDLE});`);
 assert.strictEqual(arrows(), 2, 'bars too narrow: still one mark per trade');
 
+// Was: 3 and then 2, when the selection's entry was a dot. Now: one more
+// each, since that entry is a triangle up or down like the arrows (the
+// markers of web/DESIGN.md), drawn with or without an exit
 run('state.selected = 1;');
-assert.strictEqual(arrows(), 3,
-  'a selection does not hide the other trades, and adds the arrow that runs '
-  + 'from its entry to its exit');
+assert.strictEqual(arrows(), 4,
+  'a selection does not hide the other trades, and adds its entry and the '
+  + 'arrow that runs from its entry to its exit');
 
 run('state.data.trades[1].exitPrice = null;');
-assert.strictEqual(arrows(), 2, 'a trade with no exit has nowhere to point');
+assert.strictEqual(arrows(), 3, 'a trade with no exit has nowhere to point');
 run('state.data.trades[1].exitPrice = 1;');
 
 /*
@@ -497,6 +509,52 @@ assert.strictEqual(run('heldStats().join(", ")'), 'bars min 0, bars avg 2.5, bar
   'the open trade is left out');
 run('state.data.trades = []');
 assert.strictEqual(run('heldStats().join(", ")'), 'bars min n/a, bars avg n/a, bars max n/a');
+
+/* the parameter analysis of the simulate page (paramEffects in sim.js): a
+   page of its own, so a context of its own, with menu.js's shared globals.
+   A 2x2x2 grid where slScale=2 adds 20 to the score and grows the capital in
+   every quarter, inverse=1 adds 5, and tpScale changes nothing */
+const simPage = vm.createContext({ ...sandbox });
+vm.runInContext(shared, simPage);
+// Was: sim.js alone. Now: analysis.js first, the KPIs in words it shares with the mix page
+vm.runInContext(fs.readFileSync(
+  path.join(__dirname, '..', 'web', 'static', 'analysis.js'), 'utf8'), simPage);
+vm.runInContext(fs.readFileSync(
+  path.join(__dirname, '..', 'web', 'static', 'sim.js'), 'utf8'), simPage);
+const inSim = (code) => vm.runInContext(code, simPage);
+// a run out of margin is not a candidate, whatever its KPIs say
+assert.match(inSim(`analyse({ kpi: { roi: 30, car: 20, profitFactor: 2.5, expectancy: 5, winRate: 0.5,
+  maxDrawdownPct: 5, riskReward: 2, sharpe: 2.5, carMdd: 4, ulcer: 2 },
+  margin: { ok: false, leverage: 30, peakMarginPct: 140, minFree: -5, breachAt: 0, negativeAt: null } }).verdict`),
+  /margine/);
+assert.match(inSim(`marginText({ ok: true, leverage: 30, peakMargin: 1000, peakMarginPct: 1, minFree: 90000,
+  maxOpen: 2, breachAt: null, negativeAt: null })`), /always room/);
+inSim(`var T0 = Date.UTC(2020, 0, 1), T1 = Date.UTC(2020, 11, 31, 23, 59, 59), Q = (T1 - T0) / 4;
+  var grid = [], n = 0;
+  for (const sl of ['1', '2']) for (const tp of ['1', '2']) for (const inv of ['0', '1']) {
+    const up = sl === '2';
+    grid.push({ n: ++n, params: { slScale: sl, tpScale: tp, inverse: inv }, balance: 100,
+      final: up ? 140 : 100, kpi: { score: 40 + (up ? 20 : 0) + (inv === '1' ? 5 : 0),
+      maxDrawdownPct: up ? 20 : 30 },
+      curve: up ? [1, 2, 3, 4].map((k) => [T0 + Q * k - 1000, 100 + 10 * k]) : [] });
+  }
+  grid.push({ n: 99, params: { slScale: '2', tpScale: '1', inverse: '0' }, error: 'boom' });
+  var effects = (key, low) => paramEffects(grid, ['slScale', 'tpScale', 'inverse'],
+    (r) => (r.kpi ? r.kpi[key] ?? null : null), low, [T0, T1]);`);
+const EFFECTS = JSON.parse(inSim(`JSON.stringify(effects('score', false).map((e) => [e.param,
+  e.best.value, e.worst.value, e.effect, e.consistency, e.edge, +e.eta2.toFixed(3),
+  e.best.slicesWon, e.slices, e.best.runs, e.verdict]))`));
+assert.deepStrictEqual(EFFECTS[0], ['slScale', '2', '1', 20, 1, 20, 0.941, 4, 4, 4, 'decides'],
+  'slScale moves the score, in every context and every quarter; the run in error is left out');
+assert.deepStrictEqual(EFFECTS[1].slice(0, 5).concat(EFFECTS[1][10]),
+  ['inverse', '1', '0', 5, 1, 'middling'], 'inverse wins every context but explains little');
+assert.deepStrictEqual([EFFECTS[2][0], EFFECTS[2][3], EFFECTS[2][6], EFFECTS[2][7], EFFECTS[2][10]],
+  ['tpScale', 0, 0, 2, 'matters little'], 'tpScale changes nothing, and a tied quarter is shared');
+const LOW = JSON.parse(inSim(`JSON.stringify(effects('maxDrawdownPct', true)[0])`));
+assert.deepStrictEqual([LOW.param, LOW.best.value, LOW.best.median, LOW.effect],
+  ['slScale', '2', 20, 10], 'a drawdown is better low: the smaller one is the best value');
+assert.strictEqual(inSim(`paramEffects(grid, ['slScale'], (r) => null, false, null)[0].best`), null,
+  'no run with the figure, no best value');
 
 console.log('app.js: loaded, curve drawn, arrows, clicks, swings, panels and '
   + 'outcomes checked, %d canvas calls', calls.length);

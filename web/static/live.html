@@ -4,13 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>parity-deriva live</title>
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="static/fonts.css">
+<link rel="stylesheet" href="static/tokens.css">
 <link rel="stylesheet" href="static/app.css">
+<link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="static/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="static/apple-touch-icon.png">
+<!--
+  The theme the switch forced, before the first paint. Here and not in
+  menu.js because the scripts load at the bottom of the page: without it a
+  page forced to light would show the dark one for a moment, or the other way.
+-->
+<script>
+  try {
+    const theme = localStorage.getItem('parity-deriva.theme');
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  } catch (error) { /* nothing kept: the system's theme */ }
+</script>
 </head>
 <body>
 
 <header>
   <div id="brand">
-    <h1>parity-deriva &middot; live</h1>
+    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="201" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="201" height="28"></h1>
+    <span id="page-name">live</span>
+    <span id="env-badge" class="badge live">live &middot; real money</span>
     <span id="live-clock" class="hint"></span>
   </div>
 </header>
@@ -95,7 +114,7 @@
       <label title="lo stesso numero su ogni conto: un conto in USD (eToro) lo prende 1:1">capitale
         <input type="number" id="new-capital" min="1" step="any" required></label>
       <fieldset id="new-accounts"><legend>accounts</legend><p class="hint">reading the accounts&hellip;</p></fieldset>
-      <button type="submit" id="new-start">start</button>
+      <button type="submit" id="new-start" class="primary">start</button>
     </form>
     <aside id="new-summary"><p class="hint">scegli una strategia: qui compare il riassunto della sua simulazione</p></aside>
   </div>
@@ -108,14 +127,20 @@
 <dialog id="sim-dialog">
   <form method="dialog" class="dialog-head">
     <strong>strategie simulate</strong>
-    <button type="submit" aria-label="close">close</button>
+    <button type="submit" class="dialog-close" aria-label="close" title="close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </form>
-  <div id="sim-tabs">
-    <button type="button" data-tab="sweeps" aria-pressed="true">simulazioni (sweep)</button>
-    <button type="button" data-tab="runs" aria-pressed="false">backtest salvati</button>
+  <div class="dialog-body">
+    <div id="sim-tabs">
+      <button type="button" data-tab="sweeps" aria-pressed="true">simulazioni (sweep)</button>
+      <button type="button" data-tab="runs" aria-pressed="false">backtest salvati</button>
+    </div>
+    <div id="sim-list"><p class="hint">leggo&hellip;</p></div>
+    <p id="sim-message" class="hint" hidden></p>
   </div>
-  <div id="sim-list"><p class="hint">leggo&hellip;</p></div>
-  <p id="sim-message" class="hint" hidden></p>
+  <form method="dialog" class="dialog-foot">
+    <span>esc to close</span>
+    <button type="submit">close</button>
+  </form>
 </dialog>
 
 <!-- the session clicked: its capital, its trades, what it logged -->

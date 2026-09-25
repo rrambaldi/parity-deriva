@@ -4,15 +4,37 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>parity-deriva mix</title>
-<!-- relative, like the other pages: see run.html -->
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="static/fonts.css">
+<link rel="stylesheet" href="static/tokens.css">
 <link rel="stylesheet" href="static/app.css">
+<link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="static/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="static/apple-touch-icon.png">
+<!--
+  The theme the switch forced, before the first paint. Here and not in
+  menu.js because the scripts load at the bottom of the page: without it a
+  page forced to light would show the dark one for a moment, or the other way.
+-->
+<script>
+  try {
+    const theme = localStorage.getItem('parity-deriva.theme');
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  } catch (error) { /* nothing kept: the system's theme */ }
+</script>
 </head>
 <body>
 
 <header>
   <div id="brand">
-    <h1>parity-deriva &middot; mix</h1>
+    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="201" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="201" height="28"></h1>
+    <span id="page-name">mix</span>
+    <span id="env-badge" class="badge">offline &middot; no orders</span>
   </div>
+</header>
+
+<!-- the controls, a bar of their own under the header -->
+<div class="bar">
   <!--
     A mix is runs of the saved sets traded side by side, each on its own
     capital: its curve is theirs added up at every close, on one time axis
@@ -21,14 +43,18 @@
   <form id="mix-controls" autocomplete="off">
     <label>mix <select id="mix-pick"></select></label>
     <label>name <input type="text" id="mix-name" placeholder="optional" size="16" maxlength="120"></label>
+    <!-- the one account's n:1: the mix's margin is checked on it (report.margin) -->
+    <label>leverage <input type="number" id="mix-leverage" min="1" step="1" size="4" placeholder="30"></label>
+    <button type="button" id="mix-together" hidden
+      title="trade every run on one account: each sized on the shared capital, a trade the margin does not cover refused">simulate together</button>
     <button type="button" id="mix-delete" hidden title="delete this mix; its sets and their runs stay">delete</button>
   </form>
+  <!-- a strategy, then one of its simulations: its runs are listed below -->
   <form id="mix-add" autocomplete="off">
-    <label>set <select id="add-set"></select></label>
-    <label>run <select id="add-run"></select></label>
-    <button type="submit">add to the mix</button>
+    <label>strategy <select id="add-strategy"></select></label>
+    <label>simulation <select id="add-set"></select></label>
   </form>
-</header>
+</div>
 
 <p id="message" hidden></p>
 
@@ -37,8 +63,15 @@
 <section id="mix-chart-panel">
   <div id="mix-head">
     <span id="mix-title">no mix yet</span>
+    <!-- the runs' profits added up on the one capital, or the runs traded
+         together on it (report.together): which one the page shows -->
+    <span id="mix-views" hidden>
+      <button type="button" data-view="summed" aria-pressed="true" title="every run's profit, as it made it, on the one capital">summed</button>
+      <button type="button" data-view="together" aria-pressed="false" title="the runs traded together on the one capital">together</button>
+    </span>
     <span id="mix-readout"></span>
   </div>
+  <p id="mix-margin" class="hint"></p>
   <canvas id="mix-equity" height="340"></canvas>
   <p class="legend" id="mix-legend"></p>
 </section>
@@ -53,7 +86,42 @@
   </table>
 </section>
 
+<!-- the mix read as a whole: its KPIs in words (analysis.js), what each run
+     made of it, how their days move together (web/service.py _mixAnalysis) -->
+<section id="mix-analysis" hidden>
+  <div id="kpi-head"><strong>analysis</strong><span class="hint" id="mix-analysis-view"></span></div>
+  <div id="analysis-body">
+    <p id="mix-warning" class="hint" hidden></p>
+    <div id="mix-kpi"></div>
+    <h3>the runs in the mix</h3>
+    <table id="mix-parts">
+      <thead><tr><th>run</th><th class="num">net</th><th class="num">share</th>
+        <th class="num">max DD alone</th><th class="num">with the rest</th><th class="num">refused</th></tr></thead>
+      <tbody id="mix-parts-rows"></tbody>
+    </table>
+    <p id="mix-diversification"></p>
+    <h3>how their days move together</h3>
+    <p class="hint">correlation of the daily profit, &minus;1 to +1: near 0 is what spreads the risk</p>
+    <table id="mix-matrix"></table>
+  </div>
+</section>
+
+<!-- the runs of the simulation picked, the best score first (report.score in
+     performance/report.py), each with its capital and its curve: add puts
+     one in the mix, remove takes it out -->
+<section id="runs-panel">
+  <div id="runs-head"><span id="runs-title">runs</span></div>
+  <table id="runs-table">
+    <thead><tr><th>#</th><th>parameters</th><th class="num">score</th><th class="num">trades</th>
+      <th class="num">ROI</th><th class="num">profit factor</th><th class="num">max DD</th>
+      <th class="num">Sharpe</th><th class="num">capital</th><th class="num">net</th>
+      <th>equity</th><th></th></tr></thead>
+    <tbody id="runs-rows"></tbody>
+  </table>
+</section>
+
 <script src="static/menu.js"></script>
+<script src="static/analysis.js"></script>
 <script src="static/mix.js"></script>
 </body>
 </html>

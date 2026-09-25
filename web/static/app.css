@@ -2,41 +2,15 @@
  * Two panels: the chart on top, the trades under it. Everything else is
  * chrome around those two.
  *
- * The colours are a small fixed set with one job each - long is blue, short
- * is amber, a target is green, a stop is red, and nothing else uses those
- * four. A trade's row and its markers on the chart are deliberately the same
- * colour, because the whole interaction is "this row is that thing up there".
+ * Every colour is a token of tokens.css (web/DESIGN.md), the same names in
+ * both themes, and each has one job: long, a target, a gain and a rising
+ * candle are --up; short, a stop, a loss and a falling candle are --down;
+ * the entry and the selected trade are --entry. A trade's row and its
+ * markers on the chart are deliberately the same colour, because the whole
+ * interaction is "this row is that thing up there". Colour is never the
+ * only sign: a triangle, a sign, a word or a dash always goes with it.
+ * Ochre belongs to the brand and to the page's one main button, nothing else.
  */
-
-:root {
-  --bg: #12151a;
-  --panel: #181c23;
-  --line: #2a303a;
-  --text: #dfe4ec;
-  --dim: #8b95a6;
-  --up: #3fb68b;
-  --down: #e2555a;
-  --entry: #58a6ff;
-  --exit: #c8a2ff;
-  --tp: #3fb68b;
-  --sl: #e2555a;
-  /* where a walking stop ended up: the same family as the stop it came from
-     would be unreadable next to it, so it gets its own */
-  --trail: #ff9f45;
-  --long: #58a6ff;
-  --short: #e8a33d;
-  /* one colour per price feed on the live page: the closes a feed drew, the
-     trades its session took, its line in the skew strip (livechart.js reads
-     these off the root). A provider not named here is drawn --dim. */
-  --feed-twelvedata: #f2f2f2;
-  --feed-ig: #58a6ff;
-  --feed-capital: #e8a33d;
-  --feed-etoro: #3fb68b;
-  --feed-mt5: #c8a2ff;
-  --feed-ib: #ff9f45;
-  --feed-oanda: #e2555a;
-  --font: 13px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-}
 
 * { box-sizing: border-box; }
 
@@ -44,78 +18,237 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: var(--font);
+  font: var(--fs-body)/var(--lh) var(--font-sans);
+  /* a slashed zero: 0 and O side by side in an instrument or an ID */
+  font-feature-settings: "zero" 1;
 }
 
+/* the figures: prices, times, amounts, IDs, code - in the mono, whose
+   digits line up in a column whatever they are */
+td.num, pre, code, #chart-trade, #live-clock, #data-dir,
+input[type="number"], input[type="date"], .event {
+  font-family: var(--font-mono);
+}
+/* the trades table's times and numbers, which have no class of their own:
+   #, signal, entry and exit */
+#trade-rows td:is(:nth-child(1), :nth-child(2), :nth-child(5), :nth-child(7)) {
+  font-family: var(--font-mono);
+}
+
+a { color: var(--accent-text); }
+
+/* tokens.css says "light dark" and lets the system pick; a theme forced by
+   the switch has to say so too, or the browser's own parts - scrollbars, the
+   date picker, a select's list - stay in the system's */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+/* ------------------------------------------------------------ header */
+
+/* the header: the logo, the page, where the orders go, and the pages. The
+   controls are a bar of their own under it */
 header {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  padding: 0 var(--gutter);
+}
+#brand {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 60px;
+  padding: var(--space-2) 0;
+}
+h1 { margin: 0; display: flex; }
+h1 img { height: 28px; width: auto; }
+/* one logo per theme, shown the way tokens.css picks its values: the light
+   one unless the system asks for dark and the switch has not said light, or
+   the switch said dark */
+.logo-dark { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .logo-light { display: none; }
+  :root:not([data-theme="light"]) .logo-dark { display: block; }
+}
+:root[data-theme="dark"] .logo-light { display: none; }
+:root[data-theme="dark"] .logo-dark { display: block; }
+
+#page-name {
+  font-size: var(--fs-title);
+  font-weight: 500;
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--line);
+  line-height: 28px;
+}
+/* where the orders go, on every page and always in sight: whoever looks
+   must know at any moment whether real money is moving */
+.badge {
+  font-size: var(--fs-small);
+  line-height: 18px;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.badge.practice { border-color: var(--entry); color: var(--entry); }
+/* the one thing on the screen filled with red */
+.badge.live { background: var(--live); border-color: var(--live); color: var(--on-live); font-weight: 700; }
+.badge.live::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  vertical-align: 1px;
+  border-radius: 50%;
+  background: currentColor;
+}
+/* the page waiting on the service (menu.js): a ring that turns */
+#spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--line);
+  border-top-color: var(--text-2);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+#spinner[hidden] { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { #spinner { animation-duration: 3s; } }
+
+/* the theme switch: three buttons in one frame, the one in force pressed */
+#theme { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-s); }
+#theme button { height: 28px; width: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 4px; color: var(--text-3); }
+#theme button:hover { color: var(--text); }
+#theme button[aria-pressed="true"] { background: var(--raised); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+
+/* the pages, at the right of every header (menu.js) */
+#menu { margin-left: auto; display: flex; gap: var(--space-1); }
+#menu a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-h);
+  padding: 0 var(--space-3);
+  color: var(--text-2);
+  text-decoration: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+}
+#menu a:hover { color: var(--text); border-color: var(--line); }
+#menu [aria-current="page"] { color: var(--text); border-color: var(--border); background: var(--raised); }
+/* something going on in the service - a sweep, a live session - lights its
+   entry up on every page (menu.js, api/busy). It is news, not a success */
+#menu a.busy { color: var(--entry); }
+#menu a.busy svg { animation: busy 1.6s ease-in-out infinite; }
+@keyframes busy {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .4; }
+}
+@media (prefers-reduced-motion: reduce) { #menu a.busy svg { animation: none; } }
+@media (max-width: 900px) {
+  #menu span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  #menu a { padding: 0 var(--space-2); }
+}
+
+/* ------------------------------------------------------------ controls */
+
+/* the controls, under the header: a bar of their own */
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
   align-items: flex-end;
-  gap: 16px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--line);
+  padding: var(--space-3) var(--gutter) var(--space-4);
   background: var(--panel);
+  border-bottom: 1px solid var(--line);
 }
 
-h1 {
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  margin: 0;
-  color: var(--dim);
-}
-
-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+form { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
 
 label, .yn {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 11px;
+  gap: var(--space-1);
+  font-size: var(--fs-label);
   text-transform: uppercase;
-  letter-spacing: .06em;
-  color: var(--dim);
+  letter-spacing: var(--tracking-label);
+  color: var(--text-3);
 }
 /* a flag as a Y box and an N box, side by side under its name */
 .yn label { display: inline-flex; flex-direction: row; align-items: center; gap: 3px; }
 
 select, input, button {
-  font: var(--font);
-  background: #10131a;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  font-feature-settings: "zero" 1;
   color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 5px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  padding: 0 var(--space-2);
+}
+/* one height for every control, and a target that stays big enough for a
+   finger; a box to tick is its own size */
+select, button, input:not([type="checkbox"]):not([type="radio"]):not([type="file"]) {
+  height: var(--control-h);
+}
+input[type="file"] { padding: 6px var(--space-2); }
+
+/* the secondary button, which is every button but one */
+button { cursor: pointer; background: transparent; font-weight: 500; }
+button:hover { border-color: var(--text-2); }
+button:disabled { opacity: .5; cursor: default; }
+/* the page's main action - one per page, the only ochre filled on screen */
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+button.primary:disabled { opacity: 1; background: var(--line); border-color: var(--line); color: var(--text-3); }
+
+/* the focus ring: always there for the keyboard, never taken away without
+   something in its place */
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+select:focus-visible, input:focus-visible {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 20%, transparent);
 }
 
-button { cursor: pointer; }
-button:hover { border-color: var(--entry); }
-button:disabled { opacity: .5; cursor: default; }
+/* ------------------------------------------------------------ messages */
 
 #message {
   margin: 0;
-  padding: 10px 16px;
-  background: #3a1d20;
-  border-bottom: 1px solid var(--sl);
-  color: #ffd7d9;
+  padding: 10px var(--gutter);
+  background: var(--error-bg);
+  border-bottom: 1px solid var(--down);
+  color: var(--text);
   white-space: pre-wrap;
 }
-#message.info { background: #17252f; border-bottom-color: var(--entry); color: #cfe6ff; }
+#message.info { background: var(--info-bg); border-bottom-color: var(--entry); }
 
-section { padding: 12px 16px; }
+/* ------------------------------------------------------------ panels */
+
+/* every panel on the page's background: a change of surface and a rule, no
+   shadow */
+section {
+  margin: var(--space-4) var(--gutter);
+  padding: var(--space-4);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+}
 /* the two strips live inside the chart panel and are read as part of it: same
    bars, same width, no padding of their own and no gap above. A strip that
    floats a centimetre under the candles is a second chart; one that touches
    them is the same chart with another axis. */
-#curve-panel, #levels-panel { padding: 0; margin-top: 4px; }
+#curve-panel, #levels-panel { margin: 4px 0 0; padding: 0; border: 0; border-radius: 0; background: none; }
 
 #chart-tools, #equity-head, #levels-head, #curve-head {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
   margin-bottom: 6px;
-  color: var(--dim);
+  color: var(--text-3);
 }
 /* the title has its own line. It is a title - what was run, on what, over
    what - and a readout that grows as the cursor moves used to push it about
@@ -123,27 +256,35 @@ section { padding: 12px 16px; }
    which is free to wrap without moving anything above it. */
 #chart-head {
   margin-bottom: 4px;
+  font-size: var(--fs-title);
   font-weight: 600;
   line-height: 1.4;
 }
 /* and that row wraps rather than squeezing its buttons off the end */
 #chart-tools { flex-wrap: wrap; row-gap: 6px; }
 /* the disclosure triangle: a <summary> laid out as flex loses the marker the
-   browser would draw, so it is asked for again explicitly */
+   browser would draw, so it is drawn again - with borders, since the font has
+   no triangle of its own */
 #equity-head, #levels-head, #curve-head { cursor: pointer; list-style: none; }
-#equity-head::before, #levels-head::before,
-#curve-head::before { content: "\25be"; color: var(--dim); }
+#equity-head::before, #levels-head::before, #curve-head::before {
+  content: "";
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  color: var(--text-3);
+}
 #equity-box:not([open]) #equity-head::before,
 #curve-box:not([open]) #curve-head::before,
-#levels-box:not([open]) #levels-head::before { content: "\25b8"; }
+#levels-box:not([open]) #levels-head::before { transform: rotate(-90deg); }
 #equity-head::-webkit-details-marker,
 #curve-head::-webkit-details-marker,
 #levels-head::-webkit-details-marker { display: none; }
 #chart-title, #equity-title, #levels-title, #curve-title { color: var(--text); }
+#equity-title, #levels-title, #curve-title { font-size: var(--fs-title); font-weight: 600; }
 /* the curve is not hovered but it is clicked: a click on it goes to the trade
    that made that step */
 #equity { cursor: pointer; }
-#equity-note, #levels-note, #curve-note { color: var(--dim); }
+#equity-note, #levels-note, #curve-note { color: var(--text-3); font-size: var(--fs-small); }
 /* nothing to hover on either of the two panels below the chart */
 #levels-chart, #curve-chart { cursor: default; }
 #chart-zoom { color: var(--entry); }
@@ -151,7 +292,7 @@ section { padding: 12px 16px; }
    because it is a table row written as a line */
 #chart-trade {
   margin: 0 0 6px;
-  font: 12px ui-monospace, Menlo, Consolas, monospace;
+  font-size: var(--fs-small);
   color: var(--text);
 }
 /* the buttons sit together at the right end; only the first one needs the
@@ -164,38 +305,36 @@ section { padding: 12px 16px; }
   box-sizing: border-box;
   margin: 0 0 10px;
   padding: 8px 10px;
-  color: var(--dim);
-  line-height: 1.45;
+  color: var(--text-2);
+  line-height: var(--lh);
 }
 /* a pressed toggle, so "are the levels on" is answerable without looking at
    the chart it is a question about */
 #levels[aria-pressed="false"], #slope[aria-pressed="false"] { opacity: .55; }
 
-/* the shading's own two colours, so the legend and the canvas cannot drift */
-.k.up { color: #3ca370; }
-.k.down { color: #c8553d; }
-#slope-note { color: var(--dim); }
+#slope-note { color: var(--text-3); }
 #calendar-box { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
-#calendar-state { color: var(--dim); margin: 4px 0 6px; }
-#calendar-how { color: var(--dim); margin: 0 0 8px; padding-left: 20px; line-height: 1.6; }
+#calendar-state { color: var(--text-3); margin: 4px 0 6px; }
+#calendar-how { color: var(--text-2); margin: 0 0 8px; padding-left: 20px; line-height: 1.6; }
 #calendar-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 
-#detail-box { color: var(--dim); display: inline-flex; gap: 4px; align-items: center; }
-#detail-box select { font: inherit; }
+#detail-box { color: var(--text-3); display: inline-flex; gap: 4px; align-items: center; }
 
 canvas {
   width: 100%;
   display: block;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-s);
   cursor: crosshair;
 }
 /* the price chart is draggable, and a crosshair does not say so. app.js
    swaps this for 'grabbing' while a drag is running. */
 #chart { cursor: grab; }
 
-.legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 6px 0 0; color: var(--dim); }
+/* ------------------------------------------------------------ legend */
+
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 6px 0 0; color: var(--text-2); font-size: var(--fs-small); }
 .k::before {
   content: "";
   display: inline-block;
@@ -205,133 +344,209 @@ canvas {
   vertical-align: middle;
   border-top: 2px solid currentColor;
 }
-/* the entry arrows, which are solid marks rather than levels: a triangle in
-   the legend would need its own shape, and the colour is what identifies them */
-.k.buy { color: var(--long); }
-.k.sell { color: var(--short); }
-/* an indicator's own colour is set inline, because which curve gets which is
-   decided by the order the strategy declared them in */
-.k.curve::before { border-top-style: solid; }
+/* the entry arrows, which are solid marks rather than levels: the same
+   triangle as on the chart, up for a buy and down for a sell */
+.k.buy { color: var(--up); }
+.k.sell { color: var(--down); }
+.k.buy::before, .k.sell::before {
+  width: 0;
+  border-top: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+}
+.k.buy::before { border-bottom: 9px solid currentColor; }
+.k.sell::before { border-top: 9px solid currentColor; }
+/* one of many - a strategy's curves, a mix's runs, the live feeds: told apart
+   by the dash, drawn by the same dashSample() as the line (menu.js) */
+.k.series { color: var(--text-3); }
+.k.series::before { display: none; }
+.k.series.mix-total { color: var(--text); }
+.k .dash { margin-right: 6px; vertical-align: middle; }
 .k.entry { color: var(--entry); }
-.k.exit { color: var(--exit); }
-.k.tp { color: var(--tp); }
-.k.sl { color: var(--sl); }
-.k.trail { color: var(--trail); }
-/* the swings, dotted on the chart and dotted in the legend */
-.k.support { color: var(--tp); }
-.k.resistance { color: var(--sl); }
-.k.support::before, .k.resistance::before { border-top-style: dotted; }
+.k.exit { color: var(--mark-exit); }
+.k.exit::before { border-top-width: 1px; }
+.k.tp { color: var(--up); }
+.k.sl { color: var(--down); }
+.k.trail { color: var(--mark-trail); }
+.k.tp::before, .k.sl::before { border-top-style: dashed; }
+.k.trail::before { border-top-style: dotted; }
+/* the swings: neutral, a resistance dashed and a support dotted, as on the
+   chart - green and red are taken */
+.k.support, .k.resistance { color: var(--text-3); }
+.k.resistance::before { border-top-style: dashed; }
+.k.support::before { border-top-style: dotted; }
 /* the entry-to-exit arrow, which is solid and thicker than a level */
-.k.won { color: var(--tp); }
-.k.lost { color: var(--sl); }
+.k.won { color: var(--up); }
+.k.lost { color: var(--down); }
 .k.won::before, .k.lost::before { border-top-width: 3px; }
 /* the box around the bars the entry rule read */
 .k.setup { color: var(--text); }
 .k.setup::before { border-top-style: dashed; }
-.k.tp::before, .k.sl::before, .k.trail::before { border-top-style: dashed; }
+/* the slope shading's two sides */
+.k.up { color: var(--up); }
+.k.down { color: var(--down); }
 /* the legend folds away; the help behind its (?) is a dialog */
-#legend-box { margin: 6px 0 0; color: var(--dim); }
+#legend-box { margin: 6px 0 0; color: var(--text-3); }
 #legend-box > summary { cursor: pointer; width: max-content; }
-#help-open { padding: 0 7px; border-radius: 50%; line-height: 18px; }
+#help-open { height: 20px; padding: 0 7px; border-radius: 50%; line-height: 18px; }
 #help-dialog { width: min(640px, calc(100vw - 32px)); }
-#data-panel { margin: 16px auto; }
+#data-panel { margin: var(--space-4) auto; }
 #help-list { margin: 0; padding-left: 18px; line-height: 1.5; }
 #help-list li + li { margin-top: 6px; }
 
-#trade-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 8px; color: var(--dim); }
-#report-panel { display: flex; flex-wrap: wrap; gap: 24px; padding-top: 0; }
-#report, #counts { display: flex; flex-wrap: wrap; gap: 18px; }
+/* ------------------------------------------------------------ report */
+
+#trade-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 8px; color: var(--text-3); }
+#report-panel { display: flex; flex-wrap: wrap; gap: var(--space-6); }
+#report, #counts { display: flex; flex-wrap: wrap; gap: var(--space-5); }
 
 .stat { display: flex; flex-direction: column; gap: 2px; }
-.stat .label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
-.stat .value { font-size: 15px; }
+.stat .label { font-size: var(--fs-label); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-3); }
+/* the first row - trades, won, lost, net... - is what the run is judged on;
+   the counts under it are how it got there */
+.stat .value { font-size: var(--fs-stat); font-weight: 500; }
+#report .stat .value { font-size: var(--fs-kpi); }
 .stat .value.good { color: var(--up); }
 .stat .value.bad { color: var(--down); }
+
+/* ------------------------------------------------------------ tables */
 
 table { width: 100%; border-collapse: collapse; }
 thead th {
   position: sticky;
   top: 0;
-  background: var(--bg);
+  background: var(--panel);
   text-align: left;
-  font-size: 10px;
+  font-size: var(--fs-label);
   text-transform: uppercase;
-  letter-spacing: .06em;
-  color: var(--dim);
-  font-weight: 600;
+  letter-spacing: var(--tracking-label);
+  color: var(--text-3);
+  font-weight: 500;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--border);
 }
 th.num, td.num { text-align: right; }
-tbody td { padding: 5px 8px; border-bottom: 1px solid #1f242c; white-space: nowrap; }
+tbody td { padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+/* a control in a row stays the row's size */
+td button, td input:not([type="checkbox"]) { height: auto; padding: 1px 6px; font-size: var(--fs-small); }
 tbody tr { cursor: pointer; }
-tbody tr:hover { background: #1d222b; }
-tbody tr.selected { background: #22303f; }
+tbody tr:hover { background: var(--raised); }
+tbody tr.selected { background: var(--row-selected); }
 tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--entry); }
-tbody tr.empty td, tbody tr.empty { cursor: default; color: var(--dim); }
+tbody tr.empty td, tbody tr.empty { cursor: default; color: var(--text-3); }
 tbody tr.empty:hover { background: none; }
 
-.side.long { color: var(--long); }
-.side.short { color: var(--short); }
-.outcome { font-size: 11px; padding: 1px 6px; border-radius: 3px; border: 1px solid currentColor; }
-.outcome.tp { color: var(--tp); }
-.outcome.sl { color: var(--sl); }
+/* the side, in its colour and with its triangle: a short in profit has a red
+   side and a green P&L, and the triangle is what says which is which */
+.side.long { color: var(--up); }
+.side.short { color: var(--down); }
+.side.long::before, .side.short::before {
+  content: "";
+  display: inline-block;
+  margin-right: 5px;
+  vertical-align: 1px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+}
+.side.long::before { border-bottom: 8px solid currentColor; }
+.side.short::before { border-top: 8px solid currentColor; }
+.outcome {
+  font-size: var(--fs-label);
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid currentColor;
+}
+.outcome.tp { color: var(--up); }
+.outcome.sl { color: var(--down); }
 /* an exit this page has no opinion about: it closed, on the strategy's own
    rule, and the badge says which rather than pretending to grade it */
-.outcome.other { color: var(--dim); }
-.outcome.open { color: var(--dim); }
+.outcome.other { color: var(--text-3); }
+.outcome.open { color: var(--text-3); }
 .pl.good { color: var(--up); }
 .pl.bad { color: var(--down); }
 
+/* ------------------------------------------------------------ dialogs */
+
 /* the dialogs, and the settings page's data panel that looks like one:
    the exports waiting, and the import's own report */
-#data-panel, #help-dialog, #ask-dialog, #sets-dialog, #analysis-dialog, #sim-dialog {
+#data-panel, dialog {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-m);
   padding: 12px 16px;
   width: min(760px, calc(100vw - 32px));
 }
-#help-dialog::backdrop, #ask-dialog::backdrop, #sets-dialog::backdrop, #analysis-dialog::backdrop, #sim-dialog::backdrop { background: rgba(0, 0, 0, .55); }
-.dialog-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
-.dialog-head button { margin-left: auto; }
+/* a dialog stands off the page with a shadow. Open, it is a column: the head
+   and the foot stay put and only the body between them scrolls, so the
+   scrollbar starts under the head */
+dialog {
+  border-radius: var(--radius-l);
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgba(11, 26, 38, .30), 0 2px 8px rgba(11, 26, 38, .14);
+}
+dialog[open] { display: flex; flex-direction: column; }
+dialog::backdrop { background: color-mix(in srgb, var(--brand-night) 55%, transparent); }
+.dialog-head, .dialog-foot { flex: none; display: flex; align-items: center; gap: var(--space-3); background: var(--raised); }
+.dialog-head { padding: var(--space-4) var(--space-6); border-bottom: 1px solid var(--line); }
+.dialog-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--space-5) var(--space-6); }
+.dialog-foot {
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-6);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-small); color: var(--text-3);
+}
+.dialog-foot button { height: 28px; font-size: var(--fs-small); }
+.dialog-head strong { font-size: var(--fs-stat); font-weight: 600; }
+/* the close: a round cross that turns solid under the pointer */
+.dialog-close {
+  margin-left: auto; flex: none;
+  width: var(--control-h); height: var(--control-h); padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-pill); background: var(--panel); color: var(--text);
+}
+.dialog-close:hover { background: var(--text); border-color: var(--text); color: var(--panel); }
+/* a question has no head: the room it would have taken */
+#ask-dialog { padding: var(--space-5) var(--space-6); }
 /* the yes or no asked before a long run, see askUser() */
 #ask-dialog { width: min(520px, calc(100vw - 32px)); }
+/* asked without a modal, so the menu stays in reach (sim.js): in the middle of
+   the screen all the same, over a page that is locked and says so */
+#ask-dialog[open]:not(:modal) { position: fixed; inset: 0; margin: auto; height: fit-content; z-index: 100; }
+[inert] { opacity: .45; }
 #ask-text { white-space: pre-line; margin: 0 0 14px; }
-.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; flex-basis: 100%; }
 #ask-yes { border-color: var(--entry); }
 #data-loaded {
   margin-bottom: 12px;
   padding: 8px 10px;
-  background: #10131a;
+  background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-s);
 }
 #data-loaded div + div { margin-top: 4px; }
-#data-loaded .dim, #data-dir { color: var(--dim); }
-#data-dir { margin-bottom: 6px; overflow-wrap: anywhere; }
-/* the title row: the name on the left, the page's own buttons on the
-   right, short of the menu; the controls on the row under it */
-#brand { display: flex; align-items: center; width: 100%; }
+#data-loaded .dim, #data-dir { color: var(--text-3); }
+#data-dir { margin-bottom: 6px; overflow-wrap: anywhere; font-size: var(--fs-small); }
 #data-files { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
 #data-files th, #data-files td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
-#data-files th { color: var(--dim); font-weight: normal; }
+#data-files th { color: var(--text-3); font-weight: normal; }
 #data-files td:first-child { overflow-wrap: anywhere; }
-#data-files td.missing { color: var(--sl); }
+#data-files td.missing { color: var(--down); }
 #data-rows tr { cursor: pointer; }
-#data-rows tr:hover td { background: #1d222b; }
+#data-rows tr:hover td { background: var(--raised); }
 #data-progress-box { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 #data-progress { flex: 1; height: 10px; accent-color: var(--entry); }
-#data-progress-text { color: var(--dim); white-space: nowrap; }
+#data-progress-text { color: var(--text-3); white-space: nowrap; }
 #data-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
 #data-log {
   margin: 10px 0 0;
   padding: 8px;
   max-height: 40vh;
   overflow: auto;
-  background: #10131a;
+  background: var(--bg);
   border: 1px solid var(--line);
+  border-radius: var(--radius-s);
   white-space: pre-wrap;
 }
 
@@ -342,25 +557,50 @@ tbody tr.empty:hover { background: none; }
 #grid {
   display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
   flex-basis: 100%;
-  border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px 10px;
+  margin: 0;
+  border: 1px solid var(--line); border-radius: var(--radius-s); padding: 8px 10px 10px;
 }
-#grid legend { color: var(--dim); font-size: 11px; padding: 0 4px; }
+#grid legend { color: var(--text-3); font-size: var(--fs-label); padding: 0 4px; }
 #grid-strategy, #grid-account { display: flex; flex-wrap: wrap; gap: 12px; }
 #grid-account { border-left: 1px solid var(--line); padding-left: 12px; }
 .hint { text-transform: none; letter-spacing: 0; }
-#combos { color: var(--dim); align-self: center; }
-#sim-head, #mix-head { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 6px; color: var(--dim); }
-#sim-title, #mix-title { font-weight: 600; color: var(--text); }
+/* the count of runs, then the buttons: pushed to the right end together */
+#combos { color: var(--text-3); align-self: center; margin-left: auto; }
+#sim-head, #mix-head { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 6px; color: var(--text-3); }
+#sim-title, #mix-title { font-size: var(--fs-title); font-weight: 600; color: var(--text); }
 #sim-equity { display: block; width: 100%; }
-#sim-current { margin-top: 8px; color: #cfe6ff; }
-.k.sim-run { color: #e8a33d; }
+#sim-current { margin-top: 8px; color: var(--text-2); }
+/* the run going now is the line drawn in the text's colour, the one picked
+   the selection's, the finished ones the grey that makes forty a spread */
+.k.sim-run { color: var(--text); }
 .k.sim-pick { color: var(--entry); }
-.k.sim-done { color: rgba(139, 149, 166, .6); }
+.k.sim-done { color: var(--text-3); }
+.k.sim-done::before { border-top-width: 1px; }
+/* a varied parameter and its values, one pressed lighting its runs' curves
+   (renderLight in sim.js): pressed is ink, like the lit curves */
+#sim-light { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
+#sim-light[hidden] { display: none; }
+#sim-light label { flex-direction: row; align-items: center; gap: 6px; }
+#light-values { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+#light-values button { padding: 2px 8px; font-family: var(--font-mono); font-size: var(--fs-small); }
+#light-values button[aria-pressed="true"] { color: var(--text); border-color: var(--text); background: var(--raised); }
+/* the parameter analysis (renderEffects in sim.js): no colour of its own, a
+   verdict that decides is ink and bold, one that matters little is grey */
+#sim-effects { margin-top: var(--space-4); overflow-x: auto; }
+#sim-effects[hidden] { display: none; }
+#effects-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-2); }
+#effects-head label { flex-direction: row; align-items: center; gap: 6px; }
+#effects-table td, #effects-values td { font-family: var(--font-mono); font-size: var(--fs-small); }
+#effects-table .verdict { font-family: var(--font-sans); }
+#effects-table .verdict.strong { color: var(--text); font-weight: 600; }
+#effects-table .verdict.weak, #effects-values .hint { color: var(--text-3); }
+#effects-values { margin-top: var(--space-3); }
+#effects-values[hidden] { display: none; }
 #sim-rows td.good, #mix-rows td.good { color: var(--up); }
 #sim-rows td.bad, #mix-rows td.bad { color: var(--down); }
 #sim-thead th { cursor: pointer; }
 .run-actions { white-space: nowrap; }
-.run-actions button { padding: 1px 6px; font-size: 11px; }
+.run-actions button { padding: 1px 6px; font-size: var(--fs-label); }
 @media (max-width: 640px) {
   #grid-account { border-left: 0; padding-left: 0; }
   #sim-table-panel { overflow-x: auto; }
@@ -371,100 +611,133 @@ tbody tr.empty:hover { background: none; }
 /* the saved sets of simulations */
 #sets-dialog { width: calc(100vw - 32px); max-width: none; }
 #sets-dialog, #ask-dialog { max-height: calc(100vh - 48px); }
-#sets-table th, #sets-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
-#sets-table th { color: var(--dim); font-weight: normal; }
-#sets-table .num { text-align: right; }
-#sets-table tbody tr { cursor: pointer; }
-.set-name { width: 14em; padding: 2px 6px; }
-.set-delete, .set-rerun { padding: 1px 6px; font-size: 11px; }
+#sets-table th, #sets-table td, #runs-table th, #runs-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+#sets-table th, #runs-table th { color: var(--text-3); font-weight: normal; }
+#sets-table .num, #runs-table .num { text-align: right; }
+#sets-table tbody tr, #runs-table tbody tr { cursor: pointer; }
+/* the mix's pick of a run from the simulation, see renderRuns() in mix.js */
+#runs-panel { overflow-x: auto; }
+#runs-panel[hidden] { display: none; }
+#runs-head { margin-bottom: 6px; color: var(--text-3); }
+#runs-title { font-size: var(--fs-title); font-weight: 600; color: var(--text); }
+#runs-table { border-collapse: collapse; }
+#runs-table tbody tr { cursor: default; }
+#runs-table tbody tr:hover { background: var(--raised); }
+#runs-table tr.selected { background: var(--row-selected); }
+#runs-table td.good { color: var(--up); }
+#runs-table td.bad { color: var(--down); }
+#runs-table .spark { display: block; color: var(--text-2); }
+.set-name { width: 14em; }
+.set-delete, .set-rerun { font-size: var(--fs-label); }
 #sets-table td:last-child { white-space: nowrap; }
 .set-delete:hover { border-color: var(--down); }
-#sets-open { margin-left: auto; }
 
 /* the run page's walk through the table it was opened from */
-#run-nav { display: inline-flex; align-items: center; gap: 8px; margin-left: 16px; color: var(--dim); }
+#run-nav { display: inline-flex; align-items: center; gap: 8px; margin-left: 16px; color: var(--text-3); }
 #run-nav[hidden] { display: none; }
-#run-back { color: var(--entry); text-decoration: none; }
+#run-back { color: var(--accent-text); text-decoration: none; }
 
 /* the mix page: its whole, under its runs */
 #add-set { max-width: 34em; }
-#add-run { max-width: 26em; }
 /* the run's name and its parameters wrap, rather than widen the table */
 #mix-rows td:nth-child(2), #mix-rows td:nth-child(5) { white-space: normal; }
 #mix-rows tr.mix-total td { font-weight: 600; border-top: 1px solid var(--line); }
 #mix-rows tr.mix-total { cursor: default; }
 
-/* the KPI comparison: a verdict colour always comes with its mark */
+/* the KPI comparison: a verdict colour always comes with its mark, and the
+   one in the middle has no colour at all - it is neither a gain nor a loss */
 #kpi-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; margin-bottom: 6px; }
-#kpi-head .hint { color: var(--dim); }
+#kpi-head strong { font-size: var(--fs-title); font-weight: 600; }
+#kpi-head .hint { color: var(--text-3); }
 #kpi-panel { overflow-x: auto; }
 #kpi-thead th { cursor: pointer; }
 #kpi-rows td.good { color: var(--up); }
-#kpi-rows td.ok { color: #e8c33d; }
+#kpi-rows td.ok { color: var(--text-2); }
 #kpi-rows td.bad { color: var(--down); }
 
 /* one run's KPIs in words */
 #analysis-dialog { width: min(980px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
 #analysis-body table { border-collapse: collapse; margin: 8px 0 4px; }
+/* the run's parameters, name over value, as many a line as the width takes */
+.run-params {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-5); padding: var(--space-3) var(--space-4);
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-s);
+}
+.run-params dt { font-size: var(--fs-small); color: var(--text-3); overflow-wrap: anywhere; }
+.run-params dd { margin: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
 #analysis-body th, #analysis-body td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--line); }
-#analysis-body th { color: var(--dim); font-weight: normal; }
+#analysis-body th { color: var(--text-3); font-weight: normal; }
 #analysis-body td.num { text-align: right; }
 #analysis-body td.good { color: var(--up); }
-#analysis-body td.ok { color: #e8c33d; }
+#analysis-body td.ok { color: var(--text-2); }
 #analysis-body td.bad { color: var(--down); }
-#analysis-body h3 { font-size: 13px; margin: 16px 0 4px; }
+#analysis-body h3 { font-size: var(--fs-body); margin: 16px 0 4px; }
 #analysis-body p { margin: 6px 0 2px; }
 #analysis-body ul { margin: 2px 0 6px; padding-left: 20px; }
-.analysis-summary { font-weight: bold; }
+.analysis-summary { font-weight: 600; }
+/* the score on top of it: the bar, with a mark where middling (40) and
+   good (70) begin - the colour is the verdict's, and its word is said above */
+#analysis-body .score-head { font-size: var(--fs-stat); font-weight: 600; margin: 0 0 6px; }
+.score-bar { position: relative; height: 12px; background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius-pill); overflow: hidden; }
+.score-bar span { display: block; height: 100%; border-radius: inherit; }
+.score-bar .good { background: var(--up); }
+.score-bar .ok { background: var(--text-3); }
+.score-bar .bad { background: var(--down); }
+.score-bar::before, .score-bar::after { content: ''; position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); }
+.score-bar::before { left: 40%; }
+.score-bar::after { left: 70%; }
+#analysis-body .score-parts { color: var(--text-3); font-size: var(--fs-small); margin: 6px 0 12px; }
 
 
-/* the live page */
-#live-clock { margin-left: 12px; }
+/* ------------------------------------------------------------ live */
+
+#live-clock { margin-left: 12px; font-size: var(--fs-small); }
 #live-back { margin-left: auto; }
-#live-panel, #live-detail { padding: 8px 16px; overflow-x: auto; }
+#live-panel, #live-detail { overflow-x: auto; }
 /* a session started from the live page itself */
-#new-live { margin: 8px 16px; padding: 8px 12px 12px; border: 1px solid var(--line);
-  border-radius: 6px; background: var(--panel); }
-#new-live h3 { font-size: 13px; margin: 0 0 8px; color: var(--dim); font-weight: normal; }
-#new-accounts { border: 1px solid var(--line); border-radius: 4px; margin: 0; padding: 4px 10px 8px;
+#new-live h3 { font-size: var(--fs-title); margin: 0 0 8px; font-weight: 600; }
+#new-accounts { border: 1px solid var(--line); border-radius: var(--radius-s); margin: 0; padding: 4px 10px 8px;
   flex-basis: 100%; }
-#new-accounts legend { color: var(--dim); padding: 0 4px; }
+#new-accounts legend { color: var(--text-3); padding: 0 4px; }
 #new-accounts label { display: block; padding: 2px 0; cursor: pointer; text-transform: none;
-  letter-spacing: 0; color: var(--text); }
-#new-accounts .hint { color: var(--dim); margin: 2px 0; }
-#new-accounts .real { color: var(--down); font-weight: 600; }
-#new-description { color: var(--dim); margin: 8px 0 0; max-width: 110ch; }
+  letter-spacing: 0; font-size: var(--fs-body); color: var(--text); }
+#new-accounts .hint { color: var(--text-3); margin: 2px 0; }
+/* an account that trades real money says so the way the header's badge does */
+#new-accounts .real { margin-left: 4px; padding: 0 6px; border-radius: var(--radius-pill);
+  background: var(--live); color: var(--on-live); font-weight: 700; font-size: var(--fs-label); }
+#new-description { color: var(--text-2); margin: 8px 0 0; max-width: 110ch; }
 #new-message { color: var(--entry); margin: 6px 0 0; }
 #live-table, .live-small { border-collapse: collapse; width: 100%; }
 #live-table th, #live-table td, .live-small th, .live-small td {
   text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-#live-table th, .live-small th { color: var(--dim); font-weight: normal; }
+#live-table th, .live-small th { color: var(--text-3); font-weight: normal; }
 #live-table .num, .live-small .num { text-align: right; }
 #live-table tbody tr[data-id] { cursor: pointer; }
 #live-table td.good, .live-small td.good { color: var(--up); }
 #live-table td.bad, .live-small td.bad { color: var(--down); }
-#live-foot td { color: var(--dim); border-bottom: 0; }
-#live-equity { width: 100%; display: block; margin: 8px 0; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 4px; }
+#live-foot td { color: var(--text-3); border-bottom: 0; }
+#live-equity { width: 100%; display: block; margin: 8px 0; }
 #detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 @media (max-width: 900px) { #detail-grid { grid-template-columns: minmax(0, 1fr); } }
-#live-detail h3 { font-size: 13px; margin: 12px 0 4px; color: var(--dim); font-weight: normal; }
-#event-list { max-height: 360px; overflow-y: auto; font-size: 12px; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; }
+#detail-title { font-size: var(--fs-title); font-weight: 600; }
+#live-detail h3 { font-size: var(--fs-body); margin: 12px 0 4px; color: var(--text-3); font-weight: normal; }
+#event-list { max-height: 360px; overflow-y: auto; font-size: var(--fs-small); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--radius-s); padding: 4px 8px; }
 .event { white-space: pre; }
 .event-transaction { color: var(--up); }
 .event-signal, .event-order { color: var(--entry); }
 .event-status { color: var(--down); }
 /* a parity status is a divergence from the reference, not an error */
-.event-parity { color: var(--trail); }
-.event-candle { color: var(--dim); }
-#console { max-height: 260px; overflow: auto; font-size: 11px; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; margin: 0; }
-.hint { color: var(--dim); }
+.event-parity { color: var(--text-2); }
+.event-candle { color: var(--text-3); }
+#console { max-height: 260px; overflow: auto; font-size: var(--fs-label); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--radius-s); padding: 6px 8px; margin: 0; }
+.hint { color: var(--text-3); }
 
 /* the skew board, the live chart and the trade skew tables */
-#skew-board, #live-chart-panel, #trade-skew { padding: 8px 16px; overflow-x: auto; }
-#skew-table tr.hint td { color: var(--dim); }
+#skew-board, #live-chart-panel, #trade-skew { overflow-x: auto; }
+#skew-table tr.hint td { color: var(--text-3); }
 #skew-table td.bad, #trade-skew tr.bad td, #skew-note.bad { color: var(--down); }
 #skew-note { margin: 6px 0 0; }
 #chart-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 6px; }
@@ -474,69 +747,62 @@ tbody tr.empty:hover { background: none; }
 /* the two canvases are one chart: same bars, same margins, no gap to speak of */
 #live-skew { margin-top: 4px; }
 #live-chart, #live-skew { cursor: grab; }
-#trade-skew h3 { font-size: 13px; margin: 12px 0 4px; color: var(--dim); font-weight: normal; }
+#trade-skew h3 { font-size: var(--fs-body); margin: 12px 0 4px; color: var(--text-3); font-weight: normal; }
 #trade-skew tbody tr[data-signal] { cursor: pointer; }
-
-/* the pages, fixed at the top right of every page (menu.js). The
-   title row keeps its right edge clear of it. */
-#brand { padding-right: var(--menu-w); min-height: 30px; }
-:root { --menu-w: 420px; }
-#menu { position: fixed; top: 8px; right: 12px; z-index: 50; display: flex; gap: 4px;
-  padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
-#menu a, #menu button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
-  color: var(--dim); text-decoration: none; background: none; border: 1px solid transparent;
-  border-radius: 4px; font: var(--font); cursor: pointer; }
-#menu a:hover, #menu button:hover { color: var(--text); border-color: var(--line); }
-#menu [aria-current="page"] { color: var(--text); border-color: var(--entry); background: #1d222b; }
-#menu a:focus-visible, #menu button:focus-visible { outline: 2px solid var(--entry); outline-offset: 1px; }
-/* something going on in the service - a sweep, a live session - lights its
-   entry up on every page (menu.js, api/busy) */
-#menu a.busy { color: var(--up); }
-#menu a.busy svg { animation: busy 1.6s ease-in-out infinite; }
-@keyframes busy {
-  0%, 100% { opacity: 1; filter: drop-shadow(0 0 0 transparent); }
-  50% { opacity: .5; filter: drop-shadow(0 0 5px currentColor); }
-}
-@media (prefers-reduced-motion: reduce) { #menu a.busy svg { animation: none; } }
-@media (max-width: 900px) {
-  :root { --menu-w: 176px; }
-  #menu span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  #menu a, #menu button { padding: 6px 8px; }
-}
 
 /* the favourite star: a run marked as one of the forms the live page trades.
    A button drawn as a glyph, so it sits in a title or a table cell without a
-   box of its own; lit when pressed */
-.fav-star { background: none; border: 0; color: var(--dim); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
-.fav-star[aria-pressed="true"] { color: #f2c14e; }
+   box of its own; a full star when pressed, an empty one when not */
+.fav-star { height: auto; background: none; border: 0; color: var(--text-3); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
+.fav-star[aria-pressed="true"] { color: var(--text); }
 .fav-star:hover { color: var(--text); }
 
 /* the live page's new session: the favourites to pick from on the left, what
    the picked one is on the right; one column when the two would not fit */
 #new-live .new-grid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr); gap: 18px; align-items: start; }
 @media (max-width: 900px) { #new-live .new-grid { grid-template-columns: 1fr; } }
-#new-summary { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+#new-summary { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 10px 12px; }
 #new-summary h4 { margin: 0 0 6px; }
 #new-summary dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; margin: 0; }
-#new-summary dt { color: var(--dim); }
+#new-summary dt { color: var(--text-3); }
 #new-summary dd { margin: 0; }
 #new-summary .hint { margin-top: 8px; }
 #new-summary h5 { margin: 10px 0 4px; font-size: inherit; }
 #new-summary dd.hint { margin-top: 0; }
-/* the way back to the run this form came from: a button, not a word in the hint */
-#new-summary a.open-backtest { display: inline-block; margin-top: 10px; padding: 5px 10px; color: var(--entry);
-  border: 1px solid var(--entry); border-radius: 4px; text-decoration: none; }
-#new-summary a.open-backtest:hover { background: var(--entry); color: var(--bg); }
-#new-summary a.open-backtest:focus-visible { outline: 2px solid var(--entry); outline-offset: 2px; }
-#sim-dialog td.params { font-size: 0.85em; color: var(--dim); max-width: 360px; }
+/* the way back to the run this form came from: a secondary button, not a
+   word in the hint */
+#new-summary a.open-backtest { display: inline-block; margin-top: 10px; padding: 7px 10px; color: var(--text);
+  font-weight: 500; border: 1px solid var(--border); border-radius: var(--radius-s); text-decoration: none; }
+#new-summary a.open-backtest:hover { border-color: var(--text-2); }
+#sim-dialog td.params { font-size: 0.85em; color: var(--text-3); max-width: 360px; }
 /* the favourites dialog on the live page: the sets table's look */
 #sim-dialog { width: min(980px, calc(100vw - 32px)); }
 #sim-dialog table { width: 100%; border-collapse: collapse; }
 #sim-dialog th, #sim-dialog td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
-#sim-dialog th { color: var(--dim); font-weight: normal; }
+#sim-dialog th { color: var(--text-3); font-weight: normal; }
 #sim-dialog .num { text-align: right; }
 #sim-dialog tr[data-pick] { cursor: pointer; }
-/* the panel colour is the dialog's own, so the hover is the one every table here has */
-#sim-dialog tr[data-pick]:hover { background: #1d222b; }
+#sim-dialog tr[data-pick]:hover { background: var(--raised); }
 #sim-tabs { display: flex; gap: 8px; margin: 8px 0; }
 #sim-tabs button[aria-pressed="true"] { border-color: var(--entry); color: var(--text); }
+
+/* a phone: the page's margin shrinks, the panels keep their frame */
+@media (max-width: 640px) {
+  header, .bar, #message { padding-left: var(--space-4); padding-right: var(--space-4); }
+  section { margin-left: var(--space-3); margin-right: var(--space-3); }
+}
+
+/* the mix page's two readings of one account: the profits added up, or the
+   runs traded together (mix.js view()); pressed is the one on show */
+#mix-views { display: inline-flex; gap: 8px; }
+#mix-views[hidden] { display: none; }
+#mix-views button { padding: 1px 8px; font-size: var(--fs-small); }
+#mix-views button[aria-pressed="true"] { border-color: var(--entry); color: var(--text); }
+#mix-margin { margin: 0 0 6px; color: var(--text-3); }
+#mix-margin.bad { color: var(--down); }
+/* the mix read as a whole (renderAnalysis in mix.js), in the analysis
+   dialog's look: its body has that dialog's id */
+#mix-analysis { overflow-x: auto; }
+#mix-analysis[hidden] { display: none; }
+#mix-warning { color: var(--text-2); }
+#mix-warning[hidden] { display: none; }

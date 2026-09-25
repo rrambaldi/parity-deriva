@@ -182,18 +182,7 @@ def kpis(curve, start, dtfrom, dtto, summary=None):
 	points = sorted(curve, key=lambda point: point[0])
 	final = points[-1][1] if points else start
 	years = max((dtto - dtfrom).total_seconds() / (365.25 * 86400), 1e-9)
-
-	# one balance per weekday, the last close on or before its end
-	daily, i, balance = [], 0, start
-	day = dtfrom.replace(hour=0, minute=0, second=0, microsecond=0)
-	while day <= dtto:
-		end = day + datetime.timedelta(days=1)
-		while i < len(points) and points[i][0] < end:
-			balance = points[i][1]
-			i += 1
-		if day.weekday() < 5:
-			daily.append(balance)
-		day = end
+	daily = [balance for _, balance in days(points, start, dtfrom, dtto)]
 
 	# drawdown in per cent of the peak, on every close and not only daily
 	peak, mdd = start, 0.0
@@ -217,7 +206,7 @@ def kpis(curve, start, dtfrom, dtto, summary=None):
 
 	car = ((final / start) ** (1 / years) - 1) * 100 if start > 0 and final > 0 else None
 	win, loss = summary.get('averageWin'), summary.get('averageLoss')
-	return {
+	out = {
 		'roi': (final - start) / start * 100 if start else None,
 		'car': car,
 		'maxDrawdownPct': mdd,
@@ -230,3 +219,232 @@ def kpis(curve, start, dtfrom, dtto, summary=None):
 		'winRate': summary.get('winRate'),
 		'years': years,
 	}
+	out['score'] = score(out, summary.get('closedTrades'))
+	# an account that ran out of margin could not have traded the run at all
+	if summary.get('margin') and not summary['margin'].get('ok'):
+		out['score'] = 0.0
+	return out
+
+
+def days(curve, start, dtfrom, dtto):
+	"""
+	[(day, balance)], one a weekday from dtfrom to dtto: the last close on or
+	before the day's end. `curve` is [(time, balance)] in time order.
+	"""
+	out, i, balance = [], 0, start
+	day = dtfrom.replace(hour=0, minute=0, second=0, microsecond=0)
+	while day <= dtto:
+		end = day + datetime.timedelta(days=1)
+		while i < len(curve) and curve[i][0] < end:
+			balance = curve[i][1]
+			i += 1
+		if day.weekday() < 5:
+			out.append((day, balance))
+		day = end
+	return out
+
+
+def _position(trade, leverage, factor=1.0):
+	"""(margin, risk to the stop) of a trade's position, or None without one."""
+	try:
+		size = abs(float(trade.get('units'))) * factor
+		price = float(trade.get('entryPrice'))
+	except (TypeError, ValueError):
+		return None
+	if trade.get('entryTime') is None or size <= 0:
+		return None
+	stop = trade.get('stopLoss')
+	risk = abs(price - float(stop)) * size if stop is not None else 0.0
+	return size * price / leverage, risk
+
+
+class _Account(object):
+	"""
+	The margin account both margin() and together() walk: the closed
+	balance, the margin the open positions hold and what they would lose at
+	their stops.
+
+	Free margin is the balance, less every open position's loss to its stop,
+	less the margin they hold: what is left for the next trade on the worst
+	close of all of them.
+	"""
+
+	def __init__(self, start, leverage):
+		self.balance, self.used, self.risk, self.open = float(start), 0.0, 0.0, 0
+		self.out = {'leverage': leverage, 'start': float(start), 'peakMargin': 0.0,
+					'peakMarginPct': 0.0, 'minFree': None, 'minFreeAt': None,
+					'maxOpen': 0, 'breachAt': None, 'negativeAt': None}
+
+	def free(self, margin=0.0, risk=0.0):
+		return self.balance - self.risk - risk - self.used - margin
+
+	def enter(self, when, margin, risk):
+		self.used += margin
+		self.risk += risk
+		self.open += 1
+		out, free = self.out, self.free()
+		out['peakMargin'] = max(out['peakMargin'], self.used)
+		if self.balance > 0:
+			out['peakMarginPct'] = max(out['peakMarginPct'], self.used / self.balance * 100)
+		out['maxOpen'] = max(out['maxOpen'], self.open)
+		if out['minFree'] is None or free < out['minFree']:
+			out['minFree'], out['minFreeAt'] = free, when
+		if free < 0 and out['breachAt'] is None:
+			out['breachAt'] = when
+		if self.balance - self.risk <= 0 and out['negativeAt'] is None:
+			out['negativeAt'] = when
+
+	def leave(self, when, margin, risk, pl):
+		self.used -= margin
+		self.risk -= risk
+		self.open -= 1
+		self.balance += pl
+		if self.balance <= 0 and self.out['negativeAt'] is None:
+			self.out['negativeAt'] = when
+
+	def result(self):
+		out = self.out
+		out['ok'] = out['breachAt'] is None and out['negativeAt'] is None
+		return out
+
+
+# ponytail: closes and stop distances only - a gap past the stop, or the
+# floating loss of a trade with no stop, is not seen; walk the candles if it matters
+def margin(trades, start, leverage):
+	"""
+	Whether an account of `start` on `leverage`:1 could have carried these
+	trades: it never went to zero, and every trade found the free margin to
+	open. A position holds |units| x entry price / leverage.
+
+	In the quote currency, as the rest of this module. {leverage, start,
+	peakMargin, peakMarginPct, minFree, minFreeAt, maxOpen, breachAt,
+	negativeAt, ok}; the times are the trades' own.
+	"""
+	events = []
+	for trade in trades:
+		held = _position(trade, leverage)
+		if held is None:
+			continue
+		events.append((trade['entryTime'], 1, held, 0.0))
+		if trade.get('exitTime') is not None:
+			events.append((trade['exitTime'], 0, held, _pl(trade) or 0.0))
+	# a close frees its margin before an entry of the same moment asks for it
+	events.sort(key=lambda event: (event[0], event[1]))
+	account = _Account(start, leverage)
+	for when, entering, (held_margin, risk), pl in events:
+		if entering:
+			account.enter(when, held_margin, risk)
+		else:
+			account.leave(when, held_margin, risk, pl)
+	return account.result()
+
+
+# ponytail: a run sized off its capital is scaled by shared / own balance at
+# each entry, where the money manager reviews its capital once a month; and a
+# refused trade does not free the strategy for a signal it skipped meanwhile.
+# Running the strategies on one engine is what would lift both
+def together(runs, start, leverage):
+	"""
+	The runs traded on one account of `start`, from their trades: what
+	a mix simulated together makes.
+
+	`runs` is [{trades, start, scaled}]: a scaled run sized its trades off its
+	own capital, so each is resized by the shared balance over the run's own
+	at its entry; one of fixed units trades them as they were. A trade the
+	free margin does not cover is refused, as a broker would refuse it.
+
+	{curve [[time, balance]], steps (the money of each close), parts (each
+	run's curve, [[time, start + its net]]), nets, taken, refused (both per
+	run), margin (as margin() says it)}.
+	"""
+	events = []
+	for i, run in enumerate(runs):
+		for k, trade in enumerate(run['trades']):
+			if trade.get('entryTime') is None:
+				continue
+			events.append((trade['entryTime'], 1, i, k, trade))
+			if trade.get('exitTime') is not None:
+				events.append((trade['exitTime'], 0, i, k, trade))
+	events.sort(key=lambda event: (event[0], event[1]))
+	account = _Account(start, leverage)
+	own = [float(run['start']) for run in runs]
+	held, curve, steps = {}, [], []
+	nets, taken, refused = [0.0] * len(runs), [0] * len(runs), [0] * len(runs)
+	parts = [[] for _ in runs]
+	for when, entering, i, k, trade in events:
+		if entering:
+			factor = 1.0
+			if runs[i].get('scaled'):
+				factor = max(0.0, account.balance / own[i]) if own[i] > 0 else 0.0
+			position = _position(trade, leverage, factor)
+			if position is None:
+				continue
+			if account.free(*position) < 0:
+				refused[i] += 1
+				continue
+			held[(i, k)] = position + (factor,)
+			taken[i] += 1
+			account.enter(when, *position)
+		else:
+			pl = _pl(trade) or 0.0
+			own[i] += pl   # the run's own capital moves whether or not it was taken
+			if (i, k) not in held:
+				continue
+			held_margin, risk, factor = held.pop((i, k))
+			step = pl * factor
+			account.leave(when, held_margin, risk, step)
+			steps.append(step)
+			nets[i] += step
+			curve.append([when, account.balance])
+			parts[i].append([when, float(start) + nets[i]])
+	return {'curve': curve, 'steps': steps, 'parts': parts, 'nets': nets,
+			'taken': taken, 'refused': refused, 'margin': account.result()}
+
+
+def correlation(a, b):
+	"""Pearson's r of two series of the same length, or None when one is flat."""
+	import statistics
+	try:
+		return statistics.correlation(a, b)
+	except statistics.StatisticsError:
+		return None
+
+
+#: where each KPI of the score is worth nothing and where it is worth all it
+#: can: a straight line in between, held at the ends outside
+SCORE_SCALE = {'car': (0.0, 30.0), 'maxDrawdownPct': (30.0, 5.0), 'ulcer': (10.0, 2.0),
+			   'profitFactor': (1.0, 2.5), 'sharpe': (0.0, 2.5)}
+#: the closed trades a score is believed in full from
+SCORE_TRADES = 30
+
+
+def score(kpi, trades):
+	"""
+	One number from 0 to 100 that ranks runs: the KPI table and the mix's
+	pick of a run are ordered by it.
+
+	Four parts, each KPI put on 0..1 by SCORE_SCALE: the gain 35% (CAR, the
+	total gain on a year, so that sets of different length compare), the risk
+	25% (max drawdown and Ulcer, half each), the quality 20% (profit factor),
+	the steadiness 20% (Sharpe). ROI and expectancy are left out: over one
+	window they say what the CAR says, and the gain counted three times would
+	drown the rest. The sum is then multiplied by the confidence,
+	sqrt(trades / SCORE_TRADES) up to 1: one lucky trade has a profit factor
+	with no loss under it and no drawdown, and would come first on the ratios
+	alone.
+
+	A figure the run cannot have counts as the worst, except a profit factor
+	with no losing trade under it, which is at its best.
+	"""
+	import math
+
+	def part(key):
+		value = kpi.get(key)
+		if value is None:
+			return 1.0 if key == 'profitFactor' and trades else 0.0
+		bad, good = SCORE_SCALE[key]
+		return min(1.0, max(0.0, (value - bad) / (good - bad)))
+
+	total = (0.35 * part('car') + 0.25 * (part('maxDrawdownPct') + part('ulcer')) / 2
+			 + 0.20 * part('profitFactor') + 0.20 * part('sharpe'))
+	return 100 * total * min(1.0, math.sqrt((trades or 0) / SCORE_TRADES))

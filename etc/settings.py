@@ -79,6 +79,9 @@ LOG_DIR = os.environ.get('PARITY_DERIVA_LOG_DIR', "/home/rrambaldi/DATA")
 IMPORT_DIR = dotenv('PARITY_DERIVA_IMPORT_DIR', '/mnt/HC_Volume_37718599/rrambaldi/parity-deriva/data')
 BASE_CURRENCY = "EUR"
 EQUITY = Decimal("100000.00")
+# the leverage a simulation's account trades on, when the form does not say:
+# ESMA's 30:1 on a major. Its margin is checked, not enforced (report.margin)
+LEVERAGE = int(dotenv('PARITY_DERIVA_LEVERAGE', 30))
 
 DEF_CONFIG = 'logging.conf'
 DEF_PAIRS  = [ 'EUR_USD' ]

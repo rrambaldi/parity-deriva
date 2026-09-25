@@ -81,7 +81,7 @@ function paramList(fields) {
 }
 
 function paramsText(fields) {
-  return paramList(fields).map((p) => `${p.name}=${p.value}`).join(' ');
+  return paramList(fields).map((p) => `${p.name}=${paramValue(p.name, p.value)}`).join(' ');
 }
 
 function cell(row, text, cls) {
@@ -91,7 +91,21 @@ function cell(row, text, cls) {
   return td;
 }
 
+// Whoever looks must know at every moment whether real money is moving
+// (web/DESIGN.md § 6): the badge in the header is live·real money as soon as
+// one session actually trading (s.running, which also covers "closing…":
+// it is still open until then) is on an account that is not demo. The
+// HTML's default is the red one on purpose, for the moment before this runs.
+function updateBadge() {
+  const badge = $('env-badge');
+  if (!badge) return;
+  const live = state.sessions.some((s) => s.running && !s.demo);
+  badge.className = 'badge ' + (live ? 'live' : 'practice');
+  badge.textContent = live ? 'live · real money' : 'practice';
+}
+
 function renderTable() {
+  updateBadge();
   const body = $('live-rows');
   body.textContent = '';
   const foot = $('live-foot');
@@ -227,27 +241,27 @@ function drawEquity(d) {
   const ctx = canvas.getContext('2d');
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, width, height);
-  const css = getComputedStyle(document.documentElement);
+  const p = palette();
   // held to now: the capital has not moved since the last close
   const curve = d.curve || [];
   const last = curve[curve.length - 1];
   const points = last && Date.now() > last[0] ? curve.concat([[Date.now(), last[1]]]) : curve;
-  ctx.fillStyle = css.getPropertyValue('--dim');
-  ctx.font = '12px ui-monospace, monospace';
+  ctx.fillStyle = p.text3;
+  ctx.font = '12px ' + p.mono;
   if (points.length < 2) { ctx.fillText('the capital curve starts with the first close', 12, 24); return; }
   const left = 70, right = 12, top = 12, bottom = 22;
   const t0 = points[0][0], t1 = points[points.length - 1][0];
-  let lo = Math.min(...points.map((p) => p[1])), hi = Math.max(...points.map((p) => p[1]));
+  let lo = Math.min(...points.map((pt) => pt[1])), hi = Math.max(...points.map((pt) => pt[1]));
   if (hi === lo) { hi += 1; lo -= 1; }
   const x = (t) => left + (t - t0) / Math.max(1, t1 - t0) * (width - left - right);
   const y = (v) => top + (hi - v) / (hi - lo) * (height - top - bottom);
-  ctx.strokeStyle = css.getPropertyValue('--line');
+  ctx.strokeStyle = p.line;
   ctx.beginPath(); ctx.moveTo(left, y(points[0][1])); ctx.lineTo(width - right, y(points[0][1])); ctx.stroke();
   ctx.fillText(money(hi), 4, top + 8);
   ctx.fillText(money(lo), 4, height - bottom);
   ctx.fillText(stamp(t0), left, height - 6);
   ctx.fillText(stamp(t1), width - right - 110, height - 6);
-  ctx.strokeStyle = css.getPropertyValue('--entry');
+  ctx.strokeStyle = p.entry;
   ctx.lineWidth = 2;
   ctx.beginPath();
   points.forEach(([t, v], i) => {

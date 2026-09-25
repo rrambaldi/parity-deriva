@@ -4,17 +4,38 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>parity-deriva simulate</title>
-<!-- relative, like index.html: served at /sim this is /static/app.css, and
-     behind a proxy at /parity/sim it is /parity/static/app.css -->
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="static/fonts.css">
+<link rel="stylesheet" href="static/tokens.css">
 <link rel="stylesheet" href="static/app.css">
+<link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="static/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="static/apple-touch-icon.png">
+<!--
+  The theme the switch forced, before the first paint. Here and not in
+  menu.js because the scripts load at the bottom of the page: without it a
+  page forced to light would show the dark one for a moment, or the other way.
+-->
+<script>
+  try {
+    const theme = localStorage.getItem('parity-deriva.theme');
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  } catch (error) { /* nothing kept: the system's theme */ }
+</script>
 </head>
 <body>
 
 <header>
   <div id="brand">
-    <h1>parity-deriva &middot; simulate</h1>
+    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="201" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="201" height="28"></h1>
+    <span id="page-name">simulate</span>
+    <span id="env-badge" class="badge">offline &middot; no orders</span>
     <button type="button" id="sets-open" title="the sets of simulations already made">sets</button>
   </div>
+</header>
+
+<!-- the controls, a bar of their own under the header -->
+<div class="bar">
   <!--
     One backtest per combination of the values below - one value in every
     field is one backtest, which is how a single run is made. The first row
@@ -30,6 +51,8 @@
     <label>to <input type="date" id="to"></label>
     <label>risk % <input type="number" id="risk" value="1" min="0.01" max="100" step="0.01"></label>
     <label>capital <input type="number" id="balance" min="0" step="any"></label>
+    <!-- the account's n:1: its margin is checked on every run (report.margin), not enforced -->
+    <label>leverage <input type="number" id="leverage" min="1" step="1" placeholder="30"></label>
     <!-- stand aside this many minutes either side of a calendar event on the
          instrument's own currencies; both zero, or no calendar, is no rule -->
     <label>news -min <input type="number" id="newsBefore" min="0" step="1" placeholder="0"></label>
@@ -61,12 +84,12 @@
     </fieldset>
     <label>name <input type="text" id="sweep-name" placeholder="optional" size="16" maxlength="120"></label>
     <span id="combos"></span>
-    <button type="submit" id="run">simulate</button>
+    <button type="submit" id="run" class="primary">simulate</button>
     <button type="button" id="rerun" hidden title="run the set on show again, as a new set">rerun</button>
     <button type="button" id="delete" hidden title="delete the set on show from the list of sets">delete</button>
     <button type="button" id="stop" hidden>stop</button>
   </form>
-</header>
+</div>
 
 <dialog id="ask-dialog">
   <form method="dialog">
@@ -83,23 +106,35 @@
 <dialog id="sets-dialog">
   <form method="dialog" class="dialog-head">
     <strong>simulation sets</strong>
-    <button type="submit" aria-label="close">close</button>
+    <button type="submit" class="dialog-close" aria-label="close" title="close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </form>
-  <table id="sets-table">
-    <thead><tr><th>id</th><th>saved (UTC)</th><th>name</th><th>strategy</th><th>instrument</th><th>tf</th>
-      <th>from</th><th>to</th><th>varied</th><th class="num">runs</th>
-      <th class="num">best capital</th><th></th></tr></thead>
-    <tbody id="sets-rows"></tbody>
-  </table>
+  <div class="dialog-body">
+    <table id="sets-table">
+      <thead><tr><th>id</th><th>saved (UTC)</th><th>name</th><th>strategy</th><th>instrument</th><th>tf</th>
+        <th>from</th><th>to</th><th>varied</th><th class="num">runs</th>
+        <th class="num">best capital</th><th></th></tr></thead>
+      <tbody id="sets-rows"></tbody>
+    </table>
+  </div>
+  <form method="dialog" class="dialog-foot">
+    <span>esc to close</span>
+    <button type="submit">close</button>
+  </form>
 </dialog>
 
 <!-- one run's KPIs read out in words: see analyse() in sim.js -->
 <dialog id="analysis-dialog">
   <form method="dialog" class="dialog-head">
     <strong id="analysis-title"></strong>
-    <button type="submit" aria-label="close">close</button>
+    <button type="submit" class="dialog-close" aria-label="close" title="close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </form>
-  <div id="analysis-body"></div>
+  <div class="dialog-body">
+    <div id="analysis-body"></div>
+  </div>
+  <form method="dialog" class="dialog-foot">
+    <span>esc to close</span>
+    <button type="submit">close</button>
+  </form>
 </dialog>
 
 <p id="message" hidden></p>
@@ -121,6 +156,40 @@
     <span class="k sim-pick">selected</span>
     <span class="k sim-done">finished</span>
   </p>
+  <!-- one of the varied parameters, and a value of it: its runs' curves are
+       lit and the rest fade, so the spread one value makes reads on its own.
+       See renderLight() in sim.js -->
+  <div id="sim-light" hidden>
+    <label>highlight <select id="light-param"></select></label>
+    <span id="light-values"></span>
+  </div>
+  <!-- which varied parameter moves the result and which of its values does
+       best, four ways: see paramEffects() in sim.js. A row lights its best
+       value above and lists its values under the table -->
+  <div id="sim-effects" hidden>
+    <div id="effects-head">
+      <strong>parameter analysis</strong>
+      <label>metric <select id="effects-metric"></select></label>
+    </div>
+    <table id="effects-table">
+      <thead><tr>
+        <th>parameter</th><th>best</th><th>worst</th>
+        <th class="num" title="the best value's median less the worst's">effect</th>
+        <th class="num" title="among the runs alike in every other varied parameter: how often the best value is the first, and by how much, at the median">consistency</th>
+        <th class="num" title="the share of the metric's spread between runs that this parameter's values account for (eta squared)">explains</th>
+        <th class="num" id="effects-time" title="the window in equal slices: in how many the best value's runs made the most. Read off the capital, whatever the metric">over time</th>
+        <th>verdict</th>
+      </tr></thead>
+      <tbody id="effects-rows"></tbody>
+    </table>
+    <table id="effects-values" hidden>
+      <thead><tr>
+        <th id="effects-values-param">value</th><th class="num">runs</th><th class="num">median</th>
+        <th class="num">first in its context</th><th class="num">slices won</th><th></th>
+      </tr></thead>
+      <tbody id="effects-value-rows"></tbody>
+    </table>
+  </div>
   <!-- the run going now: its parameters and its trades so far -->
   <div id="sim-current" hidden></div>
 </section>
@@ -150,6 +219,7 @@
 </section>
 
 <script src="static/menu.js"></script>
+<script src="static/analysis.js"></script>
 <script src="static/sim.js"></script>
 </body>
 </html>

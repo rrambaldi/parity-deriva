@@ -178,6 +178,30 @@ class TestKpis(unittest.TestCase):
         k = self.kpis([])
         self.assertEqual(k['roi'], 0.0)
         self.assertIsNone(k['sharpe'])
+        self.assertEqual(k['score'], 0.0)
+
+    def test_the_score_halfway_on_every_part_is_fifty(self):
+        from parity_deriva.performance import report
+        half = {'car': 15.0, 'maxDrawdownPct': 17.5, 'ulcer': 6.0,
+                'profitFactor': 1.75, 'sharpe': 1.25}
+        self.assertAlmostEqual(report.score(half, 30), 50.0)
+        # past the ends each part is held there: all best is 100, all worst 0
+        best = {'car': 90.0, 'maxDrawdownPct': 0.0, 'ulcer': 0.0,
+                'profitFactor': 9.0, 'sharpe': 5.0}
+        self.assertAlmostEqual(report.score(best, 300), 100.0)
+        worst = {'car': -20.0, 'maxDrawdownPct': 60.0, 'ulcer': 30.0,
+                 'profitFactor': 0.2, 'sharpe': -3.0}
+        self.assertEqual(report.score(worst, 300), 0.0)
+
+    def test_the_score_believes_a_few_trades_less(self):
+        """One trade and no loss has the best ratios, and must not come first."""
+        from parity_deriva.performance import report
+        lucky = {'car': 40.0, 'maxDrawdownPct': 0.0, 'ulcer': 0.0,
+                 'profitFactor': None, 'sharpe': 3.0}
+        self.assertAlmostEqual(report.score(lucky, 1), 100 * (1 / 30) ** 0.5)
+        self.assertAlmostEqual(report.score(lucky, 30), 100.0)
+        # a figure missing counts as the worst: here only the gain is left
+        self.assertAlmostEqual(report.score({'car': 30.0, 'profitFactor': 0.5}, 30), 35.0)
 
 
 class TestSavedSweeps(TempDirCase):
@@ -210,6 +234,14 @@ class TestSavedSweeps(TempDirCase):
         self.assertFalse(opened['running'])
         self.assertEqual(opened['grid'], {'reward': '1.5, 2'})
         self.assertEqual(len(opened['done']), 2)
+
+    def test_a_set_saved_before_the_score_gets_it_when_opened(self):
+        job = self.job()
+        job['done'][0].update(report={'closedTrades': 30}, kpi={
+            'car': 15.0, 'maxDrawdownPct': 17.5, 'ulcer': 6.0, 'profitFactor': 1.75, 'sharpe': 1.25})
+        self.service.saveSweep(job)
+        opened = self.service.savedSweep('20260923-120000-abcdef')
+        self.assertAlmostEqual(opened['done'][0]['kpi']['score'], 50.0)
 
     def test_renamed_and_deleted(self):
         self.service.saveSweep(self.job())

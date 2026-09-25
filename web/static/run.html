@@ -12,7 +12,24 @@
   to /parity/ - without it the browser resolves these against / and asks the
   wrong server for them.
 -->
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="static/fonts.css">
+<link rel="stylesheet" href="static/tokens.css">
 <link rel="stylesheet" href="static/app.css">
+<link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="static/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="static/apple-touch-icon.png">
+<!--
+  The theme the switch forced, before the first paint. Here and not in
+  menu.js because the scripts load at the bottom of the page: without it a
+  page forced to light would show the dark one for a moment, or the other way.
+-->
+<script>
+  try {
+    const theme = localStorage.getItem('parity-deriva.theme');
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  } catch (error) { /* nothing kept: the system's theme */ }
+</script>
 </head>
 <body>
 
@@ -24,7 +41,9 @@
 -->
 <header>
   <div id="brand">
-    <h1>parity-deriva &middot; run</h1>
+    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="201" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="201" height="28"></h1>
+    <span id="page-name">run</span>
+    <span id="env-badge" class="badge">offline &middot; no orders</span>
     <!-- the runs of the table this one was opened from: see walkRuns() -->
     <span id="run-nav" hidden>
       <a id="run-back" href="./" title="the table this run was opened from">&lsaquo; table</a>
@@ -38,20 +57,26 @@
 <dialog id="help-dialog">
   <form method="dialog" class="dialog-head">
     <strong>reading the chart</strong>
-    <button type="submit" aria-label="close">close</button>
+    <button type="submit" class="dialog-close" aria-label="close" title="close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </form>
-  <ul id="help-list">
-    <li>every trade is marked with an arrow saying which way it was taken, and a click anywhere on the chart zooms onto the nearest one - as does a click on the capital curve, which goes to the trade that made that step</li>
-    <li>hovering a bar reads out its four prices and how far it travelled, high to low, in pips</li>
-    <li>the wheel zooms and dragging moves sideways once the chart is zoomed</li>
-    <li>the selected trade gets an arrow from its entry to its exit, coloured by what it made, and a box around the candles its entry rule read</li>
-    <li>support and resistance are bands, not lines: the width is what decides that two swings are one level and that a bar touched it, and each is drawn from the bar that confirmed it and never from the swing itself</li>
-    <li>the strip right under the candles has the curves that are not on the price axis, and the one below it has the levels on their own</li>
-    <li>times are UTC</li>
-    <li>zooming in past a point redraws the same window on a finer series - the candles change timeframe, the trades and the curves do not: they stay the strategy's, placed by time and stepped across the finer bars</li>
-    <li>the orders were already filled on the finest series the store holds, whatever the strategy read</li>
-    <li>the thin whiskers on a zoomed chart are the ask high and the bid low, which are the prices the fill rule reads</li>
-  </ul>
+  <div class="dialog-body">
+    <ul id="help-list">
+      <li>every trade is marked with an arrow saying which way it was taken, and a click anywhere on the chart zooms onto the nearest one - as does a click on the capital curve, which goes to the trade that made that step</li>
+      <li>hovering a bar reads out its four prices and how far it travelled, high to low, in pips</li>
+      <li>the wheel zooms and dragging moves sideways once the chart is zoomed</li>
+      <li>the selected trade gets an arrow from its entry to its exit, coloured by what it made, and a box around the candles its entry rule read</li>
+      <li>support and resistance are bands, not lines: the width is what decides that two swings are one level and that a bar touched it, and each is drawn from the bar that confirmed it and never from the swing itself</li>
+      <li>the strip right under the candles has the curves that are not on the price axis, and the one below it has the levels on their own</li>
+      <li>times are UTC</li>
+      <li>zooming in past a point redraws the same window on a finer series - the candles change timeframe, the trades and the curves do not: they stay the strategy's, placed by time and stepped across the finer bars</li>
+      <li>the orders were already filled on the finest series the store holds, whatever the strategy read</li>
+      <li>the thin whiskers on a zoomed chart are the ask high and the bid low, which are the prices the fill rule reads</li>
+    </ul>
+  </div>
+  <form method="dialog" class="dialog-foot">
+    <span>esc to close</span>
+    <button type="submit">close</button>
+  </form>
 </dialog>
 
 <p id="message" hidden></p>
@@ -148,8 +173,8 @@
     <span class="k sell">sell</span>
     <span class="k entry">entry</span>
     <span class="k exit">exit</span>
-    <span class="k tp">take profit</span>
-    <span class="k sl">stop loss</span>
+    <span class="k tp">target</span>
+    <span class="k sl">stop</span>
     <span class="k trail">stop moved to</span>
     <span class="k resistance">resistance</span>
     <span class="k won">trade won</span>
