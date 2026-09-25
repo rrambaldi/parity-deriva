@@ -107,14 +107,14 @@
   <div class="new-grid">
     <form id="new-form" autocomplete="off">
       <label>strategia <select id="new-strategy"></select></label>
-      <button type="button" id="choose-sim">scegli tra le simulate&hellip;</button>
+      <button type="button" id="choose-sim" data-icon="list">scegli tra le simulate&hellip;</button>
       <label>instrument <select id="new-instrument"></select></label>
       <label>timeframe <select id="new-granularity"></select></label>
       <label>risk % <input type="number" id="new-risk" value="1" min="0.01" max="100" step="0.01"></label>
       <label title="lo stesso numero su ogni conto: un conto in USD (eToro) lo prende 1:1">capitale
         <input type="number" id="new-capital" min="1" step="any" required></label>
       <fieldset id="new-accounts"><legend>accounts</legend><p class="hint">reading the accounts&hellip;</p></fieldset>
-      <button type="submit" id="new-start" class="primary">start</button>
+      <button type="submit" id="new-start" class="primary" data-icon="play">start</button>
     </form>
     <aside id="new-summary"><p class="hint">scegli una strategia: qui compare il riassunto della sua simulazione</p></aside>
   </div>
@@ -139,7 +139,7 @@
   </div>
   <form method="dialog" class="dialog-foot">
     <span>esc to close</span>
-    <button type="submit">close</button>
+    <button type="submit" data-icon="close">close</button>
   </form>
 </dialog>
 
@@ -170,8 +170,8 @@
   <form method="dialog">
     <p id="ask-text"></p>
     <div class="dialog-actions">
-      <button value="no">cancel</button>
-      <button value="yes" id="ask-yes">yes</button>
+      <button value="no" data-icon="close">cancel</button>
+      <button value="yes" id="ask-yes" data-icon="yes">yes</button>
     </div>
   </form>
 </dialog>

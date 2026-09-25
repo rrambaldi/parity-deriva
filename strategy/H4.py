@@ -133,6 +133,13 @@ class H4(ExecutionHandler):
 
 	# ------------------------------------------------------ the subclass
 
+	#: what each parameter of the page's form means: a line under its field
+	#: (web/service.handlerFields). Merged over the class and the classes it
+	#: extends.
+	PARAM_HELP = {
+		'atrPeriod': 'period of the ATR, in bars',
+	}
+
 	def setup(self, args):
 		"""Read the parameters this strategy adds. Optional."""
 

@@ -45,9 +45,9 @@
     <label>name <input type="text" id="mix-name" placeholder="optional" size="16" maxlength="120"></label>
     <!-- the one account's n:1: the mix's margin is checked on it (report.margin) -->
     <label>leverage <input type="number" id="mix-leverage" min="1" step="1" size="4" placeholder="30"></label>
-    <button type="button" id="mix-together" hidden
+    <button type="button" id="mix-together" hidden data-icon="play"
       title="trade every run on one account: each sized on the shared capital, a trade the margin does not cover refused">simulate together</button>
-    <button type="button" id="mix-delete" hidden title="delete this mix; its sets and their runs stay">delete</button>
+    <button type="button" id="mix-delete" hidden data-icon="delete" title="delete this mix; its sets and their runs stay">delete</button>
   </form>
   <!-- a strategy, then one of its simulations: its runs are listed below -->
   <form id="mix-add" autocomplete="off">

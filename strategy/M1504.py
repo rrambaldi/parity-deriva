@@ -54,6 +54,22 @@ class M1504(M15):
 
 	SETUP_BARS = TOUCH_BARS
 
+	#: see M15.PARAM_HELP
+	PARAM_HELP = {
+		'period': 'period of the Bollinger bands',
+		'deviations': 'band width, in standard deviations',
+		'rsiPeriod': 'period of the RSI',
+		'rsiLow': 'level of RSI counted as oversold',
+		'rsiHigh': 'level of RSI counted as overbought',
+		'touchBars': 'bars back the band touch may be',
+		'h1Slow': 'period of the H1 EMA checked for flatness',
+		'flatBars': "hours the H1 EMA's flatness is measured over",
+		'flatSlope': 'max H1 EMA slope per hour, in H1 ATR',
+		'structureBars': 'hours per window of the H1 structure check',
+		'expansion': 'max band width, as a multiple of bars ago',
+		'expansionBars': 'bars back the band width is compared',
+	}
+
 	def setup(self, args):
 		M15.setup(self, args)
 		self._set(args, 'period', self.PERIOD)

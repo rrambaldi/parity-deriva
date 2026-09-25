@@ -51,6 +51,17 @@ class M1502(M15):
 
 	SETUP_BARS = RANGE_BARS + 1
 
+	#: see M15.PARAM_HELP
+	PARAM_HELP = {
+		'sessionHour': 'session start hour, UTC',
+		'rangeBars': 'bars that build the opening range',
+		'breakoutBars': 'bars after the range a breakout still counts',
+		'breakAtr': 'breakout buffer beyond the range, in ATR',
+		'bodyShare': 'minimum candle body as a share of its range',
+		'maxRangeAtr': 'max width of the opening range, in ATR',
+		'stopInsideAtr': 'stop distance inside the range, in ATR',
+	}
+
 	def setup(self, args):
 		M15.setup(self, args)
 		self._set(args, 'sessionHour', self.SESSION_HOUR)

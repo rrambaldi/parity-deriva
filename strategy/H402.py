@@ -50,6 +50,14 @@ class H402(H4):
 
 	SETUP_BARS = WINDOW + 1
 
+	#: see H4.PARAM_HELP
+	PARAM_HELP = {
+		'windowBars': 'bars scanned for the consolidation pattern',
+		'volumeBars': 'bars averaged for the volume filter',
+		'narrowAtr': 'max consolidation range, in ATR',
+		'reward': 'target as a multiple of the stop (R)',
+	}
+
 	def setup(self, args):
 		self._set(args, 'windowBars', self.WINDOW)
 		self._set(args, 'volumeBars', self.VOLUME_BARS)

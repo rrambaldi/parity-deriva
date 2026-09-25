@@ -52,6 +52,14 @@ class H405(H4):
 
 	INDICATORS = ({'kind': 'sma', 'period': SMA_PERIOD},)
 
+	#: see H4.PARAM_HELP
+	PARAM_HELP = {
+		'swingBars': 'bars either side confirming a swing',
+		'smaPeriod': 'period of the trend filter SMA, in bars',
+		'reward': 'target as a multiple of the stop (R)',
+		'keepBars': 'swings kept, in bars',
+	}
+
 	def setup(self, args):
 		self._set(args, 'swingBars', self.SWING_BARS)
 		self._set(args, 'smaPeriod', self.SMA_PERIOD)

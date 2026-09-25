@@ -252,7 +252,7 @@ function renderRuns() {
     line.insertCell().innerHTML = times.length ? spark(row, from, to) : '';
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = inMix ? 'remove' : 'add';
+    button.textContent = button.dataset.icon = inMix ? 'remove' : 'add';
     button.title = inMix ? 'take it out of the mix' : 'add it to the mix';
     const actions = line.insertCell();
     actions.className = 'run-actions';
@@ -359,7 +359,7 @@ function render() {
       if (name === 'view' && run.error) continue;
       const button = document.createElement('button');
       button.type = 'button';
-      button.dataset.action = name;
+      button.dataset.action = button.dataset.icon = name;
       button.textContent = name;
       button.title = title;
       actions.append(button, ' ');

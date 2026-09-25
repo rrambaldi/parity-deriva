@@ -93,6 +93,14 @@ class TestHandlerFields(unittest.TestCase):
         self.assertNotIn('pipSize', fields)
         self.assertNotIn('granularity', fields)
 
+    def test_every_parameter_says_what_it_is(self):
+        """The line the page prints under each field (PARAM_HELP, merged
+        over the classes a strategy extends): a parameter added without one
+        is caught here and not by somebody reading a blank."""
+        for name in service.ledger.STRATEGIES:
+            for field in service.handlerFields(name):
+                self.assertTrue(field['help'], '%s: %s' % (name, field['name']))
+
     def test_the_query_sets_only_what_differs(self):
         get = {'fast': '30', 'reward': '2'}.get
         self.assertEqual(service.handlerArgs('H401-PULLBACK-EMA', get), {'fast': 30})

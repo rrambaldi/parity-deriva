@@ -88,6 +88,17 @@ class H404(H4):
 	#: the pattern is this bar, and the engulfing reads the one before it
 	SETUP_BARS = 2
 
+	#: see H4.PARAM_HELP
+	PARAM_HELP = {
+		'swingDays': 'days either side confirming a swing',
+		'dailySma': 'period of the daily trend SMA, in days',
+		'toleranceAtr': 'distance from a level counted as near, in ATR',
+		'stopAtr': 'stop distance beyond the level, in ATR',
+		'reward': 'fallback target as a multiple of the stop (R)',
+		'keepDays': 'daily levels kept, in days',
+		'wick': 'pin bar tail, as a multiple of its body',
+	}
+
 	def setup(self, args):
 		self._set(args, 'swingDays', self.SWING_DAYS)
 		self._set(args, 'dailySma', self.DAILY_SMA)

@@ -37,6 +37,14 @@ class H401(H4):
 	ATR_STOP = 2.0
 	REWARD = 2.0
 
+	#: see H4.PARAM_HELP
+	PARAM_HELP = {
+		'fast': 'period of the fast EMA, in bars',
+		'slow': 'period of the slow trend EMA, in bars',
+		'atrStop': 'stop distance from the close, in ATR',
+		'reward': 'target as a multiple of the stop (R)',
+	}
+
 	def setup(self, args):
 		self._set(args, 'fast', self.FAST)
 		self._set(args, 'slow', self.SLOW)

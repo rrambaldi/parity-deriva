@@ -36,6 +36,13 @@ class H403(H4):
 	INDICATORS = ({'kind': 'bollinger', 'period': PERIOD,
 				   'deviations': DEVIATIONS},)
 
+	#: see H4.PARAM_HELP
+	PARAM_HELP = {
+		'period': 'period of the Bollinger bands, in bars',
+		'deviations': 'width of the bands, in standard deviations',
+		'atrStop': 'stop distance beyond the band, in ATR',
+	}
+
 	def setup(self, args):
 		self._set(args, 'period', self.PERIOD)
 		self._set(args, 'deviations', self.DEVIATIONS)

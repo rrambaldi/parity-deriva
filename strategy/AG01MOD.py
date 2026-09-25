@@ -76,6 +76,13 @@ class AG01MOD(AG01):
 	#: bars of window, and how long a level outlives its bars
 	KEEP = 400
 
+	#: see H4.PARAM_HELP
+	PARAM_HELP = {
+		'swingBars': 'bars either side confirming a swing',
+		'nearRange': 'level band, as a share of the window range',
+		'keepBars': 'swings kept, in bars',
+	}
+
 	def __init__(self, **args):
 		AG01.__init__(self, **args)
 		self._set(args, 'swingBars', self.SWING_BARS)

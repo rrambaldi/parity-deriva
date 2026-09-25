@@ -139,7 +139,7 @@ function renderTable() {
     actions.className = 'run-actions';
     const button = document.createElement('button');
     button.type = 'button';
-    button.dataset.action = s.running ? 'stop' : 'delete';
+    button.dataset.action = button.dataset.icon = s.running ? 'stop' : 'delete';
     button.textContent = s.running ? 'stop & close' : 'delete';
     button.disabled = !!(s.running && s.stopped);
     actions.appendChild(button);

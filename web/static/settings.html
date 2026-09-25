@@ -51,8 +51,8 @@
     <label>upload CSV
       <input type="file" id="data-file" accept=".csv,text/csv" multiple>
     </label>
-    <button type="button" id="data-upload">upload</button>
-    <button type="button" id="data-import" class="primary">import selected</button>
+    <button type="button" id="data-upload" data-icon="upload">upload</button>
+    <button type="button" id="data-import" class="primary" data-icon="import">import selected</button>
   </div>
   <!--
     The economic calendar. Collected by the browser and not by the service:
@@ -80,11 +80,11 @@
         weeks since rather than the years again.
       -->
       <label>from <input type="date" id="calendar-from"></label>
-      <button type="button" id="calendar-copy">copy the collector</button>
+      <button type="button" id="calendar-copy" data-icon="copy">copy the collector</button>
       <label>calendar CSV
         <input type="file" id="calendar-file" accept=".csv,text/csv">
       </label>
-      <button type="button" id="calendar-import">import calendar</button>
+      <button type="button" id="calendar-import" data-icon="import">import calendar</button>
     </div>
   </div>
   <div id="data-progress-box" hidden>

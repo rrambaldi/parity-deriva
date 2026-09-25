@@ -49,6 +49,16 @@ class M1501(M15):
 
 	SETUP_BARS = PULLBACK_BARS + 1
 
+	#: see M15.PARAM_HELP
+	PARAM_HELP = {
+		'fast': 'period of the fast EMA',
+		'slow': 'period of the slow EMA',
+		'structureBars': 'hours per window of the H1 structure check',
+		'pullbackBars': 'bars back the pullback may touch the EMA',
+		'minStopAtr': 'minimum stop distance from entry, in ATR',
+		'reward': 'target distance, in R',
+	}
+
 	def setup(self, args):
 		M15.setup(self, args)
 		self._set(args, 'fast', self.FAST)

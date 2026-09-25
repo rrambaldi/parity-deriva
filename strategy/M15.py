@@ -143,6 +143,20 @@ class M15(H4):
 		self.clock = None
 		H4.__init__(self, **args)
 
+	#: what each parameter of the page's form means: a line under its field
+	#: (web/service.handlerFields). Merged over the class and the classes it
+	#: extends.
+	PARAM_HELP = {
+		'entryBars': 'how many bars a stop entry order stays live',
+		'bufferAtr': 'stop buffer beyond the level, in ATR',
+		'minReward': 'minimum reward to take a trade, in R',
+		'dailyStopR': 'daily loss limit before trading stops, in R',
+		'followR': 'trade progress needed by the time stop, in R',
+		'maxAttempts': 'max trades on the same move',
+		'timeStopBars': 'bars before the time stop, if going nowhere',
+		'maxBarAtr': 'max width of the signal bar, in ATR',
+	}
+
 	def setup(self, args):
 		self._set(args, 'entryBars', self.ENTRY_BARS)
 		self._set(args, 'bufferAtr', self.BUFFER_ATR)

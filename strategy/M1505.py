@@ -58,6 +58,20 @@ class M1505(M15):
 
 	SETUP_BARS = SQUEEZE_BARS + 1
 
+	#: see M15.PARAM_HELP
+	PARAM_HELP = {
+		'period': 'period of the Bollinger bands',
+		'deviations': 'band width, in standard deviations',
+		'squeezePercentile': 'percentile of band width counted as a squeeze',
+		'lookback': 'bars the percentile is read from',
+		'squeezeBars': 'bars in a row to count as a squeeze',
+		'boxBars': 'bars after the squeeze a breakout counts',
+		'bodyAtr': 'minimum body of the breakout bar, in ATR',
+		'volumeBars': 'bars the average volume is taken over',
+		'volumeShare': 'minimum volume, as a share of its average',
+		'reward': 'target distance, in R',
+	}
+
 	def setup(self, args):
 		M15.setup(self, args)
 		self._set(args, 'period', self.PERIOD)

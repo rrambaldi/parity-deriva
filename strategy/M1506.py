@@ -49,6 +49,16 @@ class M1506(M15):
 
 	SETUP_BARS = 2
 
+	#: see M15.PARAM_HELP
+	PARAM_HELP = {
+		'swingBars': 'hours either side that confirm an H1 swing',
+		'keepHours': 'hours of swing levels kept',
+		'zoneAtr': 'distance from the level, in ATR',
+		'retestBars': 'bars a breakout waits for its retest',
+		'wick': 'pin bar tail as a multiple of its body',
+		'reward': 'target distance, in R',
+	}
+
 	def setup(self, args):
 		M15.setup(self, args)
 		self._set(args, 'swingBars', self.SWING_BARS)

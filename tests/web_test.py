@@ -1069,6 +1069,26 @@ class StopTest(StoreCase):
         self.assertTrue(seen[0]['loading'], "it stopped before the first bar")
         self.assertIn('read', seen[0])
 
+    def test_a_held_run_waits_and_its_wait_is_not_its_time(self):
+        """A sweep's pause: the run waits at its next report while the
+        hold is clear, goes on once set, and the second it waited is not
+        in its elapsed."""
+        hold = threading.Event()
+        done = []
+        thread = threading.Thread(target=lambda: done.append(
+            self.service.backtest('EUR_USD', 'H1', hold=hold)))
+        thread.start()
+        thread.join(1)
+        self.assertTrue(thread.is_alive(), "it did not wait")
+        hold.set()
+        thread.join(30)
+        self.assertTrue(done[0]['candles'])
+        self.assertLess(done[0]['elapsed'], 1)
+
+    def test_pausing_when_no_sweep_is_running(self):
+        with self.assertRaises(ServiceError):
+            self.service.pauseSweep(True)
+
     def test_stopping_when_nothing_is_running(self):
         with self.assertRaises(ServiceError) as caught:
             self.service.stop()

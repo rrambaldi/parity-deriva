@@ -305,6 +305,10 @@ class Service(object):
 		# thread serving its own request and /api/progress reads it from
 		# another, and a dict update is atomic enough for a status line.
 		self._progress = {'running': False}
+		# cleared by pauseSweep: the sweep's runs wait on it at every
+		# progress report, and the sweep itself between two runs
+		self._sweepGoing = threading.Event()
+		self._sweepGoing.set()
 		# what the last run managed, bars a second. Seeded with a measured
 		# figure and replaced by this machine's own as soon as it has one
 		self._rate = float(TICKS_A_SECOND)
@@ -1103,7 +1107,7 @@ class Service(object):
 				 newsImpacts=None, maxBars=None, strategyArgs=None,
 				 slScale=None, tpScale=None, inverse=False, trailing=None,
 				 trailProfit=False, trailPips=None, cachedOnly=False, confirmed=False,
-				 leverage=None):
+				 leverage=None, hold=None):
 		"""
 		Run one backtest and return the payload the page reads, with the
 		margin its account needed at `leverage` (withMargin). cachedOnly
@@ -1111,7 +1115,9 @@ class Service(object):
 		what a reloaded page asks, so a refresh redraws the last run rather
 		than running it again. confirmed lifts the candle ceiling: the page
 		has already told somebody how big the chart would be and they said
-		yes, and a reload of that run is the same run.
+		yes, and a reload of that run is the same run. hold, an Event, pauses
+		the run at its next progress report while it is clear (a sweep's
+		pause): the time it waits counts neither in elapsed nor in the rate.
 		"""
 		known = self.check(instrument, granularity, strategy)
 
@@ -1162,6 +1168,7 @@ class Service(object):
 				is the only place a run can be interrupted between two bars
 				rather than in the middle of one.
 				"""
+				nonlocal started
 				if where.get('loading'):
 					# still reading the candles: no bar has been simulated
 					# yet, so there is no time and no balance to report
@@ -1171,6 +1178,11 @@ class Service(object):
 								 curve=[[millis(when), balance] for when, balance
 										in where.get('curve') or ()],
 								 loading=False)
+				if hold is not None and not hold.is_set():
+					since = time.time()
+					hold.wait()
+					started += time.time() - since
+					state['started'] = started
 				return not state.get('cancel')
 
 			plugin = plugins.viewers().get(strategy)
@@ -1583,6 +1595,7 @@ class Service(object):
 						   'varied': [name for name in grid
 									  if len(gridValues(name, grid[name])) > 1],
 						   'started': time.time()}
+			self._sweepGoing.set()
 		thread = threading.Thread(target=self._runSweep, args=(self._sweep, runs))
 		thread.daemon = True
 		thread.start()
@@ -1591,12 +1604,15 @@ class Service(object):
 	def _runSweep(self, job, runs):
 		try:
 			for n, (combo, args) in enumerate(runs, 1):
+				# paused between two runs, or in one (hold): a plugin that
+				# reports no progress only stops here
+				self._sweepGoing.wait()
 				if job['cancel']:
 					break
 				job['current'] = {'n': n, 'params': combo}
 				row = {'n': n, 'params': combo}
 				try:
-					payload = self.backtest(confirmed=True, **args)
+					payload = self.backtest(confirmed=True, hold=self._sweepGoing, **args)
 				except (ServiceError, ledger.LedgerError) + _pluginErrors() as exc:
 					if job['cancel']:
 						break
@@ -1794,7 +1810,8 @@ class Service(object):
 		job = getattr(self, '_sweep', None)
 		if job is None:
 			return {'running': False, 'total': 0, 'done': [], 'since': 0}
-		out = dict(job, done=job['done'][since:], since=since, count=len(job['done']))
+		out = dict(job, done=job['done'][since:], since=since, count=len(job['done']),
+				   paused=bool(job.get('running')) and not self._sweepGoing.is_set())
 		if job.get('current'):
 			out['progress'] = self.progress()
 		return out
@@ -1807,7 +1824,23 @@ class Service(object):
 		job['cancel'] = True
 		if self._progress.get('running'):
 			self._progress['cancel'] = True
+		# a paused sweep wakes up to see it has been stopped
+		self._sweepGoing.set()
 		return {'stopping': True, 'done': len(job['done']), 'total': job['total']}
+
+	def pauseSweep(self, paused):
+		"""
+		Hold the sweep where it is, or let it go on. The run going now waits
+		at its next progress report, a quarter of a second of bars, with the
+		backtest lock held: any other backtest asked meanwhile waits too.
+		"""
+		job = getattr(self, '_sweep', None)
+		if not job or not job.get('running'):
+			raise ServiceError("no sweep is running")
+		if job['cancel']:
+			raise ServiceError("the sweep is stopping")
+		(self._sweepGoing.clear if paused else self._sweepGoing.set)()
+		return {'paused': bool(paused)}
 
 	def remember(self, key, payload):
 		self._cache[key] = payload
@@ -2162,16 +2195,21 @@ def handlerFields(strategy):
 	number for a default, walking the class and the classes it extends, the
 	nearest one winning. That is where a strategy already declares what it
 	accepts, so this is a reading of it and not a second list to keep in step.
-	A default spelled `self.FAST` is looked up on the class.
+	A default spelled `self.FAST` is looked up on the class. The line the
+	page prints under a field is the strategy's PARAM_HELP, merged over the
+	classes it extends in the same order.
 	"""
 	try:
 		handler = ledger.load_strategy(strategy)
 	except ledger.LedgerError:
 		return ()
 	found = {}
+	helps = {}
 	for klass in handler.__mro__:
 		if not klass.__module__.startswith('parity_deriva.strategy'):
 			continue
+		for name, text in vars(klass).get('PARAM_HELP', {}).items():
+			helps.setdefault(name, text)
 		try:
 			tree = ast.parse(textwrap.dedent(inspect.getsource(klass)))
 		except (OSError, TypeError, SyntaxError):
@@ -2195,7 +2233,8 @@ def handlerFields(strategy):
 			if isinstance(value, (int, float)) and not isinstance(value, bool):
 				found[name] = value
 	return tuple({'name': name, 'label': name, 'value': value,
-				  'step': 1 if isinstance(value, int) else 'any'}
+				  'step': 1 if isinstance(value, int) else 'any',
+				  'help': helps.get(name, '')}
 				 for name, value in found.items())
 
 
@@ -2761,6 +2800,8 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendJSON(self.service.renameSweep(sweep, body.get('name')))
 			if route == '/api/sweep/stop':
 				return self.sendJSON(self.service.stopSweep())
+			if route in ('/api/sweep/pause', '/api/sweep/resume'):
+				return self.sendJSON(self.service.pauseSweep(route == '/api/sweep/pause'))
 			if route == '/api/mixes' or route.startswith('/api/mixes/'):
 				# {"id"?, "name", "items": [{"sweep", "n"}]} keeps a mix,
 				# {"delete": true} on /api/mixes/<id> removes one

@@ -41,7 +41,7 @@ function marginCell(td, m) {
 }
 
 const state = {
-  forms: {}, defaults: {}, instruments: [],
+  forms: {}, defaults: {}, descriptions: {}, instruments: [],
   rows: [],          // finished runs, as the service sent them
   job: null,         // the last status
   fields: null,      // the fixed fields the sweep was started with
@@ -140,6 +140,7 @@ function askUser(text, yes = 'run it anyway') {
   const dialog = $('ask-dialog');
   $('ask-text').textContent = text;
   $('ask-yes').textContent = yes;
+  $('ask-yes').dataset.icon = yes === 'delete' ? 'delete' : 'yes';
   dialog.returnValue = '';
   if (document.querySelector('dialog:modal')) dialog.showModal();
   else { lock(true); dialog.show(); }
@@ -208,6 +209,10 @@ for (const name of FLAGS) {
 function onStrategy() {
   // a strategy picked puts its own trailing default back; fillForm runs after
   fillFlag('trailing', '');
+  // what the strategy says it does, on a line of its own under the choice
+  const about = state.descriptions[$('strategy').value] || '';
+  $('strategy-about').textContent = about;
+  $('strategy-about').hidden = !about;
   const box = $('grid-strategy');
   box.textContent = '';
   for (const field of state.forms[$('strategy').value] || []) {
@@ -222,6 +227,13 @@ function onStrategy() {
     input.placeholder = field.choices ? field.choices.join(', ') : String(field.value);
     if (field.choices) input.title = 'accepts ' + field.choices.join(', ');
     label.appendChild(input);
+    // what the number is, in a few words under it (the strategy's PARAM_HELP)
+    if (field.help) {
+      const help = document.createElement('small');
+      help.className = 'param-help';
+      help.textContent = field.help;
+      label.appendChild(help);
+    }
     box.appendChild(label);
   }
   const wanted = state.defaults[$('strategy').value] || {};
@@ -369,10 +381,13 @@ function follow(job) {
   state.rows.push(...(job.done || []));
   const running = job.running;
   $('run').disabled = running;
-  $('stop').hidden = !running;
+  $('stop').hidden = $('pause').hidden = !running;
   $('rerun').hidden = running || !job.total;
   $('delete').hidden = running || !job.id;
-  if (running) $('stop').disabled = !!job.cancel;
+  if (running) {
+    $('stop').disabled = $('pause').disabled = !!job.cancel;
+    showPaused(job.paused);
+  }
   if (job.error) message(job.error);
   else if (running) {
     // just the values that change from run to run, the rest is in the title
@@ -386,7 +401,8 @@ function follow(job) {
     const phase = !p ? ' · starting'
       : p.loading ? ` · ${p.stage || 'reading the candles'}${share(p.read, p.toRead)}`
       : ` · simulating${share(p.bars, p.total)}`;
-    message(`run ${c ? c.n : state.rows.length} of ${job.total}${phase}` + (text ? ` · ${text}` : ''), 'info');
+    message(`run ${c ? c.n : state.rows.length} of ${job.total}${phase}` + (job.paused ? ' · paused' : '')
+      + (text ? ` · ${text}` : ''), 'info');
   }
   else if (job.total) message(job.cancel ? `stopped after ${state.rows.length} of ${job.total} runs` : '');
   const f = job.fields || {};
@@ -428,6 +444,21 @@ $('delete').addEventListener('click', async () => {
     await post('api/sweeps/' + job.id, { delete: true });
     location.reload();
   } catch (error) { message(String(error.message || error)); }
+});
+
+// pause and resume are one button, saying what a click does next
+function showPaused(paused) {
+  $('pause').textContent = paused ? 'resume' : 'pause';
+  $('pause').dataset.icon = paused ? 'play' : 'pause';
+}
+$('pause').addEventListener('click', async () => {
+  const job = state.job;
+  $('pause').disabled = true;
+  try {
+    job.paused = (await post('api/sweep/' + (job.paused ? 'resume' : 'pause'))).paused;
+    showPaused(job.paused);
+  } catch (error) { message(String(error.message || error)); }
+  finally { $('pause').disabled = false; }
 });
 
 $('stop').addEventListener('click', async () => {
@@ -588,6 +619,7 @@ function actions(more = []) {
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.action = name;
+    button.dataset.icon = name === 'analisi' ? 'analysis' : name;
     button.textContent = name;
     button.title = title;
     td.append(button, ' ');
@@ -1291,11 +1323,13 @@ async function openSets() {
     const rerun = document.createElement('button');
     rerun.type = 'button';
     rerun.className = 'set-rerun';
+    rerun.dataset.icon = 'rerun';
     rerun.textContent = 'rerun';
     rerun.title = 'run the same set again on the code and data there are now; the old one is kept';
     const drop = document.createElement('button');
     drop.type = 'button';
     drop.className = 'set-delete';
+    drop.dataset.icon = 'delete';
     drop.textContent = 'delete';
     row.insertCell().append(rerun, ' ', drop);
   }
@@ -1375,6 +1409,7 @@ async function start() {
   state.instruments = s.instruments || [];
   state.forms = s.params || {};
   state.defaults = s.defaults || {};
+  state.descriptions = s.descriptions || {};
   if (s.equity !== undefined && s.equity !== null) $('balance').value = s.equity;
   if (s.leverage) $('leverage').value = s.leverage;
   fill($('strategy'), s.strategies || []);
