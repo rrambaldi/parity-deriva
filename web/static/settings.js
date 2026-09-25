@@ -351,7 +351,61 @@ async function showMcp(state) {
     tr.insertCell().appendChild(button);
   }
   $('mcp-requests').hidden = !(state.requests || []).length;
+  const told = $('mcp-news-rows');
+  told.textContent = '';
+  for (const n of state.news || []) {
+    const tr = told.insertRow();
+    tr.insertCell().textContent = n.id;
+    tr.insertCell().textContent = day(n.posted);
+    const what = tr.insertCell();
+    const title = document.createElement('strong');
+    title.textContent = n.title;
+    what.append(title, n.text);
+    what.title = 'double click: all of it';
+    // how far the assistants got: a new version of a strategy is it done
+    const done = n.strategies.filter((s) => s.updated).length;
+    tr.insertCell().textContent = n.strategies.length
+      ? `${done} of ${n.strategies.length} updated: `
+        + n.strategies.map((s) => (s.updated ? '\u2713 ' : '') + (s.latest || `${s.name} (none)`)).join(', ')
+      : '';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'remove';
+    button.dataset.icon = 'delete';
+    button.dataset.id = n.id;
+    button.title = 'done with: it leaves the list, and the assistants are no longer told of it';
+    tr.insertCell().appendChild(button);
+  }
+  $('mcp-news').hidden = !(state.news || []).length;
 }
+
+$('calendar-format-open').addEventListener('click', () => $('calendar-format').showModal());
+$('draft-format-open').addEventListener('click', () => $('draft-format').showModal());
+
+// a yes or no asked on the page, as in live.js; the yes says what it does
+function askUser(text, yes, icon) {
+  $('ask-text').textContent = text;
+  $('ask-yes').textContent = yes;
+  $('ask-yes').dataset.icon = icon;
+  $('ask-dialog').returnValue = '';
+  return new Promise((resolve) => {
+    $('ask-dialog').addEventListener('close', () => resolve($('ask-dialog').returnValue === 'yes'),
+                                     { once: true });
+    $('ask-dialog').showModal();
+    $('ask-yes').focus();
+  });
+}
+
+$('mcp-news-rows').addEventListener('click', async (event) => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  try {
+    await showMcp(await post('api/mcp/news/drop', JSON.stringify({ id: button.dataset.id })));
+    mcpSay(`${button.dataset.id}: removed`);
+  } catch (error) {
+    mcpSay(String(error.message || error));
+  }
+});
 
 $('mcp-request-rows').addEventListener('click', async (event) => {
   const button = event.target.closest('button');
@@ -364,12 +418,14 @@ $('mcp-request-rows').addEventListener('click', async (event) => {
   }
 });
 
-// a row is one line; a double click opens it on the whole description
-$('mcp-rows').addEventListener('dblclick', (event) => {
+// a strategy or a news is one line; a double click opens it on all of it
+function openRow(event) {
   if (event.target.closest('button, a')) return;
   event.target.closest('tr').classList.toggle('open');
   getSelection().removeAllRanges();
-});
+}
+$('mcp-rows').addEventListener('dblclick', openRow);
+$('mcp-news-rows').addEventListener('dblclick', openRow);
 
 // the buttons on a row, and the same ones in the code's dialog, which closes
 // once what they do is done
@@ -426,7 +482,7 @@ async function mcpAct(event) {
       const { uses } = await ask('api/mcp/uses?name=' + encodeURIComponent(name));
       if (uses.length) asked += `\n\nIn use now:\n- ${uses.join('\n- ')}\n\nTurn it off all the same?`;
     }
-    if (!confirm(asked)) return;
+    if (!await askUser(asked, action, { enable: 'yes', disable: 'stop' }[action] || 'delete')) return;
     await showMcp(await post('api/mcp/strategy', JSON.stringify({ name, action })));
     $('source-dialog').close();
     mcpSay(`${name}: ${action}d`);

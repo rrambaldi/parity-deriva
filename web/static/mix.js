@@ -22,6 +22,10 @@ const state = {
   together: null,   // what api/mixes/<id>/together made of it
   sets: [],      // the saved simulations' summaries, from api/sweeps
   set: null,     // the one picked to add from, from api/sweeps/<id>
+  preview: null, // the run of it clicked, drawn over the mix: a row of set.done
+  runSort: { col: 'score', dir: -1 },   // its runs' order, by a head's data-col
+  onlyFav: false,   // its runs starred only
+  favourites: [],   // the forms starred to trade live, from api/favourites
 };
 
 const $ = (id) => document.getElementById(id);
@@ -86,6 +90,7 @@ function fillMixes() {
 async function openMix(id) {
   state.mix = state.mixes.find((m) => m.id === id) || { id: '', name: '', items: [] };
   state.pick = null;
+  state.preview = null;
   state.together = null;
   state.view = 'summed';
   $('mix-name').value = state.mix.name;
@@ -171,11 +176,24 @@ async function loadSets() {
 async function pickStrategy() {
   const box = $('add-set');
   box.textContent = '';
-  for (const s of state.sets.filter((s) => s.strategy === $('add-strategy').value)) {
-    box.add(new Option(`${s.name || s.id} · ${s.instrument} ${s.granularity}`
-      + ` · ${s.from} .. ${s.to} · ${s.runs} runs`, s.id));
-  }
+  for (const s of state.sets.filter((s) => s.strategy === $('add-strategy').value)) box.add(new Option(s.id, s.id));
+  markSets();
   await pickSet();
+}
+
+// the strategies and the simulations say how many of the mix's runs are theirs
+function markSets() {
+  const items = state.mix ? state.mix.items : [];   // the sets may come before the mix
+  const count = (ids) => items.filter((i) => ids.includes(i.sweep)).length;
+  const had = (n) => n ? ` · ${n} in the mix` : '';
+  for (const o of $('add-strategy').options) {
+    o.textContent = o.value + had(count(state.sets.filter((s) => s.strategy === o.value).map((s) => s.id)));
+  }
+  for (const o of $('add-set').options) {
+    const s = state.sets.find((x) => x.id === o.value);
+    o.textContent = `${s.name || s.id} · ${s.instrument} ${s.granularity}`
+      + ` · ${s.from} .. ${s.to} · ${s.runs} runs` + had(count([s.id]));
+  }
 }
 
 const scoreOf = (row) => row.kpi && typeof row.kpi.score === 'number' ? row.kpi.score : null;
@@ -183,7 +201,8 @@ const variedOf = (row) => Object.fromEntries((state.set.varied || []).map((k) =>
 
 async function pickSet() {
   const id = $('add-set').value;
-  state.set = null;
+  state.set = state.preview = null;
+  if (state.mix) render();   // the old runs off the page while the new ones come
   if (id) {
     const set = await ask('api/sweeps/' + id);
     if ($('add-set').value !== id) return;   // another set picked meanwhile
@@ -192,9 +211,42 @@ async function pickSet() {
   renderRuns();
 }
 
+// what each column of the runs sorts by, by its head's data-col
+const kpiOf = (name) => (row) => (row.kpi || {})[name];
+const RUN_SORT = {
+  n: (row) => row.n, params: (row) => paramsText(variedOf(row)), score: scoreOf,
+  trades: (row) => (row.report || {}).closedTrades, roi: kpiOf('roi'),
+  profitFactor: kpiOf('profitFactor'), maxDrawdownPct: kpiOf('maxDrawdownPct'),
+  sharpe: kpiOf('sharpe'), final: (row) => row.final, net: (row) => row.final - startOf(row),
+};
+
+// the runs of the set as its head sorts them, one with no number last; the
+// favourites only when asked
 function ranked() {
-  return state.set.done.filter((row) => !row.error)
-    .sort((a, b) => (scoreOf(b) ?? -1) - (scoreOf(a) ?? -1) || a.n - b.n);
+  const { col, dir } = state.runSort;
+  const value = (row) => RUN_SORT[col](row) ?? -Infinity;
+  return state.set.done.filter((row) => !row.error && (!state.onlyFav || favouriteOf(row.n)))
+    .sort((a, b) => {
+      const x = value(a), y = value(b);
+      return (x < y ? -1 : x > y ? 1 : 0) * dir || a.n - b.n;
+    });
+}
+
+// a favourite is a form the live page trades: here a run of a saved set, by
+// set and number (web/service.py favourites), as on the simulate page
+const favouriteOf = (n) => state.favourites.find((f) => f.source.kind === 'sweep'
+  && f.source.id === state.set.id && f.source.n === n);
+
+async function loadFavourites() {
+  state.favourites = (await ask('api/favourites')).favourites || [];
+  if (state.set) renderRuns();
+}
+
+async function toggleFavourite(n) {
+  const have = favouriteOf(n);
+  if (have) await post(`api/favourites/${have.id}/delete`);
+  else await post('api/favourites', { source: { kind: 'sweep', id: state.set.id, n } });
+  await loadFavourites();
 }
 
 // a viewer plugin declares no opening capital: it is the last one less the net
@@ -223,10 +275,21 @@ function renderRuns() {
   const body = $('runs-rows');
   body.textContent = '';
   const set = state.set;
-  $('runs-panel').hidden = !set;
+  $('runs-head').hidden = $('runs-table').hidden = !set;
   if (!set) return;
   const rows = ranked();
-  $('runs-title').textContent = `runs of ${set.name || set.id} · ${rows.length} · the best score first`;
+  $('runs-title').textContent = `runs of ${set.name || set.id} · ${rows.length}`
+    + (state.onlyFav ? ` favourite${rows.length === 1 ? '' : 's'}` : '');
+  for (const th of $('runs-table').tHead.querySelectorAll('th[data-col]')) {
+    th.setAttribute('aria-sort', th.dataset.col !== state.runSort.col ? 'none'
+      : state.runSort.dir > 0 ? 'ascending' : 'descending');
+  }
+  if (!rows.length) {
+    const td = body.insertRow().insertCell();
+    td.colSpan = 13;
+    td.className = 'hint';
+    td.textContent = state.onlyFav ? 'none of its runs is a favourite' : 'none of its runs can be read';
+  }
   const times = rows.flatMap((row) => (row.curve || []).map((p) => p[0]));
   const fields = set.fields || {};
   const from = Math.min(...times, Date.parse(fields.from) || Infinity);
@@ -239,8 +302,9 @@ function renderRuns() {
     const inMix = items.some((i) => i.sweep === set.id && i.n === row.n);
     const line = body.insertRow();
     line.dataset.n = row.n;
-    if (inMix) line.className = 'selected';
-    const texts = [`#${row.n}`, paramsText(variedOf(row)), fixed(scoreOf(row), 1),
+    if (inMix) line.className = 'in-mix';
+    if (row === state.preview) line.classList.add('selected');
+    const texts = [`#${row.n}` + (inMix ? ' · in the mix' : ''), paramsText(variedOf(row)), fixed(scoreOf(row), 1),
       String((row.report || {}).closedTrades ?? ''), pct(k.roi), fixed(k.profitFactor, 2),
       pct(k.maxDrawdownPct), fixed(k.sharpe, 2), amount(row.final), amount(net)];
     texts.forEach((text, i) => {
@@ -257,19 +321,56 @@ function renderRuns() {
     const actions = line.insertCell();
     actions.className = 'run-actions';
     actions.append(button);
+    const star = document.createElement('button');
+    star.type = 'button';
+    star.className = 'fav-star';
+    star.title = 'a favourite: a form the live page trades';
+    const on = !!favouriteOf(row.n);
+    star.textContent = on ? '\u2605' : '\u2606';
+    star.setAttribute('aria-pressed', String(on));
+    line.insertCell().append(star);
   }
 }
 
 $('runs-rows').addEventListener('click', (event) => {
   const line = event.target.closest('tr[data-n]');
-  if (!line || event.target.tagName !== 'BUTTON') return;
+  if (!line) return;
   const sweep = state.set.id, n = Number(line.dataset.n);
+  // the star is on the row but is not the row: neither drawn nor added
+  if (event.target.classList.contains('fav-star')) return toggleFavourite(n).catch(fail);
+  if (event.target.tagName !== 'BUTTON') {
+    // a click draws the run on the chart, a second one takes it off
+    const row = state.set.done.find((r) => r.n === n);
+    state.preview = state.preview === row ? null : row;
+    render();
+    return;
+  }
   const others = state.mix.items.filter((i) => !(i.sweep === sweep && i.n === n));
   keep(others.length < state.mix.items.length ? others : [...state.mix.items, { sweep, n }]).catch(fail);
+});
+// a head sorts the runs by it, a second click turns it round; a number starts
+// from the most, the run's number and its parameters from the first
+$('runs-table').tHead.addEventListener('click', (event) => {
+  const col = event.target.dataset.col;
+  if (!col) return;
+  state.runSort = { col, dir: state.runSort.col === col ? -state.runSort.dir
+    : col === 'n' || col === 'params' ? 1 : -1 };
+  renderRuns();
+});
+$('runs-fav').addEventListener('click', () => {
+  state.onlyFav = !state.onlyFav;
+  $('runs-fav').setAttribute('aria-pressed', String(state.onlyFav));
+  if (state.set) renderRuns();
 });
 $('add-strategy').addEventListener('change', () => pickStrategy().catch(fail));
 $('add-set').addEventListener('change', () => pickSet().catch(fail));
 $('mix-add').addEventListener('submit', (event) => event.preventDefault());
+$('mix-add-open').addEventListener('click', () => {
+  const panel = $('runs-panel');
+  panel.hidden = !panel.hidden;
+  $('mix-add-open').setAttribute('aria-pressed', String(!panel.hidden));
+  if (panel.hidden && state.preview) { state.preview = null; render(); }
+});
 
 /* ------------------------------------------------------------ the table */
 
@@ -296,12 +397,23 @@ function view() {
       .map(([i, run]) => [i, run, run.curve, run.summary.start]) };
 }
 
+// the run clicked in the add panel: drawn on its own profit, and with the mix
+// added to it - the summed one only (together sizes every trade again on the
+// shared capital), and not for a run the mix already has
+function tried() {
+  const row = state.preview;
+  if (!row) return null;
+  const v = view();
+  return { row, name: `${state.set.id}/${row.n}`,
+    added: !!v && !v.together && !state.mix.items.some((i) => i.sweep === state.set.id && i.n === row.n) };
+}
+
 function render() {
   const d = state.drawn;
   const runs = d ? d.runs : [];
   const v = view();
   const t = v && v.total;
-  $('mix-title').textContent = !runs.length ? 'an empty mix: pick a strategy and a simulation above, and add its runs'
+  $('mix-title').textContent = !runs.length ? 'an empty mix: press add, pick a simulation and add its runs'
     : !t ? `${state.mix.name || 'mix'} · none of its runs can be read`
     : `${state.mix.name || 'mix'} · ${runs.length} run${runs.length === 1 ? '' : 's'}`
       + ` · ${stamp(t.from)} .. ${stamp(t.to)} · capital ${amount(t.start)} → ${amount(t.final)}`
@@ -382,19 +494,25 @@ function render() {
   }
   const legend = $('mix-legend');
   legend.textContent = '';
+  const key = (text, dash, extra) => {
+    const span = document.createElement('span');
+    span.className = 'k series' + (extra ? ' ' + extra : '');
+    span.innerHTML = dashSample(dash);
+    span.append(text);
+    legend.append(span);
+  };
   if (t) {
-    const key = (text, dash, extra) => {
-      const span = document.createElement('span');
-      span.className = 'k series' + (extra ? ' ' + extra : '');
-      span.innerHTML = dashSample(dash);
-      span.append(text);
-      legend.append(span);
-    };
     key('the mix: capital', DASHES[0], 'mix-total');
     for (const [i, run] of v.parts) key(`${run.sweep}/${run.n}`, DASHES[i % DASHES.length]);
-    legend.append('each run: its own profit, drawn from the mix\'s start');
   }
+  const trial = tried();
+  if (trial) {
+    key(trial.name, DASHES[1], 'sim-pick');
+    if (trial.added) key(`the mix with ${trial.name}`, DASHES[0], 'sim-pick');
+  }
+  if (t || trial) legend.append('each run: its own profit, drawn from the mix\'s start');
   renderAnalysis(v);
+  markSets();
   renderRuns();
   draw();
 }
@@ -489,16 +607,26 @@ function draw() {
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, width, height);
   geometry = null;
-  const v = view();
-  if (!v) return;
-  const t = v.total;
-  const { from, to, start } = t;
-  const mix = [[from, start]].concat(t.curve);
+  const v = view(), trial = tried();
+  if (!v && !trial) return;
+  const t = v && v.total;
+  const start = t ? t.start : startOf(trial.row);
   // each run as its own profit on the mix's start, so they share its axis
-  const parts = v.parts.map(([i, run, curve, own]) =>
-    [i, run, [[from, start]].concat(curve.map(([ms, b]) => [ms, start + b - own])), own, curve]);
+  const onStart = (at, curve, own) => [[at, start]].concat(curve.map(([ms, b]) => [ms, start + b - own]));
+  const mix = t ? [[t.from, start]].concat(t.curve) : null;
+  const parts = v ? v.parts.map(([i, run, curve, own]) => [i, run, onStart(t.from, curve, own), own, curve]) : [];
+  // the run tried from the start of its set, by the close (the trades come by entry)
+  const fields = trial ? state.set.fields || {} : {};
+  const own = trial && startOf(trial.row);
+  const curve = trial ? (trial.row.curve || []).slice().sort((a, b) => a[0] - b[0]) : [];
+  const alone = trial && onStart(Date.parse(fields.from) || (curve.length ? curve[0][0] : Date.now()), curve, own);
+  const withIt = trial && trial.added ? added(mix, alone, start) : null;
+  const drawn = [mix, alone, withIt, ...parts.map((p) => p[2])].filter(Boolean);
+  const from = Math.min(...drawn.map((points) => points[0][0]));
+  const to = Math.max(t ? t.to : -Infinity, Date.parse(fields.to) || -Infinity,
+                      ...drawn.map((points) => points[points.length - 1][0]));
   let low = Infinity, high = -Infinity;
-  for (const points of [mix, ...parts.map((p) => p[2])]) for (const [, value] of points) {
+  for (const points of drawn) for (const [, value] of points) {
     low = Math.min(low, value);
     high = Math.max(high, value);
   }
@@ -508,7 +636,7 @@ function draw() {
   const plotW = width - AXIS.left - AXIS.right, plotH = height - AXIS.top - AXIS.bottom;
   const x = (ms) => AXIS.left + (ms - from) / Math.max(1, to - from) * plotW;
   const y = (value) => AXIS.top + (high - value) / (high - low) * plotH;
-  geometry = { from, to, plotW, mix, parts };
+  geometry = { from, to, plotW, mix, parts, trial, alone, withIt, own };
 
   const p = palette();
   ctx.font = '11px ' + p.mono;
@@ -555,17 +683,36 @@ function draw() {
   ctx.globalAlpha = 1;
   const picked = parts.find(([i]) => i === state.pick);
   if (picked) line(picked[2], p.entry, 2, DASHES[picked[0] % DASHES.length]);
-  line(mix, p.text, 2);
+  if (alone) line(alone, p.entry, 1.5, DASHES[1]);
+  // under the mix: where the run has not traded yet the two are one line
+  if (withIt) line(withIt, p.entry, 2);
+  if (mix) line(mix, p.text, 2);
+}
+
+// two step curves on one start added up, at every step of either: the mix
+// with a run in it, as the service adds up its runs
+function added(a, b, start) {
+  const out = [];
+  let i = 0, j = 0, va = a[0][1], vb = b[0][1];
+  while (i < a.length || j < b.length) {
+    const ms = Math.min(i < a.length ? a[i][0] : Infinity, j < b.length ? b[j][0] : Infinity);
+    while (i < a.length && a[i][0] === ms) va = a[i++][1];
+    while (j < b.length && b[j][0] === ms) vb = b[j++][1];
+    out.push([ms, va + vb - start]);
+  }
+  return out;
 }
 
 // what the mix and each run held at the cursor's time, each on its own capital
 canvas.addEventListener('mousemove', (event) => {
   if (!geometry) return;
-  const { from, to, plotW, mix, parts } = geometry;
+  const { from, to, plotW, mix, parts, trial, alone, withIt, own } = geometry;
   const ms = from + (event.clientX - canvas.getBoundingClientRect().left - AXIS.left) / plotW * (to - from);
-  $('mix-readout').textContent = `${stamp(ms)} · mix ${amount(balanceAt(mix, ms))}`
+  $('mix-readout').textContent = stamp(ms) + (mix ? ` · mix ${amount(balanceAt(mix, ms))}` : '')
+    + (withIt ? ` · with ${trial.name} ${amount(balanceAt(withIt, ms))}` : '')
     + parts.map(([, run, , own, curve]) => ` · ${run.sweep}/${run.n} ${amount(balanceAt(
-      [[from, own]].concat(curve), ms))}`).join('');
+      [[from, own]].concat(curve), ms))}`).join('')
+    + (alone ? ` · ${trial.name} ${amount(own + balanceAt(alone, ms) - alone[0][1])}` : '');
 });
 
 window.addEventListener('resize', draw);
@@ -574,6 +721,7 @@ window.addEventListener('resize', draw);
 
 async function start() {
   loadSets().catch(fail);
+  loadFavourites().catch(fail);
   state.mixes = (await ask('api/mixes')).mixes;
   const wanted = new URLSearchParams(location.search).get('id');
   await openMix(state.mixes.some((m) => m.id === wanted) ? wanted

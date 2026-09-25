@@ -1310,17 +1310,25 @@ class Service(object):
 		at `leverage` or the setting's. Not part of the cache's key, as the
 		trades do not depend on it: the cached payload is answered as it is
 		when its leverage is the one asked, a copy with its own when not.
+
+		The KPIs come with it (rowKpi, as a sweep row has them), since the
+		score reads the margin: the run page's analysis is the simulate
+		page's, on the same numbers.
 		"""
 		leverage = leverage or self.leverage()
-		if not payload or (payload.get('margin') or {}).get('leverage') == leverage:
+		if not payload or ((payload.get('margin') or {}).get('leverage') == leverage
+						   and 'kpi' in payload):
 			return payload
 		trades = payload.get('trades') or []
-		start = opening(payload.get('balance'), next(
-			(t['balance'] for t in reversed(trades) if t.get('balance') is not None), None),
-			(payload.get('report') or {}).get('net'))
+		final = next((t['balance'] for t in reversed(trades) if t.get('balance') is not None), None)
+		start = opening(payload.get('balance'), final, (payload.get('report') or {}).get('net'))
 		if start is None:
 			return payload
-		return dict(payload, margin=report_module.margin(trades, start, leverage))
+		margin = report_module.margin(trades, start, leverage)
+		row = {'balance': start, 'final': final, 'report': payload.get('report'), 'margin': margin,
+			   'curve': [[t['exitTime'], t['balance']] for t in trades
+						 if t.get('exitTime') is not None and t.get('balance') is not None]}
+		return dict(payload, margin=margin, kpi=rowKpi(row, payload.get('from'), payload.get('to')))
 
 	def leverage(self):
 		return getattr(self.setup, 'LEVERAGE', None) or 30
@@ -2604,7 +2612,13 @@ def expandGrid(grid):
 		raise ServiceError("that grid is %d runs and the limit is %d: fewer "
 						   "values, or fewer fields varied at once"
 						   % (total, MAX_COMBOS))
-	return [dict(combo) for combo in itertools.product(*axes)]
+	combos = [dict(combo) for combo in itertools.product(*axes)]
+	for combo in combos:
+		# a stop that never moves reads no trail pips (MoneyManager.trail): one
+		# run for all of them, not one each making the same trades
+		if combo.get('trailing') == '0' and 'trailPips' in combo:
+			combo['trailPips'] = ''
+	return [dict(combo) for combo in dict.fromkeys(tuple(combo.items()) for combo in combos)]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -2725,6 +2739,8 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendFile('run.html')
 			if route == '/settings':
 				return self.sendFile('settings.html')
+			if route == '/docs':
+				return self.sendFile('docs.html')
 			if route == '/live':
 				return self.sendFile('live.html')
 			if route == '/mix':

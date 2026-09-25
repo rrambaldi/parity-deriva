@@ -13,7 +13,7 @@ import unittest
 
 from parity_deriva.event.event import CandleEvent
 from parity_deriva.lib import indicators
-from parity_deriva.lib.streaming import Daily, Series, Swings
+from parity_deriva.lib.streaming import Cross, Daily, Series, Swings, Values, Weekly
 from parity_deriva.tests.helpers import T0, candle_dict
 
 
@@ -216,6 +216,142 @@ class TestDaily(unittest.TestCase):
         daily.add(self.day(1, 0))
         daily.add(self.day(1, 4))
         self.assertEqual(len(daily.bars), 1)
+
+
+class TestReadings(unittest.TestCase):
+    """What the assistants' weekly strategies wrote out by hand, read off a Series."""
+
+    CLOSES = TestAgreement.CLOSES
+
+    def feed(self, **kw):
+        series = Series(**kw)
+        for i, close in enumerate(self.CLOSES):
+            series.add(bar(i, o=close, c=close, h=close + 1, l=close - 1, volume=i + 1))
+        return series
+
+    def test_the_sma_some_bars_ago_is_the_chart_s_there(self):
+        series = self.feed()
+        self.assertAlmostEqual(series.sma(5, back=4), indicators.sma(self.CLOSES, 5)[-5])
+        self.assertAlmostEqual(series.sma(5, back=0), series.sma(5))
+        self.assertIsNone(series.sma(5, back=16))
+
+    def test_the_rate_of_change_is_the_close_over_the_one_before_less_one(self):
+        series = self.feed()
+        self.assertAlmostEqual(series.change(3), self.CLOSES[-1] / self.CLOSES[-4] - 1)
+        self.assertIsNone(series.change(len(self.CLOSES)))
+
+    def test_the_bandwidth_is_the_width_of_the_bands_over_the_middle(self):
+        series = self.feed()
+        lower, middle, upper = series.bands(5, 2.0)
+        self.assertAlmostEqual(series.bandwidth(5, 2.0), (upper - lower) / middle)
+
+    def test_the_channel_leaves_out_the_bar_it_is_measured_for(self):
+        series = self.feed()
+        before = self.CLOSES[-4:-1]
+        self.assertEqual(series.channel(3), (min(before) - 1, max(before) + 1))
+        self.assertEqual(series.high(3), max(self.CLOSES[-3:]) + 1)
+        self.assertEqual(series.high(3, skip=1), max(before) + 1)
+        self.assertIsNone(series.channel(len(self.CLOSES)))
+
+    def test_the_distance_from_the_high_and_the_low_is_a_share_of_it(self):
+        series = self.feed()
+        close = self.CLOSES[-1]
+        self.assertAlmostEqual(series.offHigh(5), close / (max(self.CLOSES[-5:]) + 1) - 1)
+        self.assertAlmostEqual(series.offLow(5), close / (min(self.CLOSES[-5:]) - 1) - 1)
+        # WK09's filter, "within maxDrop percent of the highBars high", read off it
+        high = max(c + 1 for c in self.CLOSES[-5:])
+        self.assertEqual(close >= (1 - 0.05) * high, series.offHigh(5) >= -0.05)
+        self.assertIsNone(series.offHigh(len(self.CLOSES) + 1))
+
+    def test_the_average_volume_before_this_bar_leaves_it_out(self):
+        series = self.feed()
+        n = len(self.CLOSES)
+        self.assertAlmostEqual(series.averageVolume(3, skip=1), (n - 1 + n - 2 + n - 3) / 3.0)
+        self.assertAlmostEqual(series.averageVolume(3), (n + n - 1 + n - 2) / 3.0)
+
+
+class TestValues(unittest.TestCase):
+    """A series the strategy derives, and where a new value stands in it."""
+
+    def test_a_value_is_ranked_against_the_ones_before_it(self):
+        past = Values(4)
+        for value in (1, 2, 3, 4):
+            self.assertFalse(past.full())
+            past.add(value)
+        self.assertTrue(past.full())
+        self.assertEqual(past.rank(3.5), 0.75)
+        self.assertEqual((past.rank(0), past.rank(10)), (0.0, 1.0))
+        past.add(5)
+        self.assertEqual(past.values, [2, 3, 4, 5])
+
+    def test_the_median_is_the_middle_or_the_mean_of_the_two(self):
+        # WK08's own: (ordered[(n - 1) // 2] + ordered[n // 2]) / 2
+        for values in ([1, 2, 3, 10], [1, 5, 2], [0.3, -0.1, 0.7, 0.2, 0.9, 0.4]):
+            past = Values(len(values))
+            for value in values:
+                past.add(value)
+            ordered, n = sorted(values), len(values)
+            self.assertAlmostEqual(past.median(), (ordered[(n - 1) // 2] + ordered[n // 2]) / 2.0)
+
+    def test_nothing_is_said_about_an_empty_one(self):
+        past = Values(3)
+        self.assertIsNone(past.rank(1))
+        self.assertIsNone(past.median())
+
+
+class TestCross(unittest.TestCase):
+    """The bar a value goes over a level or under it."""
+
+    def test_it_is_the_bar_the_side_changes_and_no_other(self):
+        cross = Cross()
+        self.assertEqual([cross.add(v) for v in (-2, -1, 0, 1, 2, 0.5, -0.5, -1)],
+                         [0, 0, 0, 1, 0, 0, -1, 0])
+
+    def test_an_rsi_back_over_thirty(self):
+        cross = Cross(30)
+        self.assertEqual([cross.add(v) for v in (35, 28, 25, 31, 29)], [0, -1, 0, 1, -1])
+
+    def test_a_value_still_warming_has_nothing_to_cross_from(self):
+        cross = Cross()
+        self.assertEqual([cross.add(v) for v in (None, 1, None, -1, 1)], [0, 0, 0, 0, 1])
+
+
+class TestWeekly(unittest.TestCase):
+    """Weeks out of daily bars, sealed by their Friday."""
+
+    SUNDAY = datetime.date(2017, 2, 5)
+
+    def day(self, days, hour=21, price=10.0):
+        when = datetime.datetime.combine(self.SUNDAY + datetime.timedelta(days=days),
+                                         datetime.time(hour))
+        ev = CandleEvent(candle_dict(when, o=price, h=price + 5, l=price - 5, c=price + 1))
+        ev.instrument = 'EUR_USD'
+        return ev
+
+    def test_the_friday_bar_seals_the_week_it_ends(self):
+        weekly = Weekly()
+        # stamped Sunday 21:00 to Thursday 21:00: Monday's trading to Friday's
+        done = [weekly.add(self.day(i, price=10.0 + i)) for i in range(5)]
+        self.assertEqual(done[:4], [[], [], [], []])
+        week = done[4][0]
+        self.assertEqual((week.mid['o'], week.mid['h'], week.mid['l'], week.mid['c']),
+                         (10.0, 19.0, 5.0, 15.0))
+        self.assertEqual(len(weekly.bars), 1)
+
+    def test_a_bar_stamped_at_midnight_is_its_own_day(self):
+        weekly = Weekly()
+        done = [weekly.add(self.day(i, hour=0)) for i in range(1, 6)]   # Monday to Friday
+        self.assertEqual([len(d) for d in done], [0, 0, 0, 0, 1])
+
+    def test_a_week_without_its_friday_is_sealed_by_the_next_one(self):
+        weekly = Weekly()
+        for i in range(4):                       # Monday to Thursday, no Friday
+            self.assertEqual(weekly.add(self.day(i)), [])
+        self.assertEqual(len(weekly.add(self.day(7))), 1)       # next Monday
+        # and a week of one Friday after another with none: both at once
+        for i in range(8, 11):
+            weekly.add(self.day(i))
+        self.assertEqual(len(weekly.add(self.day(18))), 2)      # the Friday after
 
 
 if __name__ == '__main__':

@@ -67,6 +67,7 @@ def main():
 			klass(pairs=[getattr(klass, 'INSTRUMENT', None) or 'EUR_USD'],
 				  granularity=getattr(klass, 'GRANULARITY', None) or 'H1')
 			out = {'strategy': {
+				'class': klass.__name__,
 				'description': ' '.join((getattr(klass, 'DESCRIPTION', None) or '').split()),
 				'instrument': getattr(klass, 'INSTRUMENT', None),
 				'granularity': getattr(klass, 'GRANULARITY', None),

@@ -214,12 +214,21 @@ function fillFlag(name, text) {
   if (!y && !n) [y, n] = flagDefault(name) === '1' ? [true, false] : [false, true];
   $(`g-${name}-y`).checked = y;
   $(`g-${name}-n`).checked = n;
+  trailPipsOn();
+}
+
+// the trail pips are for a stop that follows: with the trailing stop N only
+// there is nothing to set (MoneyManager.trail), and the sweep runs one run
+// for them whatever they are (expandGrid in web/service.py)
+function trailPipsOn() {
+  $('g-trailPips').disabled = !$('g-trailing-y').checked;
 }
 
 for (const name of FLAGS) {
   for (const side of ['y', 'n']) {
     $(`g-${name}-${side}`).addEventListener('change', () => {
       if (!$(`g-${name}-y`).checked && !$(`g-${name}-n`).checked) fillFlag(name, '');
+      trailPipsOn();
     });
   }
 }
@@ -297,7 +306,8 @@ function gridFields() {
     grid[input.dataset.name] = input.value;
   }
   for (const name of ['maxStop', 'session', 'maxBars', 'slScale', 'tpScale', 'trailPips']) {
-    grid[name] = $('g-' + name).value;
+    // switched off, the box keeps what it held for when it is on again
+    grid[name] = $('g-' + name).disabled ? '' : $('g-' + name).value;
   }
   for (const name of FLAGS) grid[name] = flagGrid(name);
   return grid;

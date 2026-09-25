@@ -88,8 +88,8 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
     <h2 class="panel-title">economic calendar</h2>
     <div id="calendar-state">no calendar imported</div>
     <ol id="calendar-how">
-      <li>open <a href="https://www.forexfactory.com/calendar" target="_blank"
-                  rel="noopener">forexfactory.com/calendar</a></li>
+      <li>open the calendar page of a site that publishes one - the collector is
+          written for forexfactory.com's</li>
       <li>press F12, open the console, paste the collector, press enter</li>
       <li>leave the tab alone: the weeks arrive here as they are read</li>
       <li>if the push is refused it downloads <code>calendar.csv</code>
@@ -108,6 +108,7 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
         <input type="file" id="calendar-file" accept=".csv,text/csv">
       </label>
       <button type="button" id="calendar-import" data-icon="import">import calendar</button>
+      <button type="button" id="calendar-format-open" data-icon="list">file format</button>
     </div>
   </div>
   <div id="data-progress-box" hidden>
@@ -143,6 +144,7 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
       <input type="file" id="mcp-file" accept=".py,text/x-python" multiple>
     </label>
     <button type="button" id="mcp-import" data-icon="upload">import as drafts</button>
+    <button type="button" id="draft-format-open" data-icon="list">draft example</button>
   </div>
   <div id="mcp-token" hidden>
     <code id="mcp-token-text"></code>
@@ -159,6 +161,20 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
     <thead><tr><th>request</th><th>asked</th><th>for</th><th>what it is</th><th></th></tr></thead>
     <tbody id="mcp-request-rows"></tbody>
   </table>
+  <!-- what the assistants are told with a code update: what changed, what to
+       update. Posted with the update (web/mcp.py postNews), not from here. An
+       assistant reads it with get_news and is told of it when it connects;
+       a strategy it names is done once a new version of it is submitted -->
+  <div id="mcp-news-box">
+    <h2 class="panel-title">news for the assistants</h2>
+    <p id="news-hint">They come with the updates of parity-deriva's code. An assistant reads
+      them with get_news, and is told of them when it connects. A strategy a news names is
+      done once a new version of it is submitted.</p>
+    <table id="mcp-news" hidden>
+      <thead><tr><th>news</th><th>posted</th><th>what it says</th><th>strategies</th><th></th></tr></thead>
+      <tbody id="mcp-news-rows"></tbody>
+    </table>
+  </div>
 </section>
 
 <!-- a strategy's code, read before enabling it -->
@@ -176,6 +192,134 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
   </form>
   <div class="dialog-body">
     <pre id="mcp-source"></pre>
+  </div>
+</dialog>
+
+<!-- what a strategy file imported as a draft is: the checks are
+     strategy/uploaded.py's, and web_test.py runs them on this example -->
+<dialog id="draft-format" class="sheet" aria-labelledby="draft-format-title">
+  <form method="dialog" class="dialog-head">
+    <div class="dialog-heading">
+      <h2 class="dialog-title" id="draft-format-title">a draft strategy</h2>
+      <p class="dialog-sub">one Python file &middot; one class &middot; MY-EMA.py imports as the draft MY-EMA</p>
+    </div>
+    <div class="dialog-tools">
+      <button type="submit" class="dialog-close" aria-label="close"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+  </form>
+  <div class="dialog-body">
+    <pre id="draft-example">"""
+MY-EMA: a pullback to the fast EMA, in the trend of the slow one.
+"""
+
+from parity_deriva.lib.streaming import Series
+from parity_deriva.strategy.H4 import H4, bearish, bullish
+
+
+class MyEma(H4):
+    TAG = 'MY-EMA'
+    INSTRUMENT = 'EUR_USD'
+    GRANULARITY = 'H1'
+    DESCRIPTION = (
+        "Long above the EMA 200 when a bar's low touches the EMA 50 and it "
+        "closes green, short the mirror. Stop 2 ATR(14) from the close, "
+        "target 2R.")
+
+    PARAM_HELP = {
+        'fast': 'period of the fast EMA, in bars',
+        'slow': 'period of the slow trend EMA, in bars',
+        'atrStop': 'stop distance from the close, in ATR',
+        'reward': 'target as a multiple of the stop (R)',
+    }
+
+    def setup(self, args):
+        self._set(args, 'fast', 50)
+        self._set(args, 'slow', 200)
+        self._set(args, 'atrStop', 2.0)
+        self._set(args, 'reward', 2.0)
+
+    def series(self):
+        return Series(ema=(self.fast, self.slow), atr=self.atrPeriod)
+
+    def signal(self, state, candle):
+        fast, slow, atr = state.ema(self.fast), state.ema(self.slow), state.atr()
+        if fast is None or slow is None or not atr:
+            return None
+        close = candle.mid['c']
+        if close &gt; slow and candle.mid['l'] &lt;= fast and bullish(candle):
+            stop = close - self.atrStop * atr
+            return 1, stop, self.levels(candle, 1, stop, self.reward)
+        if close &lt; slow and candle.mid['h'] &gt;= fast and bearish(candle):
+            stop = close + self.atrStop * atr
+            return -1, stop, self.levels(candle, -1, stop, self.reward)
+        return None</pre>
+    <dl>
+      <dt>file name</dt><dd>the draft's name: <code>MY-EMA.py</code> is MY-EMA, and
+        <code>MY-EMA@2.py</code>, as download names it, the next version of MY-EMA</dd>
+      <dt>class</dt><dd>exactly one, a subclass of <code>H4</code> - or of
+        <code>M15</code>, richer for intraday entries - or of a strategy to build on.
+        Its name is its own: one another strategy's class has is refused, and only the
+        versions of one draft share it</dd>
+      <dt>INSTRUMENT, GRANULARITY</dt><dd>what it is meant for</dd>
+      <dt>DESCRIPTION</dt><dd>its rules in plain words, for who reads the code</dd>
+      <dt>setup</dt><dd>every number to tune read with <code>self._set(args, name, default)</code>:
+        they are the parameters of the simulations, and <code>PARAM_HELP</code> says what each is</dd>
+      <dt>series</dt><dd>what the bars keep: <code>Series</code> of
+        <code>parity_deriva.lib.streaming</code>, EMAs, SMAs, ATR, RSI&hellip;</dd>
+      <dt>signal</dt><dd>called on every closed bar: <code>None</code>, or
+        <code>(side, stop, target)</code> - side 1 long or &minus;1 short, stop and target as
+        prices. The entry is at market on the next bar's open, one position at a time</dd>
+      <dt>imports</dt><dd>numbers (math, numpy&hellip;) and the parts of parity_deriva a
+        strategy is made of; files, network, processes, eval and exec are refused</dd>
+    </dl>
+    <p>The server ends the file with a <code>PARITY_DERIVA</code> line, its version: leave it.
+      A file the same as its draft's newest version is refused: there is nothing new in it.
+      A draft is only backtested in a sandbox, until it is enabled here after reading its code.</p>
+  </div>
+</dialog>
+
+<!-- a yes or no asked on the page: enable, disable, delete (mcpAct) -->
+<dialog id="ask-dialog">
+  <form method="dialog">
+    <p id="ask-text"></p>
+    <div class="dialog-actions">
+      <button value="no" data-icon="close">cancel</button>
+      <button value="yes" id="ask-yes" data-icon="yes">yes</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- what an imported calendar is: the four columns of data/calendar.py -->
+<dialog id="calendar-format" class="sheet" aria-labelledby="calendar-format-title">
+  <form method="dialog" class="dialog-head">
+    <div class="dialog-heading">
+      <h2 class="dialog-title" id="calendar-format-title">calendar file format</h2>
+      <p class="dialog-sub">a CSV &middot; four columns &middot; a row an event &middot; times in UTC</p>
+    </div>
+    <div class="dialog-tools">
+      <button type="submit" class="dialog-close" aria-label="close"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+  </form>
+  <div class="dialog-body">
+    <pre>time,currency,impact,title
+2015-01-09 13:30:00,USD,high,Non-Farm Employment Change
+2015-01-09 13:30:00,USD,high,Unemployment Rate
+2015-01-22 12:45:00,EUR,high,Main Refinancing Rate
+2015-01-22 13:30:00,USD,medium,Unemployment Claims
+2015-12-25 00:00:00,GBP,non-economic,Bank Holiday</pre>
+    <dl>
+      <dt>time</dt><dd>when it is released, in UTC: <code>YYYY-MM-DD HH:MM:SS</code></dd>
+      <dt>currency</dt><dd>the currency it is about, in three letters: USD, EUR, GBP, JPY&hellip;</dd>
+      <dt>impact</dt><dd><code>high</code>, <code>medium</code>, <code>low</code> or
+        <code>non-economic</code> (holidays, speeches with no number): the source's own
+        rating, kept as it is</dd>
+      <dt>title</dt><dd>the event's name as the source gives it, in quotes when it has a comma</dd>
+    </dl>
+    <p>The header line comes first, with the columns in any order; other columns are left out.
+      An event is its time, currency and title: one already held is kept as it is and not
+      added twice, so stretches of weeks that overlap import safely.</p>
+    <p>The collector writes this file, <code>calendar.csv</code>, when its push is refused.
+      Any other source works once its export is put in these four columns.</p>
   </div>
 </dialog>
 

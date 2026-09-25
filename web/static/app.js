@@ -1577,6 +1577,12 @@ function renderReport() {
     stat('candles', String(c.candles)),
     stat('took', state.data.elapsed + 's'),
   );
+
+  // the KPIs in words (analysis.js): only for a run sized off an account,
+  // the only kind whose percentages are of something
+  const d = state.data;
+  $('analysis-body').replaceChildren(...(d.kpi && d.risk
+    ? [Object.assign(document.createElement('h3'), { textContent: 'KPI analysis' }), ...analysisNodes({ kpi: d.kpi, report: r, margin: m })] : []));
 }
 
 /* ------------------------------------------------------------ interaction */

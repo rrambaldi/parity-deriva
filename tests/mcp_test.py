@@ -10,6 +10,7 @@ process, so a loop and a memory eater are each stopped the real way.
 
 import base64
 import hashlib
+import html
 import json
 import os
 import secrets
@@ -187,7 +188,8 @@ class MCPTest(StoreCase):
 		names = [t['name'] for t in self.rpc('tools/list')['tools']]
 		# Was: five tools. Now: list_helpers and request_feature too, which
 		# the rules in the instructions send an assistant to, and propose_public
-		self.assertEqual(names, ['list_strategies', 'get_source', 'list_data',
+		# and get_news first, the one the instructions send it to before the rest
+		self.assertEqual(names, ['get_news', 'list_strategies', 'get_source', 'list_data',
 								 'submit_strategy', 'list_helpers', 'request_feature',
 								 'run_backtest', 'propose_public'])
 		data, _ = self.tool('list_data')
@@ -231,9 +233,17 @@ class MCPTest(StoreCase):
 
 		# the code downloaded from the settings page comes back as a draft
 		self.assertEqual(self.http('/api/mcp/import', {'name': 'COPY', 'source': GOOD})[0], 403)
+		# under another name its class is another strategy's: refused until renamed
 		status, raw, _ = self.http('/api/mcp/import', {'name': 'EVERY-THIRD-COPY', 'source': GOOD},
 								   {'X-Parity-Deriva': '1'})
+		self.assertEqual(status, 400, raw)
+		self.assertIn('class EveryThird is already the class of EVERY-THIRD 1', raw.decode())
+		status, raw, _ = self.http('/api/mcp/import', {'name': 'EVERY-THIRD-COPY', 'source': GOOD.replace(
+			'EveryThird', 'EveryThirdCopy')}, {'X-Parity-Deriva': '1'})
 		self.assertEqual(status, 200, raw)
+		# a built-in strategy's class, the same
+		self.assertIn('class AG02 is already the class of AG02', self.tool(
+			'submit_strategy', name='NOT-AG02', source=GOOD.replace('EveryThird', 'AG02'))[0])
 		self.assertIn(('EVERY-THIRD-COPY', 'draft', 'imported from a file'),
 					  [(s['name'].split(' ')[0], s['state'], s.get('client'))
 					   for s in json.loads(raw)['strategies']])
@@ -250,7 +260,11 @@ class MCPTest(StoreCase):
 						 ('EVERY-THIRD 1', 1, mcp.serverVersion()))
 		# Was: a name enabled was refused until disabled. Now: the next version,
 		# a draft, and the one enabled stays as the user read it
+		# the same code again is no new version
 		again, failed = self.tool('submit_strategy', name='EVERY-THIRD', source=GOOD)
+		self.assertTrue(failed)
+		self.assertIn('the same code as EVERY-THIRD 1', again)
+		again, failed = self.tool('submit_strategy', name='EVERY-THIRD', source=GOOD + '# v2\n')
 		self.assertFalse(failed, again)
 		self.assertEqual(again['name'], 'EVERY-THIRD 2')
 		self.assertIn("'version': 2", self.tool('get_source', name='EVERY-THIRD')[0]['source'])
@@ -350,12 +364,79 @@ class MCPTest(StoreCase):
 		self.assertEqual(json.loads(raw)['requests'], [])
 		self.assertEqual(self.http('/api/mcp/request', {'id': 'R1'}, {'X-Parity-Deriva': '1'})[0], 400)
 
+	def test_the_user_posts_news_and_an_assistant_reads_what_is_left_to_update(self):
+		self.bearer = self.service.oauth.newSecret()
+		self.assertEqual(self.tool('get_news')[0]['news'], [])
+		self.assertFalse(self.tool('submit_strategy', name='EVERY-THIRD', source=GOOD)[1])
+		post = lambda body: self.http('/api/mcp/news', body, {'X-Parity-Deriva': '1'})
+		self.assertEqual(post({'title': 'x', 'text': 'y', 'strategies': 'not-a-name'})[0], 400)
+		self.assertEqual(self.http('/api/mcp/news', {'title': 'x', 'text': 'y'})[0], 403)
+		status, raw, _ = post({'title': 'New helpers', 'text': 'Rewrite it on Weekly.',
+							   'strategies': 'EVERY-THIRD 1, OTHER-ONE'})
+		self.assertEqual(status, 200, raw)
+		self.assertEqual(json.loads(raw)['news'][0]['id'], 'N1')
+		# told on connecting, and read in full with the tool
+		self.assertIn('N1: New helpers (new)', self.rpc('initialize', {})['instructions'])
+		# every answer carries it on top until get_news is read - a server
+		# cannot speak first over MCP here, and a client reads the
+		# instructions only when it connects
+		answer = self.rpc('tools/call', {'name': 'list_data', 'arguments': {}})['content']
+		self.assertEqual(len(answer), 2)
+		self.assertIn('call get_news before going on: N1: New helpers', answer[1]['text'])
+		told = self.tool('get_news')[0]['news'][0]
+		self.assertEqual(len(self.rpc('tools/call', {'name': 'list_data', 'arguments': {}})['content']), 1)
+		self.assertNotIn('(new)', self.rpc('initialize', {})['instructions'])
+		# a client back after the server was updated is told it had another version
+		client = [c for c in mcp.clients(self.service) if c.startswith('token: ')][0]
+		mcp.remember(self.service, client, version='0.9.0+old')
+		self.assertIn('you knew 0.9.0+old, it is now %s' % mcp.serverVersion(),
+					  self.rpc('initialize', {})['instructions'])
+		self.assertNotIn('you knew', self.rpc('initialize', {})['instructions'])
+		self.assertEqual(told['strategies'], [
+			{'name': 'EVERY-THIRD', 'latest': 'EVERY-THIRD 1', 'updated': False},
+			{'name': 'OTHER-ONE', 'latest': None, 'updated': False}])
+		# a new version after the news is the strategy done
+		self.assertFalse(self.tool('submit_strategy', name='EVERY-THIRD', source=GOOD + '# on Weekly\n')[1])
+		self.assertEqual(self.tool('get_news')[0]['news'][0]['strategies'][0],
+						 {'name': 'EVERY-THIRD', 'latest': 'EVERY-THIRD 2', 'updated': True})
+		# done with: removed on the page, and no longer in the instructions
+		status, raw, _ = self.http('/api/mcp/news/drop', {'id': 'N1'}, {'X-Parity-Deriva': '1'})
+		self.assertEqual((status, json.loads(raw)['news']), (200, []))
+		self.assertNotIn('News from the user', self.rpc('initialize', {})['instructions'])
+
+	def test_the_docs_page_s_example_is_a_strategy_the_server_takes(self):
+		"""The example on /docs, as it is written there: kept honest by this."""
+		page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+							'web', 'static', 'docs.html')
+		with open(page) as handle:
+			text = handle.read()
+		example = html.unescape(text.split('<pre id="docs-example">')[1].split('</pre>')[0])
+		self.assertEqual(uploaded.check(example), [])
+		self.bearer = self.service.oauth.newSecret()
+		saved, failed = self.tool('submit_strategy', name='EMA-CROSS-DEMO', source=example)
+		self.assertFalse(failed, saved)
+		self.assertLessEqual({'fast', 'slow', 'atrStop', 'reward'},
+							 set(p['name'] for p in saved['parameters']))
+		run, failed = self.tool('run_backtest', strategy='EMA-CROSS-DEMO', instrument='EUR_USD',
+								granularity='H1', parameters={'fast': 5, 'slow': 12},
+								**{'from': '2017-02-01', 'to': '2017-02-09'})
+		self.assertFalse(failed, run)
+		# and the page's reference is read off the helpers' source
+		status, raw, _ = self.http('/api/mcp/docs')
+		docs = json.loads(raw)
+		self.assertIn('Rules:', docs['guide'])
+		streaming = [m for m in docs['reference'] if m['module'] == 'parity_deriva.lib.streaming'][0]
+		series = [i for i in streaming['items'] if i['name'] == 'Series'][0]
+		self.assertIn('channel', [m['name'] for m in series['methods']])
+		self.assertIn('parity_deriva.lib.streaming', docs['allowed'])
+
 	def test_a_loop_and_a_memory_eater_are_stopped_in_the_sandbox(self):
 		self.bearer = self.service.oauth.newSecret()
 		self.settings.MCP_SANDBOX_SECONDS = 15
 		for name, body, word in (('FOREVER', 'while True:\n\t\t\tpass', 'stopped after'),
 								 ('GREEDY', 'x = [0] * 10 ** 9', 'memory')):
-			source = GOOD.replace("atr = state.atr()", body).replace('EveryThird', 'Bad')
+			# a class of its own each: one name for two strategies is refused
+			source = GOOD.replace("atr = state.atr()", body).replace('EveryThird', name.title())
 			saved, failed = self.tool('submit_strategy', name=name, source=source)
 			self.assertFalse(failed, saved)
 			# the secret names no client: the program's User-Agent does

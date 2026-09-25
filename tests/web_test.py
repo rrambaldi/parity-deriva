@@ -455,6 +455,31 @@ class LoadStrategyTest(unittest.TestCase):
         with self.assertRaises(LedgerError):
             ledger_module.load_strategy('nope')
 
+    def test_the_settings_page_draft_example_is_a_draft_that_loads(self):
+        """The example the settings page shows passes the checks a draft goes
+        through and builds, as import as drafts would take it."""
+        import html, re, sys
+        from parity_deriva.strategy import uploaded
+        from parity_deriva.strategy.H4 import H4
+        page = os.path.join(os.path.dirname(service_module.__file__), 'static', 'settings.html')
+        with open(page) as handle:
+            source = html.unescape(re.search(r'<pre id="draft-example">(.*?)</pre>',
+                                             handle.read(), re.S).group(1))
+        self.assertEqual(uploaded.check(source), [])
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, 'MY-EMA.py')
+            with open(path, 'w') as handle:
+                handle.write(source)
+            module, name = uploaded.load('MY-EMA', path)
+        try:
+            built = getattr(sys.modules[module], name)
+            self.assertTrue(issubclass(built, H4))
+            strategy = built(pairs=['EUR_USD'], granularity='H1')
+            self.assertEqual((strategy.fast, strategy.slow), (50, 200))
+            self.assertTrue(set(built.PARAM_HELP) <= set(vars(strategy)))
+        finally:
+            sys.modules.pop(module, None)
+
 
 class MarginTest(unittest.TestCase):
     """report.margin and report.together: an account on margin."""
@@ -1756,6 +1781,16 @@ class RiskSizingTest(StoreCase):
         for small, large in zip(poor['trades'], rich['trades']):
             self.assertAlmostEqual(large['units'], small['units'] * 2, places=1)
 
+    def test_a_run_comes_with_its_kpis_read_at_its_leverage(self):
+        """The run page's analysis: the KPIs a sweep row would have, and a
+        leverage the account cannot trade on scores nothing."""
+        payload = self.service.backtest('EUR_USD', 'H1', risk=0.01)
+        self.assertIn('score', payload['kpi'])
+        self.assertEqual(payload['kpi']['winRate'], payload['report']['winRate'])
+        broke = self.service.withMargin(payload, 0.001)
+        self.assertFalse(broke['margin']['ok'])
+        self.assertEqual(broke['kpi']['score'], 0.0)
+
     def test_a_risk_and_a_fixed_size_are_two_different_runs(self):
         fixed = self.service.backtest('EUR_USD', 'H1', units=1)
         risked = self.service.backtest('EUR_USD', 'H1', risk=0.01)
@@ -1994,7 +2029,8 @@ class HTTPTest(HTTPCase):
                            ('/run', b'<canvas id="chart"'),
                            ('/settings', b'<table id="data-files"'),
                            ('/live', b'<table id="live-table"'),
-                           ('/mix', b'<canvas id="mix-equity"')):
+                           ('/mix', b'<canvas id="mix-equity"'),
+                           ('/docs', b'<pre id="docs-example">')):
             status, body, headers = self.get(path)
             self.assertEqual(status, 200, path)
             self.assertIn('text/html', headers['Content-Type'])

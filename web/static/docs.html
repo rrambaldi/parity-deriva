@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>parity-deriva docs</title>
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="static/fonts.css">
+<link rel="stylesheet" href="static/tokens.css">
+<link rel="stylesheet" href="static/app.css">
+<link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="static/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="static/apple-touch-icon.png">
+<!-- the theme the switch forced, before the first paint: see settings.html -->
+<script>
+  try {
+    const theme = localStorage.getItem('parity-deriva.theme');
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  } catch (error) { /* nothing kept: the system's theme */ }
+</script>
+</head>
+<body>
+
+<header>
+  <div id="brand">
+    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="179" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="179" height="28"></h1>
+    <span id="page-name" class="page-title">docs</span>
+    <span id="env-badge" class="badge">offline &middot; no orders</span>
+  </div>
+</header>
+
+<!--
+  How a strategy is written, for whoever writes one: a person, or an AI
+  assistant over MCP (web/mcp.py GUIDE is what the assistants are told, and
+  is shown at the end). The parts that change with the code - the imports
+  allowed, the rules, the helpers - are read from the service, so this page
+  does not drift from it.
+-->
+<!-- two tabs; the one open is in the address (#docs-api), so a link opens it -->
+<div id="docs-tabs" role="tablist" aria-label="docs">
+  <button type="button" role="tab" id="tab-guide" aria-controls="docs-guide" aria-selected="true">writing a strategy</button>
+  <button type="button" role="tab" id="tab-api" aria-controls="docs-api" aria-selected="false" tabindex="-1">the helpers</button>
+</div>
+
+<section id="docs-guide" role="tabpanel" aria-labelledby="tab-guide">
+  <h2 class="panel-title">writing a strategy</h2>
+  <nav class="docs-toc" aria-label="on this page">
+    <a href="#where">where it goes</a>
+    <a href="#example">an example</a>
+    <a href="#class">the class</a>
+    <a href="#methods">the methods</a>
+    <a href="#candle">the candle</a>
+    <a href="#orders">what a signal becomes</a>
+    <a href="#m15">a richer base: M15</a>
+    <a href="#imports">imports</a>
+    <a href="#versions">versions</a>
+    <a href="#rules">the rules</a>
+    <a href="#docs-api">the helpers</a>
+  </nav>
+
+  <h3 id="where">where it goes</h3>
+  <p>A strategy is one Python file with exactly one class. It reaches the service two ways:
+    an AI assistant submits it over MCP, or you import the file on the settings page
+    (<em>strategy files</em>, <em>import as drafts</em>). Either way it is a <strong>draft</strong>:
+    backtested only in a sandbox with a ceiling on memory and time, never offered to a live
+    session. It becomes a strategy like the built-in ones - simulations, sets, live sessions -
+    once you <strong>enable</strong> it on the settings page, after reading its code.</p>
+
+  <h3 id="example">an example</h3>
+  <p>A whole strategy: a fast EMA crossing a slow one, a stop some ATR from the close, a
+    target in R. It is checked with every test run, so it is one the service takes as it is.</p>
+  <pre id="docs-example">"""
+EMA-CROSS-DEMO: the example of the docs page. A fast EMA crossing a slow one,
+a stop some ATR from the close and a target in R.
+"""
+
+from parity_deriva.lib.streaming import Cross, Series
+from parity_deriva.strategy.H4 import H4
+
+
+class EmaCross(H4):
+	TAG = 'EMA-CROSS-DEMO'
+	INSTRUMENT = 'EUR_USD'
+	GRANULARITY = 'H1'
+	DESCRIPTION = (
+		"A fast EMA crossing a slow one. SIGNAL: long on the bar the fast EMA "
+		"closes over the slow one, short on the bar it closes under. STOP: "
+		"atrStop ATR from the close. TARGET: reward times the stop distance.")
+
+	FAST = 20
+	SLOW = 50
+	INDICATORS = ({'kind': 'ema', 'period': FAST}, {'kind': 'ema', 'period': SLOW})
+	PARAM_HELP = {
+		'fast': 'period of the fast EMA, in bars',
+		'slow': 'period of the slow EMA, in bars',
+		'atrStop': 'stop distance from the close, in ATR',
+		'reward': 'target as a multiple of the stop (R)',
+	}
+
+	def setup(self, args):
+		self._set(args, 'fast', self.FAST)
+		self._set(args, 'slow', self.SLOW)
+		self._set(args, 'atrStop', 2.0)
+		self._set(args, 'reward', 2.0)
+
+	def series(self):
+		state = Series(ema=(self.fast, self.slow), atr=self.atrPeriod)
+		state.cross = Cross()
+		return state
+
+	def signal(self, state, candle):
+		fast, slow, atr = state.ema(self.fast), state.ema(self.slow), state.atr()
+		side = state.cross.add(None if fast is None or slow is None else fast - slow)
+		if not side or not atr:
+			return None
+		stop = candle.mid['c'] - side * self.atrStop * atr
+		return side, stop, self.levels(candle, side, stop, self.reward)
+</pre>
+
+  <h3 id="class">the class</h3>
+  <p>A subclass of <code>parity_deriva.strategy.H4.H4</code> - or of a strategy already here,
+    when yours is close to it: a base to extend, not a file to copy. On the class:</p>
+  <dl class="docs-terms">
+    <dt>TAG</dt><dd>its name. The one it is saved under replaces it, so it is only a label
+      for the file.</dd>
+    <dt>INSTRUMENT, GRANULARITY</dt><dd>what it is meant for, e.g. <code>'EUR_USD'</code> and
+      <code>'H1'</code>: what the simulate page selects when it is picked.</dd>
+    <dt>DESCRIPTION</dt><dd>its rules in plain words - signal, entry, stop, target, exit - for
+      the person who reads the code before enabling it.</dd>
+    <dt>PARAM_HELP</dt><dd><code>{'name': 'meaning'}</code> for every parameter: the line
+      under its field on the simulate page.</dd>
+    <dt>INDICATORS</dt><dd>the curves the chart draws over its runs:
+      <code>{'kind': 'sma' | 'ema' | 'bollinger' | 'atr', 'period': n}</code> (a Bollinger
+      also takes <code>'deviations'</code>).</dd>
+    <dt>ATR_PERIOD</dt><dd>14 unless changed: the period of the ATR the base keeps, as
+      <code>self.atrPeriod</code>.</dd>
+  </dl>
+
+  <h3 id="methods">the methods</h3>
+  <dl class="docs-terms">
+    <dt>setup(self, args)</dt><dd>reads each number that sets a rule with
+      <code>self._set(args, 'name', default)</code>: it becomes <code>self.name</code>, a
+      parameter the simulate page shows a field for and a backtest can be given.</dd>
+    <dt>series(self)</dt><dd>the reading state of one instrument, made once for each: usually
+      a <code>Series</code> declaring what it reads -
+      <code>Series(ema=(20, 50), sma=(), stdev=(), atr=14, rsi=14, volume=20)</code>. Anything
+      else the strategy keeps goes on it too.</dd>
+    <dt>signal(self, state, candle)</dt><dd>called on every closed bar, after the state has
+      taken it. Returns None, or <code>(side, stop, target)</code>: side 1 for a long, -1 for a
+      short, stop and target as prices.</dd>
+    <dt>feed(self, state, candle)</dt><dd>advances the state; by default
+      <code>state.add(candle)</code>. Written again when the state is more than one series -
+      weeks built with <code>Weekly</code>, say - calling the base's first.</dd>
+    <dt>self.levels(candle, side, stop, ratio)</dt><dd>a target <code>ratio</code> times the
+      stop distance, on the right side.</dd>
+  </dl>
+
+  <h3 id="candle">the candle</h3>
+  <p><code>candle.time</code> is the bar's open, a naive UTC datetime.
+    <code>candle.mid</code>, <code>candle.bid</code> and <code>candle.ask</code> are dicts with
+    <code>'o'</code>, <code>'h'</code>, <code>'l'</code>, <code>'c'</code>;
+    <code>candle.volume</code> and <code>candle.instrument</code> are there too. The bar has
+    closed when it arrives, so nothing read from it is a look ahead - and nothing in the helpers
+    reads a bar that has not arrived.</p>
+
+  <h3 id="orders">what a signal becomes</h3>
+  <p>A market order on the next bar's open, with the stop and the target as a bracket, sized
+    from the page's risk and the stop distance. One position at a time. The spread is in it: a
+    long opens on the ask, a short on the bid.</p>
+
+  <h3 id="m15">a richer base: M15</h3>
+  <p><code>parity_deriva.strategy.M15.M15</code> extends H4 for strategies that manage their
+    trade, on any granularity (set GRANULARITY). Its <code>signal()</code> returns a dict -
+    <code>{'side', 'stop', 'target'}</code>, an optional <code>'key'</code> naming the move for
+    the attempts, and anything else kept with the trade - and <code>exit(state, candle,
+    held)</code> returns <code>EARLY_EXIT</code> to close the open trade on this bar. On the
+    class: a stop entry at the bar's far end (<code>STOP_ENTRY</code>, <code>ENTRY_BARS</code>),
+    and the refusals <code>MIN_REWARD</code>, <code>MAX_ATTEMPTS</code>,
+    <code>DAILY_STOP_R</code>, <code>MAX_BAR_ATR</code>, <code>TIME_STOP_BARS</code> - each one
+    in the helpers below.</p>
+
+  <h3 id="imports">imports</h3>
+  <p>A strategy may import these, and a strategy module of this project to extend:</p>
+  <p id="docs-allowed" class="docs-list"></p>
+  <p>Files, the network and processes are refused, and so are these builtins, and
+    double-underscore attributes other than <code>__init__</code>, <code>__name__</code> and
+    <code>__class__</code>:</p>
+  <p id="docs-refused" class="docs-list"></p>
+
+  <h3 id="versions">versions</h3>
+  <p>Nothing is ever replaced. The first strategy saved under a name is its version 1,
+    <code>MY-EMA 1</code>; every one saved under that name after it is the next version, and the
+    ones before stay as they were. That code is its name everywhere - the page, the runs, a
+    backtest. The service ends the file with a <code>PARITY_DERIVA</code> line saying which
+    version it is and the server it was written on: leave it, it is written again on every
+    save.</p>
+
+  <h3 id="rules">the rules</h3>
+  <p>The ones an AI assistant is held to, and the reasons are the same for a person:</p>
+  <ol id="docs-rules"></ol>
+  <details id="docs-told">
+    <summary>everything an AI assistant is told when it connects</summary>
+    <pre id="docs-guide-text"></pre>
+  </details>
+</section>
+
+<!--
+  The helpers, read off the source of the modules a strategy is built from
+  (web/mcp.py reference): every public class, function and method with its
+  arguments and docstring, and the constants with their comment.
+-->
+<section id="docs-api" role="tabpanel" aria-labelledby="tab-api" hidden>
+  <h2 class="panel-title">the helpers</h2>
+  <p class="docs-note">Read off the source of these modules as the service runs it: what is added
+    there shows up here.</p>
+  <div id="docs-api-head">
+    <nav class="docs-toc" id="docs-modules" aria-label="modules"></nav>
+    <input type="search" id="docs-filter" placeholder="filter: sma, Weekly, channel&hellip;"
+           aria-label="filter the helpers">
+  </div>
+  <div id="docs-reference"></div>
+</section>
+
+<script src="static/menu.js"></script>
+<script src="static/docs.js"></script>
+</body>
+</html>

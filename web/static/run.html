@@ -192,9 +192,17 @@
   </details>
 </section>
 
+<!-- the run's figures, and its KPIs read in words as the simulate page's
+     analysis reads them (analysis.js): the body has that dialog's id for its look -->
 <section id="report-panel" hidden>
-  <div id="report"></div>
-  <div id="counts"></div>
+  <details id="report-box" open>
+    <summary id="report-head"><span id="report-title" class="panel-title">report</span></summary>
+    <div id="report-stats">
+      <div id="report"></div>
+      <div id="counts"></div>
+    </div>
+    <div id="analysis-body"></div>
+  </details>
 </section>
 
 <!--
@@ -245,6 +253,7 @@
 </section>
 
 <script src="static/menu.js"></script>
+<script src="static/analysis.js"></script>
 <script src="static/app.js"></script>
 </body>
 </html>

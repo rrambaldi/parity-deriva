@@ -14,15 +14,24 @@ Three kinds live here, and the difference is not cosmetic:
 * **running** - EMA, Wilder's ATR, Wilder's RSI. Each is a function of every
   bar before it, so it is carried forward rather than recomputed: the value is
   exact at every bar and costs nothing per bar.
-* **windowed** - SMA, standard deviation, Bollinger bands, the average volume.
-  These are a function of the last N bars only, so they are read off the window
-  when asked for.
+* **windowed** - SMA (now or some bars ago), standard deviation, Bollinger
+  bands and their width, the rate of change, the Donchian channel, the
+  distance from the highest high and the lowest low, the average volume. These are a function of the last N bars only, so they are read off
+  the window when asked for.
 * **confirmed** - swing highs and lows, which are a function of the bars either
   side and so are not known until `bars` more have printed. That delay is the
   point: a swing is a fact about the past that the present has just learned.
 
+Values holds a series a strategy derives itself - a return, a band's width -
+and ranks a new value against it; Cross says the bar a value crosses a level;
+Daily, Hourly and Weekly build longer bars out of the ones a strategy is fed.
+
 Nothing here reads a bar that has not been added. That is the whole contract.
 """
+
+import datetime
+
+from parity_deriva.lib import indicators
 
 
 class Series(object):
@@ -141,11 +150,15 @@ class Series(object):
 		rs = self._gain / self._loss
 		return 100.0 - 100.0 / (1.0 + rs)
 
-	def sma(self, period):
-		if len(self.bars) < period:
+	def sma(self, period, back=0):
+		"""
+		The SMA, or the one `back` bars ago - sma(30) against sma(30, back=4)
+		is which way the average is going. None while the window is short.
+		"""
+		window = self.window(period + back)
+		if window is None:
 			return None
-		window = self.bars[-period:]
-		return sum(c.mid['c'] for c in window) / float(period)
+		return sum(c.mid['c'] for c in window[:period]) / float(period)
 
 	def stdev(self, period):
 		"""
@@ -167,12 +180,37 @@ class Series(object):
 		return (middle - deviations * spread, middle,
 				middle + deviations * spread)
 
-	def averageVolume(self, period=None):
-		period = period or self.volumePeriod
-		if not period or len(self.bars) < period:
+	def bandwidth(self, period, deviations):
+		"""
+		The bands' width as a share of the middle, (upper - lower) / middle:
+		what a squeeze is read on, comparable across years and instruments
+		where a width in price is not. None while the window is short.
+		"""
+		bands = self.bands(period, deviations)
+		if bands is None or not bands[1]:
 			return None
-		window = self.bars[-period:]
-		return sum(float(getattr(c, 'volume', 0) or 0) for c in window) / period
+		return (bands[2] - bands[0]) / bands[1]
+
+	def change(self, bars):
+		"""
+		The rate of change over `bars` bars: this close over the close `bars`
+		before it, less one, so 0.05 is five percent up. None while there are
+		not `bars` + 1 bars.
+		"""
+		window = self.window(bars + 1)
+		return None if window is None else window[-1].mid['c'] / window[0].mid['c'] - 1
+
+	def averageVolume(self, period=None, skip=0):
+		"""
+		The mean volume of the last `period` bars, or of the `period` before
+		the last `skip`: a bar's volume against averageVolume(20, skip=1) is
+		against the bars before it, not a mean it is part of.
+		"""
+		period = period or self.volumePeriod
+		window = self.window(period + skip) if period else None
+		if window is None:
+			return None
+		return sum(float(getattr(c, 'volume', 0) or 0) for c in window[:period]) / period
 
 	def window(self, count):
 		"""The last `count` bars, or None if there are not that many."""
@@ -180,13 +218,110 @@ class Series(object):
 			return None
 		return self.bars[-count:]
 
-	def high(self, count):
-		window = self.window(count)
-		return None if window is None else max(c.mid['h'] for c in window)
+	def high(self, count, skip=0):
+		"""
+		The highest high of the last `count` bars, or of the `count` before
+		the last `skip`: high(20, skip=1) is the top of the Donchian channel
+		this bar's close breaks, which the bar itself cannot be part of.
+		"""
+		window = self.window(count + skip)
+		return None if window is None else max(c.mid['h'] for c in window[:count])
 
-	def low(self, count):
-		window = self.window(count)
-		return None if window is None else min(c.mid['l'] for c in window)
+	def low(self, count, skip=0):
+		"""The lowest low, the way high() reads the highest."""
+		window = self.window(count + skip)
+		return None if window is None else min(c.mid['l'] for c in window[:count])
+
+	def offHigh(self, count):
+		"""
+		How far this close is from the highest high of the last `count` bars,
+		as a share: -0.2 is twenty percent under the 52-week high, 0 is at it.
+		None while there are not enough bars.
+		"""
+		high = self.high(count)
+		return None if high is None else self.bars[-1].mid['c'] / high - 1
+
+	def offLow(self, count):
+		"""How far this close is over the lowest low, the way offHigh() reads."""
+		low = self.low(count)
+		return None if low is None else self.bars[-1].mid['c'] / low - 1
+
+	def channel(self, count, skip=1):
+		"""
+		The Donchian channel, (low, high) of the `count` bars before the last
+		`skip` - by default the channel the bar just closed is measured
+		against. None while there are not enough bars.
+		"""
+		low, high = self.low(count, skip), self.high(count, skip)
+		return None if low is None else (low, high)
+
+
+class Cross(object):
+	"""
+	The bar a value crosses a level: a fast EMA less a slow one crossing 0,
+	an RSI coming back over 30.
+
+	add(value) returns 1 on the bar the value goes from at or under the level
+	to over it, -1 from at or over it to under, and 0 otherwise - on the first
+	value too, which has nothing to cross from. A None (an indicator still
+	warming) is 0, and the value after it has nothing to cross from either.
+	"""
+
+	def __init__(self, level=0.0):
+		self.level = level
+		self.before = None
+
+	def add(self, value):
+		before, self.before = self.before, value
+		if value is None or before is None:
+			return 0
+		if before <= self.level < value:
+			return 1
+		if before >= self.level > value:
+			return -1
+		return 0
+
+
+class Values(object):
+	"""
+	The last `keep` values of something a strategy derives bar by bar - a
+	return, a band's width - and where a new one stands among them.
+
+	The questions are asked before the new value goes in: a week's momentum
+	is ranked against the weeks before it, not against a window it is already
+	part of. So the pattern is
+
+		rank = past.rank(value) if past.full() else None
+		past.add(value)
+	"""
+
+	def __init__(self, keep):
+		self.keep = keep
+		self.values = []
+
+	def add(self, value):
+		self.values.append(value)
+		del self.values[:-self.keep]
+
+	def full(self):
+		"""Are there `keep` values yet: the ranking is over a whole window."""
+		return len(self.values) >= self.keep
+
+	def rank(self, value):
+		"""
+		The share of the values held that are below `value`, 0 to 1: its
+		percentile rank. 0.8 is above four fifths of them. None when empty.
+		"""
+		if not self.values:
+			return None
+		return sum(1 for v in self.values if v < value) / float(len(self.values))
+
+	def percentile(self, percent):
+		"""The percentile of the values held, interpolated (lib/indicators)."""
+		return indicators.percentile(self.values, percent)
+
+	def median(self):
+		return self.percentile(50)
 
 
 class Swings(object):
@@ -349,3 +484,44 @@ class Hourly(Daily):
 
 	def bucket(self, when):
 		return when.replace(minute=0, second=0, microsecond=0)
+
+
+class Weekly(Daily):
+	"""
+	Weekly bars built from daily ones, each week sealed by its Friday.
+
+	The daily bar a broker stamps 21:00 or 22:00 UTC - the New York close -
+	is the next day's trading, so a bar belongs to the day it is `roll` hours
+	later: Sunday 21:00 is Monday. A week is the ISO week of that trading day
+	moved on by one day, so that a Sunday bar opens the week it trades in.
+
+	The Friday bar seals its week at once: the week is read when the market
+	shuts for the weekend, not when Monday's bar arrives. A week without a
+	Friday (a holiday) is sealed by the next week's first bar, the way Daily
+	seals a day.
+
+	Fed daily bars. From intraday ones every Friday bar would seal a week of
+	its own: fold them into days with Daily first.
+	"""
+
+	def __init__(self, keep=2, roll=3):
+		Daily.__init__(self, keep=keep)
+		self.roll = datetime.timedelta(hours=roll)
+
+	def tradingDay(self, when):
+		return (when + self.roll).date()
+
+	def bucket(self, when):
+		return (self.tradingDay(when) + datetime.timedelta(days=1)).isocalendar()[:2]
+
+	def add(self, candle):
+		"""
+		Fold one daily bar in. Returns the weeks it completed, oldest first:
+		none, one, or two when a week without a Friday is followed by a
+		Friday alone.
+		"""
+		done = [Daily.add(self, candle)]
+		if self.tradingDay(candle.time).weekday() == 4:
+			done.append(self.close())
+			self.open = self.day = None
+		return [bar for bar in done if bar is not None]

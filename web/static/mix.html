@@ -45,14 +45,12 @@
     <label>name <input type="text" id="mix-name" placeholder="optional" size="16" maxlength="120"></label>
     <!-- the one account's n:1: the mix's margin is checked on it (report.margin) -->
     <label>leverage <input type="number" id="mix-leverage" min="1" step="1" size="4" placeholder="30"></label>
+    <!-- opens the runs of the saved simulations under the chart, and closes them -->
+    <button type="button" id="mix-add-open" data-icon="add" aria-pressed="false"
+      title="pick runs of the saved simulations to add to the mix">add</button>
     <button type="button" id="mix-together" hidden data-icon="play"
       title="trade every run on one account: each sized on the shared capital, a trade the margin does not cover refused">simulate together</button>
     <button type="button" id="mix-delete" hidden data-icon="delete" title="delete this mix; its sets and their runs stay">delete</button>
-  </form>
-  <!-- a strategy, then one of its simulations: its runs are listed below -->
-  <form id="mix-add" autocomplete="off">
-    <label>strategy <select id="add-strategy"></select></label>
-    <label>simulation <select id="add-set"></select></label>
   </form>
 </div>
 
@@ -74,6 +72,30 @@
   <p id="mix-margin" class="hint"></p>
   <canvas id="mix-equity" height="340"></canvas>
   <p class="legend" id="mix-legend"></p>
+</section>
+
+<!-- opened by add: a strategy, then one of its simulations (either says how
+     many of its runs the mix has), then its runs, the best score first
+     (report.score in performance/report.py), each with its capital and its
+     curve. A click on a run draws it on the chart above, and the mix with it;
+     add puts it in the mix, remove takes it out. A head sorts the runs, the
+     star makes one a favourite as on the simulate page -->
+<section id="runs-panel" hidden>
+  <form id="mix-add" autocomplete="off">
+    <label>strategy <select id="add-strategy"></select></label>
+    <label>simulation <select id="add-set"></select></label>
+    <button type="button" id="runs-fav" aria-pressed="false" title="only the runs starred as favourites">&#9733; favourites only</button>
+  </form>
+  <div id="runs-head"><span id="runs-title">runs</span></div>
+  <table id="runs-table">
+    <thead><tr><th data-col="n">#</th><th data-col="params">parameters</th>
+      <th class="num" data-col="score">score</th><th class="num" data-col="trades">trades</th>
+      <th class="num" data-col="roi">ROI</th><th class="num" data-col="profitFactor">profit factor</th>
+      <th class="num" data-col="maxDrawdownPct">max DD</th><th class="num" data-col="sharpe">Sharpe</th>
+      <th class="num" data-col="final">capital</th><th class="num" data-col="net">net</th>
+      <th>equity</th><th></th><th></th></tr></thead>
+    <tbody id="runs-rows"></tbody>
+  </table>
 </section>
 
 <section id="mix-table-panel">
@@ -106,19 +128,6 @@
   </div>
 </section>
 
-<!-- the runs of the simulation picked, the best score first (report.score in
-     performance/report.py), each with its capital and its curve: add puts
-     one in the mix, remove takes it out -->
-<section id="runs-panel">
-  <div id="runs-head"><span id="runs-title">runs</span></div>
-  <table id="runs-table">
-    <thead><tr><th>#</th><th>parameters</th><th class="num">score</th><th class="num">trades</th>
-      <th class="num">ROI</th><th class="num">profit factor</th><th class="num">max DD</th>
-      <th class="num">Sharpe</th><th class="num">capital</th><th class="num">net</th>
-      <th>equity</th><th></th></tr></thead>
-    <tbody id="runs-rows"></tbody>
-  </table>
-</section>
 
 <script src="static/menu.js"></script>
 <script src="static/analysis.js"></script>

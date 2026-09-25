@@ -39,6 +39,13 @@ class TestGrid(unittest.TestCase):
         self.assertEqual(len(combos), 4)
         self.assertIn({'a': '2', 'b': '', 'c': ''}, combos)
 
+    def test_a_stop_that_never_moves_is_one_run_whatever_the_trail_pips(self):
+        combos = service.expandGrid({'trailing': '0, 1', 'trailPips': 'none, 20, 40'})
+        self.assertEqual(combos, [{'trailing': '0', 'trailPips': ''},
+                                  {'trailing': '1', 'trailPips': ''},
+                                  {'trailing': '1', 'trailPips': '20'},
+                                  {'trailing': '1', 'trailPips': '40'}])
+
     def test_too_many_is_refused(self):
         with self.assertRaises(ServiceError):
             service.expandGrid({'a': '1..100', 'b': '1..100'})

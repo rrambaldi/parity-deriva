@@ -67,7 +67,8 @@ intraday entries). On the class:
   run_backtest accepts; PARAM_HELP = {'name': 'meaning'} explains them.
 - series(self): the reading state of one instrument, usually
   parity_deriva.lib.streaming.Series(ema=(50, 200), sma=(), stdev=(), atr=14,
-  rsi=None) - read that module for the rest (Swings, Daily, Hourly).
+  rsi=None) - read that module for the rest (Swings, Values, Daily, Hourly,
+  Weekly).
 - signal(self, state, candle): called on every closed bar, after state has
   taken it. Return None, or (side, stop, target): side 1 long or -1 short,
   stop and target as prices. candle.mid, candle.bid and candle.ask are dicts
@@ -77,10 +78,13 @@ intraday entries). On the class:
 Imports are limited to the numbers and the parts of this project a strategy
 is made of (the refusal lists them); files, network, processes, eval/exec,
 getattr/setattr and double-underscore attributes are refused. The TAG becomes
-the strategy's name.
+the strategy's name. The class's name has to be its own: one another strategy's
+class has, built-in or yours, is refused (your versions of one name share it).
+A version the same as the one before it is refused too.
 
-Work in this order: list_data, list_strategies and list_helpers to see what
-exists; submit_strategy to save a version of a draft (it is imported and built
+Work in this order: get_news first - what changed in this project's code
+and asks you to do about it, which comes before anything else you were asked;
+list_data, list_strategies and list_helpers to see what exists; submit_strategy to save a version of a draft (it is imported and built
 at once, and an error comes back with its traceback); run_backtest on a year or
 two first, then widen. Every backtest is saved, and its link opens it on the
 user's page.
@@ -137,6 +141,9 @@ HELPERS = ('parity_deriva.lib.streaming', 'parity_deriva.lib.indicators',
 #: a feature request's limits: an assistant is not a way to fill the disk
 REQUEST_TITLE, REQUEST_TEXT, REQUESTS_OPEN = 120, 4000, 100
 
+#: the news for the assistants, posted with a code update (postNews)
+NEWS_TITLE, NEWS_TEXT, NEWS_OPEN = 120, 8000, 50
+
 #: run_backtest's options: the page's form fields for the account's rules
 OPTIONS = {
 	'balance': ('number', "starting capital; the account's default when absent"),
@@ -162,6 +169,12 @@ OPTIONS = {
 TRADES_SHOWN = 200
 
 TOOLS = [
+	{'name': 'get_news',
+	 'description': "What changed in this project's code and what the assistants are asked "
+					"to do about it - new helpers, strategies to update. Read it first. "
+					"For each strategy a news names: its newest version "
+					"and whether one was submitted after the news (updated).",
+	 'inputSchema': {'type': 'object', 'properties': {}}},
 	{'name': 'list_strategies',
 	 'description': "Every strategy that can be backtested: built in, enabled by the user, "
 					"or a draft of yours, with its description, what it is meant for and "
@@ -347,6 +360,26 @@ def listData(service, args):
 _submitLock = threading.Lock()
 
 
+def classOwner(service, name, klass):
+	"""
+	The strategy, not a version of `name`, whose class is also called `klass`;
+	None when there is none. Each file imports as a module of its own, but AG02
+	signs its signals with its class's name: two classes of one name would
+	take each other's trades for their own on a live account.
+	"""
+	for other, (module, attr) in ledger.STRATEGIES.items():
+		if attr == klass and not module.startswith('parity_deriva.strategy.uploaded_'):
+			return other
+	held = dict(uploaded.drafts(dataDir(service)), **uploaded.enabled(dataDir(service)))
+	for code, path in held.items():
+		if uploaded.split(code)[0] != name:
+			with open(path) as handle:
+				tree = ast.parse(handle.read())
+			if any(isinstance(node, ast.ClassDef) and node.name == klass for node in tree.body):
+				return code
+	return None
+
+
 def submitStrategy(service, args, client):
 	name, source = str(args.get('name') or ''), args.get('source')
 	if not uploaded.NAME.fullmatch(name):
@@ -364,6 +397,13 @@ def submitStrategy(service, args, client):
 	# Was: a draft of the same name was replaced. Now: never - each submit is
 	# the name's next version, and the one run and read before stays
 	with _submitLock:
+		# the newest version sent again, as it is: no version to make of it
+		newest = uploaded.latest(dataDir(service), name)
+		if newest:
+			held = dict(uploaded.drafts(dataDir(service)), **uploaded.enabled(dataDir(service)))
+			with open(held[newest]) as handle:
+				if uploaded.stamp(handle.read(), name, 0, '') == uploaded.stamp(source, name, 0, ''):
+					raise ToolError("not saved: the same code as %s, no new version made" % newest)
 		version, server = uploaded.nextVersion(dataDir(service), name), serverVersion()
 		code = uploaded.code(name, version)
 		path = os.path.join(where, uploaded.fileName(code))
@@ -373,6 +413,10 @@ def submitStrategy(service, args, client):
 		try:
 			answer = sandboxed(service, {'check': True, 'strategy': {'name': code, 'path': trial}},
 							   timeout=60)
+			owner = classOwner(service, name, answer['strategy']['class'])
+			if owner:
+				raise ToolError("not saved: class %s is already the class of %s - rename the class"
+								% (answer['strategy']['class'], owner))
 			os.replace(trial, path)
 		finally:
 			if os.path.exists(trial):
@@ -428,33 +472,75 @@ def runBacktest(service, args, base):
 			'tradesShown': '%d of %d' % (min(len(trades), TRADES_SHOWN), len(trades))}
 
 
-def helpers():
+def reference():
 	"""
-	HELPERS laid out from their source, not imported: every public function,
-	class and method, a line each - its arguments and the first paragraph of
-	its docstring. Read off the code, so a helper added is listed at once.
+	HELPERS read off their source, not imported: each module's docstring,
+	and every public function, class and method with its arguments and its
+	docstring, and the upper-case constants with their value and the #:
+	comment over them - in the order they are written. The docs page shows
+	it whole; list_helpers a line each. Read off the code, so what is added
+	there is documented at once.
 	"""
-	def line(node, owner=''):
+	def comment(lines, node):
+		"""The #: comment right over a line, without its hashes."""
+		above, i = [], node.lineno - 2
+		while i >= 0 and lines[i].strip().startswith('#'):
+			above.insert(0, lines[i].strip().lstrip('#:').strip())
+			i -= 1
+		return ' '.join(above)
+
+	def constants(lines, body):
+		out = []
+		for node in body:
+			targets = node.targets if isinstance(node, ast.Assign) else []
+			for target in targets:
+				if isinstance(target, ast.Name) and target.id.isupper():
+					value = ast.unparse(node.value)
+					out.append({'name': target.id, 'doc': comment(lines, node),
+								'value': value if len(value) <= 60 else value[:57] + '...'})
+		return out
+
+	def entry(node):
 		if isinstance(node, ast.ClassDef):
 			args = ', '.join(ast.unparse(b) for b in node.bases)
 		else:
 			args = ast.unparse(node.args)
-		doc = ' '.join((ast.get_docstring(node) or '').split('\n\n')[0].split())
-		if len(doc) > 200:
-			doc = doc[:197] + '...'
-		return '%s%s(%s)%s' % (owner, node.name, args, ' - ' + doc if doc else '')
+		return {'name': node.name, 'kind': 'class' if isinstance(node, ast.ClassDef) else 'function',
+				'args': args, 'doc': ast.get_docstring(node) or ''}
+
 	out = []
 	for module in HELPERS:
 		with open(os.path.join(sandbox.TOP, *module.split('.')) + '.py') as handle:
-			tree = ast.parse(handle.read())
-		lines = []
+			source = handle.read()
+		tree, lines = ast.parse(source), source.splitlines()
+		items = []
 		for node in tree.body:
 			if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and not node.name.startswith('_'):
-				lines.append(line(node))
+				item = entry(node)
 				if isinstance(node, ast.ClassDef):
-					lines += [line(m, '    %s.' % node.name) for m in node.body
-							  if isinstance(m, ast.FunctionDef) and not m.name.startswith('_')]
-		out.append({'module': module, 'helpers': lines})
+					item['constants'] = constants(lines, node.body)
+					item['methods'] = [entry(m) for m in node.body
+									   if isinstance(m, ast.FunctionDef) and not m.name.startswith('_')]
+				items.append(item)
+		out.append({'module': module, 'doc': ast.get_docstring(tree) or '',
+					'constants': constants(lines, tree.body), 'items': items})
+	return out
+
+
+def helpers():
+	"""reference() a line each: the arguments and the docstring's first paragraph."""
+	def line(item, owner=''):
+		doc = ' '.join(item['doc'].split('\n\n')[0].split())
+		if len(doc) > 200:
+			doc = doc[:197] + '...'
+		return '%s%s(%s)%s' % (owner, item['name'], item['args'], ' - ' + doc if doc else '')
+	out = []
+	for module in reference():
+		lines = []
+		for item in module['items']:
+			lines.append(line(item))
+			lines += [line(m, '    %s.' % item['name']) for m in item.get('methods', ())]
+		out.append({'module': module['module'], 'helpers': lines})
 	return out
 
 
@@ -463,29 +549,163 @@ def listHelpers(service, args):
 		dict((k, r.get(k)) for k in ('id', 'title', 'strategy')) for r in requests(service)]}
 
 
-# the requests are one small file, written whole: one writer at a time
+# the requests and the news are a small file each, written whole: one writer
+# at a time
 _requestsLock = threading.Lock()
 
 
-def requestsPath(service):
-	return os.path.join(uploaded.root(dataDir(service)), 'requests.json')
-
-
-def requests(service):
-	"""The feature requests still open, oldest first."""
+def board(service, name):
+	"""The rows of requests.json or news.json, oldest first."""
 	try:
-		with open(requestsPath(service)) as handle:
+		with open(os.path.join(uploaded.root(dataDir(service)), name + '.json')) as handle:
 			return json.load(handle)
 	except (OSError, ValueError):
 		return []
 
 
-def keepRequests(service, rows):
-	path = requestsPath(service)
+def keepBoard(service, name, rows):
+	path = os.path.join(uploaded.root(dataDir(service)), name + '.json')
 	os.makedirs(os.path.dirname(path), exist_ok=True)
 	with open(path + '.tmp', 'w') as handle:
 		json.dump(rows, handle, indent=1)
 	os.replace(path + '.tmp', path)
+
+
+def requests(service):
+	"""The feature requests still open, oldest first."""
+	return board(service, 'requests')
+
+
+def keepRequests(service, rows):
+	keepBoard(service, 'requests', rows)
+
+
+def news(service):
+	"""
+	The news the user posted, oldest first, each strategy it names with its
+	newest version and whether that was submitted after the news: how far
+	the assistants got with what it asks.
+	"""
+	held = dict(uploaded.drafts(dataDir(service)), **uploaded.enabled(dataDir(service)))
+	out = []
+	for row in board(service, 'news'):
+		named = []
+		for name in row.get('strategies') or ():
+			code = uploaded.latest(dataDir(service), name)
+			path = held.get(code)
+			submitted = (meta(path).get('submitted') or 0) if path else 0
+			named.append({'name': name, 'latest': code, 'updated': submitted > row['posted']})
+		out.append(dict(row, strategies=named))
+	return out
+
+
+def number(row):
+	"""N12 -> 12: the order the news were posted in."""
+	return int(row['id'][1:])
+
+
+def clients(service):
+	"""
+	client -> the server version it last connected to and the last news it
+	read: how a client that comes back is told what changed while it was
+	away. A client is the name it connects by (the OAuth client's, or the
+	token's User-Agent), so two copies of one program are one client.
+	"""
+	found = board(service, 'clients')
+	return found if isinstance(found, dict) else {}
+
+
+def remember(service, client, **fields):
+	with _requestsLock:
+		held = clients(service)
+		held[client] = dict(held.get(client) or {}, **fields)
+		keepBoard(service, 'clients', held)
+
+
+def unread(service, client):
+	"""The news open now that this client has not read with get_news."""
+	read = (clients(service).get(client) or {}).get('read', 0)
+	return [r for r in board(service, 'news') if number(r) > read]
+
+
+def notice(service, client):
+	"""
+	What a tool's answer carries on top while news wait: MCP has no way for a
+	server to speak first here (every request is a POST of its own, and a
+	client reads the instructions once, when it connects), so the news ride
+	on every answer until get_news is called.
+	"""
+	rows = unread(service, client)
+	if not rows:
+		return None
+	return ("News from the user you have not read yet - call get_news before going on: "
+			+ "; ".join("%s: %s" % (r['id'], r['title']) for r in rows))
+
+
+def getNews(service, args, client=None):
+	rows = news(service)
+	if client and rows:
+		remember(service, client, read=max(number(r) for r in rows))
+	return {'news': rows, 'next': (
+		"do what each one asks, then tell the user what you did. A strategy it names "
+		"is done once you submit a new version of it (updated: true)") if rows else "no news"}
+
+
+def postNews(service, asked):
+	"""A news for the assistants, posted with the code update it is about - not
+	from the page, which only lists them:
+	curl -H 'X-Parity-Deriva: 1' -d '{"title": ..., "text": ..., "strategies": "A, B"}'
+	localhost:<port>/api/mcp/news, on dev and on prod (each has its DATA)."""
+	title = ' '.join(str(asked.get('title') or '').split())
+	text = str(asked.get('text') or '').strip()
+	names = asked.get('strategies') or []
+	if isinstance(names, str):
+		# by commas or lines: a version's code has a space in it
+		names = names.replace('\n', ',').split(',')
+	# a version named is its name: the news is about what comes after it
+	names = list(dict.fromkeys(uploaded.split(' '.join(str(n).split()))[0]
+							   for n in names if str(n).strip()))
+	if not title or len(title) > NEWS_TITLE:
+		raise ToolError("title: 1 to %d characters" % NEWS_TITLE)
+	if not text or len(text) > NEWS_TEXT:
+		raise ToolError("text: what changed and what to do, 1 to %d characters" % NEWS_TEXT)
+	wrong = [n for n in names if not uploaded.NAME.fullmatch(n)]
+	if wrong:
+		raise ToolError("not a strategy name: %s" % ', '.join(wrong))
+	with _requestsLock:
+		rows = board(service, 'news')
+		if len(rows) >= NEWS_OPEN:
+			raise ToolError("%d news are posted already: remove some first" % len(rows))
+		rows.append({'id': 'N%d' % (max([int(r['id'][1:]) for r in rows] or [0]) + 1),
+					 'title': title, 'text': text, 'strategies': names,
+					 'posted': int(time.time() * 1000)})
+		keepBoard(service, 'news', rows)
+	return status(service)
+
+
+def instructions(service, client=None):
+	"""
+	GUIDE, and what changed: what an assistant is told when it connects. A
+	client that last connected to another version of this server is told so,
+	and the news open now are listed - the ones it has not read marked new.
+	The version it connects to now is remembered for the next time.
+	"""
+	now = serverVersion()
+	before = (clients(service).get(client) or {}) if client else {}
+	if client:
+		remember(service, client, version=now, connected=int(time.time() * 1000))
+	text = GUIDE
+	if before.get('version') and before['version'] != now:
+		text += ("\n\nThis server was updated since you last connected: you knew %s, it is "
+				 "now %s. What changed and what to do about it is in get_news."
+				 % (before['version'], now))
+	rows = board(service, 'news')
+	if rows:
+		text += "\n\nNews from the user, open now - call get_news before anything else:\n" \
+			+ "\n".join("- %s: %s%s" % (r['id'], r['title'],
+										  ' (new)' if number(r) > before.get('read', 0) else '')
+						 for r in rows)
+	return text
 
 
 def requestFeature(service, args):
@@ -513,13 +733,13 @@ def requestFeature(service, args):
 				"settings page" % (strategy or 'the strategy'))
 
 
-def dropRequest(service, id):
-	"""A request answered, from the settings page: it leaves the list."""
+def dropRequest(service, id, name='requests'):
+	"""A request answered or a news done, from the settings page: it leaves the list."""
 	with _requestsLock:
-		rows = requests(service)
+		rows = board(service, name)
 		if not any(r['id'] == id for r in rows):
-			raise ToolError("no request %r" % id)
-		keepRequests(service, [r for r in rows if r['id'] != id])
+			raise ToolError("no %s %r" % ('request' if name == 'requests' else 'news', id))
+		keepBoard(service, name, [r for r in rows if r['id'] != id])
 	return status(service)
 
 
@@ -642,6 +862,8 @@ def sandboxed(service, job, timeout=None):
 
 
 def call(service, name, args, base, client):
+	if name == 'get_news':
+		return getNews(service, args, client)
 	if name == 'list_strategies':
 		return listStrategies(service, args)
 	if name == 'get_source':
@@ -676,7 +898,7 @@ def handle(service, message, base, client):
 		answer['result'] = {'protocolVersion': asked if asked in PROTOCOLS else PROTOCOLS[0],
 							'capabilities': {'tools': {}},
 							'serverInfo': {'name': 'parity-deriva', 'version': serverVersion()},
-							'instructions': GUIDE}
+							'instructions': instructions(service, client)}
 	elif method == 'ping':
 		answer['result'] = {}
 	elif method == 'tools/list':
@@ -688,6 +910,10 @@ def handle(service, message, base, client):
 		except (ToolError, uploaded.UploadError, sandbox.SandboxError, ledger.LedgerError,
 				web().ServiceError, OSError) as exc:
 			answer['result'] = {'content': [{'type': 'text', 'text': str(exc)}], 'isError': True}
+		# the news not read yet, after the answer: its first block stays the answer
+		told = notice(service, client) if params.get('name') != 'get_news' else None
+		if told:
+			answer['result']['content'].append({'type': 'text', 'text': told})
 	else:
 		answer['error'] = {'code': -32601, 'message': "no method %s" % method}
 	return answer
@@ -704,7 +930,7 @@ def status(service):
 			rows.append(dict(meta(path), name=name, state=state))
 	return dict(service.oauth.status(), strategies=sorted(
 		rows, key=lambda r: r.get('submitted') or 0, reverse=True),
-		requests=requests(service)[::-1])
+		requests=requests(service)[::-1], news=news(service)[::-1])
 
 
 def source(service, name):
@@ -899,6 +1125,10 @@ def route(handler, method, path, query):
 	try:
 		if method == 'GET' and path == '/api/mcp':
 			return reply(handler, 200, status(handler.service))
+		if method == 'GET' and path == '/api/mcp/docs':
+			return reply(handler, 200, {'guide': GUIDE, 'reference': reference(),
+										'allowed': sorted(uploaded.ALLOWED),
+										'refused': sorted(uploaded.FORBIDDEN)})
 		if method == 'GET' and path == '/api/mcp/uses':
 			return reply(handler, 200, {'uses': uses(handler.service, handler.one(query, 'name') or '')})
 		if method == 'GET' and path == '/api/mcp/source':
@@ -926,6 +1156,14 @@ def route(handler, method, path, query):
 				asked = {}
 			submitStrategy(handler.service, asked, 'imported from a file')
 			return reply(handler, 200, status(handler.service))
+		if path in ('/api/mcp/news', '/api/mcp/news/drop'):
+			try:
+				asked = json.loads(body(handler) or b'{}')
+			except ValueError:
+				asked = {}
+			if path == '/api/mcp/news':
+				return reply(handler, 200, postNews(handler.service, asked))
+			return reply(handler, 200, dropRequest(handler.service, str(asked.get('id') or ''), 'news'))
 		if path == '/api/mcp/request':
 			try:
 				asked = json.loads(body(handler) or b'{}')

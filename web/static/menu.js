@@ -86,6 +86,7 @@ function marginText(m) {
       + ' 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3'
       + 'a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3'
       + ' 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+    docs: svg('<path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5z"/><path d="M4 21.5A2.5 2.5 0 0 1 6.5 19H20v3H6.5"/><path d="M8 7h8M8 11h6"/>'),
     // the theme switch's three: the system's screen, the sun, the moon
     system: svg('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'),
     light: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4'
@@ -93,7 +94,7 @@ function marginText(m) {
     dark: svg('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'),
   };
   // the home page is the simulation, at / and at the older /sim
-  const page = { '': 'simulate', sim: 'simulate', mix: 'mix', live: 'live', settings: 'settings' }[
+  const page = { '': 'simulate', sim: 'simulate', mix: 'mix', live: 'live', settings: 'settings', docs: 'docs' }[
     location.pathname.split('/').pop()];
 
   const nav = document.createElement('nav');
@@ -112,6 +113,7 @@ function marginText(m) {
   item('mix', 'mix', 'runs of different sets traded side by side: their capitals added up');
   item('live', 'live', 'the sessions trading on the accounts, as they go');
   item('settings', 'settings', 'data: stores and imports; AI assistants (MCP)');
+  item('docs', 'docs', 'how a strategy is written, and the helpers it is built from');
   const brand = document.getElementById('brand');
   brand.appendChild(nav);
 
