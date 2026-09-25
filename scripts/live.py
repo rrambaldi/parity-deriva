@@ -80,6 +80,18 @@ STRATEGIES = {
         ('parity_deriva.strategy.H404', 'H404', ('bid_ask_candles',), 'pairs'),
     'H405-MOMENTUM-RSI':
         ('parity_deriva.strategy.H405', 'H405', ('bid_ask_candles',), 'pairs'),
+    'M1501-MTP':
+        ('parity_deriva.strategy.M1501', 'M1501', ('bid_ask_candles',), 'pairs'),
+    'M1502-SBR':
+        ('parity_deriva.strategy.M1502', 'M1502', ('bid_ask_candles',), 'pairs'),
+    'M1503-SRP':
+        ('parity_deriva.strategy.M1503', 'M1503', ('bid_ask_candles',), 'pairs'),
+    'M1504-BMR':
+        ('parity_deriva.strategy.M1504', 'M1504', ('bid_ask_candles',), 'pairs'),
+    'M1505-BBO':
+        ('parity_deriva.strategy.M1505', 'M1505', ('bid_ask_candles',), 'pairs'),
+    'M1506-BRT':
+        ('parity_deriva.strategy.M1506', 'M1506', ('bid_ask_candles',), 'pairs'),
     'BO01': ('parity_deriva.strategy.BO01', 'BO01', (), 'pair'),
     'BO02': ('parity_deriva.strategy.BO02', 'BO02', (), 'pair'),
     'BO03': ('parity_deriva.strategy.BO03', 'BO03', (), 'pair'),

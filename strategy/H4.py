@@ -193,7 +193,7 @@ class H4(ExecutionHandler):
 			return False
 		return True
 
-	def emit(self, candle, side, stop, target):
+	def emit(self, candle, side, stop, target, entry=None, expiry=None):
 		"""
 		One market order with its bracket.
 
@@ -203,9 +203,16 @@ class H4(ExecutionHandler):
 		fill is whatever the next bar opens at, which the ledger writes down
 		separately: the difference between the two is the cost of acting on a
 		close, and hiding it would be the point of the exercise lost.
+
+		With an `entry` it is a stop order resting at that price instead,
+		until `expiry` - "entra sopra il massimo della candela di conferma",
+		which the M15 strategies of 6-STRATEGIE-M15.md ask for. Returns the
+		signal, so a caller can know it again when it fills.
 		"""
 		i = candle.instrument
 		price = candle.ask['c'] if side > 0 else candle.bid['c']
+		if entry is not None:
+			price = entry
 
 		se = SignalEvent()
 		se.signalNumber = signalNumber(self.tag(), i, self.granularity,
@@ -215,8 +222,7 @@ class H4(ExecutionHandler):
 							  'comment': '%s' % self.granularity}
 		#: one leg: the side is already decided, there is nothing to straddle
 		se.signalType = 'SINGLE'
-		se.orderType = 'MARKET'
-		se.type = 'MARKET'
+		se.orderType = se.type = 'MARKET' if entry is None else 'STOP'
 		se.instrument = i
 		se.time = candle.time
 		se.price = roundPrice(i, price)
@@ -226,10 +232,13 @@ class H4(ExecutionHandler):
 		# a market order that has not filled by the next bar has missed the
 		# close it was acting on, and is not this trade any more
 		se.gtdTime = candle.time + 2 * self.bar if self.bar is not None else None
+		if expiry is not None:
+			se.gtdTime = expiry
 
 		if self.event_queue is not None:
 			self.queue_event(se)
 			self.logger.info("SENT %s" % se.info())
+		return se
 
 	#: What the ledger, the order comment and the page call this strategy.
 	#: The class name is a file name - H401 says nothing about what it does -

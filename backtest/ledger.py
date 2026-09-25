@@ -85,6 +85,14 @@ STRATEGIES = {
 	'H403-BOLLINGER': ('parity_deriva.strategy.H403', 'H403'),
 	'H404-LIVELLI-DAILY': ('parity_deriva.strategy.H404', 'H404'),
 	'H405-MOMENTUM-RSI': ('parity_deriva.strategy.H405', 'H405'),
+	# the six of strategy/6-STRATEGIE-M15.md: an M15 entry with an H1
+	# context, some of them closing their own trade before the bracket does
+	'M1501-MTP': ('parity_deriva.strategy.M1501', 'M1501'),
+	'M1502-SBR': ('parity_deriva.strategy.M1502', 'M1502'),
+	'M1503-SRP': ('parity_deriva.strategy.M1503', 'M1503'),
+	'M1504-BMR': ('parity_deriva.strategy.M1504', 'M1504'),
+	'M1505-BBO': ('parity_deriva.strategy.M1505', 'M1505'),
+	'M1506-BRT': ('parity_deriva.strategy.M1506', 'M1506'),
 }
 STRATEGIES.update(plugins.backtest())
 

@@ -293,14 +293,20 @@ class Daily(object):
 			self.mid = mid
 			self.volume = volume
 
-	def __init__(self):
+	def __init__(self, keep=None):
 		self.day = None
 		self.open = None
 		self.bars = []
+		#: how many sealed bars to hold on to, None for all of them
+		self.keep = keep
+
+	def bucket(self, when):
+		"""The bar an instant belongs to."""
+		return when.date()
 
 	def add(self, candle):
 		"""Fold one intraday bar in. Returns the day it completed, or None."""
-		date = candle.time.date()
+		date = self.bucket(candle.time)
 		done = None
 		if self.day is not None and date != self.day:
 			done = self.close()
@@ -324,4 +330,22 @@ class Daily(object):
 						'l': self.open['l'], 'c': self.open['c']},
 					   self.open['volume'])
 		self.bars.append(bar)
+		if self.keep is not None and len(self.bars) > self.keep:
+			del self.bars[0]
 		return bar
+
+
+class Hourly(Daily):
+	"""
+	Hourly bars built from finer ones, the way Daily builds days.
+
+	The M15 strategies of 6-STRATEGIE-M15.md read an H1 context. The hour is
+	complete when a bar of the next hour arrives, so the context lags the
+	close of the hour by one M15 bar: late, and never early.
+	"""
+
+	def __init__(self, keep=2):
+		Daily.__init__(self, keep=keep)
+
+	def bucket(self, when):
+		return when.replace(minute=0, second=0, microsecond=0)
