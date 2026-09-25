@@ -123,13 +123,25 @@ direzione in rosso e il P&L in verde, ed è corretto così.
 | logo | Marcellus | — | — | **solo dentro gli SVG del logo**, mai come testo |
 | interfaccia | IBM Plex Sans | 400 / 500 / 600 | 13 px (corpo) | cifre tabulari già di default |
 | dati | IBM Plex Mono | 400 / 500 | 13 px (tabelle), 11–12 px (assi) | prezzi, orari, importi, ID, codice |
+| titoli | PD Instrument (Instrument Serif allargato ×1,08) | 400 | 24 · 22 · 18 px | nome della pagina, dialog, pannelli; spaziatura +0,01 em |
 
 - Attivare lo zero barrato su tutto: `font-feature-settings: "zero" 1;`
   (entrambi i font lo hanno).
 - Scala: 11 (etichette maiuscole, intestazioni di tabella, spaziatura 0,06em) ·
-  12 (note, legenda, assi) · 13 (corpo, celle, campi) · 15 (titoli di pannello,
-  nome pagina) · 17 (valori secondari) · 22 (valori principali). Interlinea 1,45.
-- Pesi: 400 testo, 500 valori e nome pagina, 600 titoli e pulsante principale.
+  12 (note, legenda, assi) · 13 (corpo, celle, campi) · 15 (testo in evidenza) ·
+  17 (valori secondari) · 22 (valori principali). Interlinea 1,45.
+- **Titoli** in `--font-title` (PD Instrument): 24 px il nome della pagina
+  (`--fs-h-page`), 22 px i dialog (`--fs-h-dialog`), 18 px i pannelli
+  (`--fs-h-panel`); interlinea 1,1–1,2; spaziatura `--tracking-title` (0,01 em);
+  minuscolo come ogni testo. Solo titoli: etichette, campi, tabelle e numeri
+  restano in Plex. Scelta del 25/09/2026 fra Jost, Manrope, Instrument Serif e
+  Newsreader (`web/font-titoli-proposte.html`), poi fra le varianti di
+  Instrument (`web/titoli-instrument-varianti.html`): con tutto in Plex a 15 px la
+  pagina non aveva un punto d'attacco.
+- PD Instrument ha un peso solo: la gerarchia la fanno misura e carattere. Sui
+  titoli sempre `font-weight: 400` e `font-synthesis: none` (`h2`/`h3` sono in
+  grassetto di default e il browser lo simulerebbe, male).
+- Pesi di Plex: 400 testo, 500 valori, 600 pulsante principale e testo in evidenza.
 - **Plex non ha ▲ ▼ ■ ●**: disegnarli come SVG in linea (triangolo 10 px, quadrato
   8 px) invece di affidarsi al font di sistema, che cambierebbe da macchina a
   macchina.
@@ -144,7 +156,9 @@ direzione in rosso e il P&L in verde, ed è corretto così.
 - Raggi: 6 px campi e pulsanti · 10 px pannelli · 999 px pillole (badge, esiti).
 - Altezza dei controlli 34 px (i bersagli restano ≥ 34 px anche con il mouse).
 - Niente ombre decorative e niente sfumature: i pannelli si separano con
-  `--line` e con il cambio di superficie `--bg` → `--panel`.
+  `--line` e con il cambio di superficie `--bg` → `--panel`. Unica ombra: quella
+  degli elementi sospesi sopra il contenuto senza fondo scuro dietro (il pannello
+  delle risorse del server), `--shadow-float`. I dialog hanno invece `--backdrop`.
 
 ## 6. Componenti
 
@@ -153,15 +167,50 @@ Le tavole di riferimento sono sulla tela "Logo parity-deriva", pagina
 
 ### Testata (60 px, `--panel`, bordo inferiore `--line`)
 - A sinistra `parity-deriva_testata_fondo-*.svg` alto 28 px (marchio + nome,
-  **senza tagline**: a quella misura non si legge), separatore verticale, nome
-  della pagina (`Backtest`, 15 px, 500).
+  **senza tagline**: a quella misura non si legge; nome a 0,07 em, § 7),
+  separatore verticale, nome della pagina (`Backtest`) in `--font-title` 24 px.
 - Badge d'ambiente sempre visibile, subito dopo il nome pagina:
   - `offline · no orders` — bordo `--border`, testo `--text-2` (il viewer di oggi);
   - `practice` — bordo e testo `--entry`;
   - `● live · real money` — pieno `--live`, testo `--on-live`, peso 700.
   Chi guarda deve sapere in ogni istante se sta muovendo soldi veri.
 - A destra: indirizzo del servizio in `--font-mono` `--text-3` e l'interruttore
-  del tema.
+  del tema. Fra i due, la spia delle risorse del server (sotto).
+
+### Risorse del server (testata)
+Scelta del 25/09/2026: proposta 4 "una spia sola" di `web/risorse-proposte.html`, al
+posto della striscia cpu / ram / dischi sempre visibile (verde pieno, mono 16 px,
+~690 px di testata).
+
+- **Spia**: pulsante alto 30 px, bordo `--line`, raggio 6 px, 12 px Plex 500. Dentro
+  quattro barrette verticali 3 × 14 px, una per misura (cpu, ram, disk /, disk
+  /mnt), alte quanto il valore; accanto una parola:
+  - tutto sotto l'80 %: `server ok`, testo `--text-2`;
+  - almeno una misura all'80 % o più: la peggiore, `ram 84 %`, e `+1`, `+2` se ce ne
+    sono altre (valore in mono);
+  - dati vecchi (nessuna risposta da tre giri di aggiornamento): `server ?` in
+    `--text-3`, bordo tratteggiato, nel tooltip l'ora dell'ultimo dato.
+  Il tooltip della spia elenca sempre le quattro percentuali, così i numeri si
+  vedono anche senza aprire.
+- **Tre stati**, uguali per spia, barrette e pannello:
+  - normale (< 80 %): riempimento `--text-3`, valore `--text-2`;
+  - alto (80–89 %): riempimento `--text`, valore `--text` 600, bordo della spia
+    `--border`;
+  - critico (≥ 90 %): `--down` con l'icona "!" (triangolo 12 px) accanto al valore e
+    bordo della spia `--down`. Mai il colore da solo.
+  **Mai verde**: il verde è long / target / guadagno, e un disco pieno non lo è.
+- **Pannello** al clic, sotto la spia allineato a destra, largo 300 px: fondo
+  `--panel`, filetto `--line`, raggio 10 px, `--shadow-float`. Titolo `server`
+  (titolo di pannello, § 4); una riga per misura: etichetta 12 px `--text-3`
+  (`disk /mnt`, il percorso in mono), barra 4 px sul fondo `--line`, valore mono
+  12 px a destra, sotto il valore assoluto in mono 11 px `--text-3`
+  (`2.4 / 3.7 GB`, `4 cores · load 2.5`); in fondo `updated 5 s ago · high from
+  80 %, critical from 90 %`. Si chiude con un altro clic, con un clic fuori e con
+  `esc` (il focus torna alla spia).
+- Tutto in percentuale; i valori assoluti solo nel pannello.
+- Accessibilità: la spia è un `<button>` con `aria-expanded` e `aria-controls`; ogni
+  riga del pannello è `role="meter"` con `aria-valuenow` e `aria-valuetext`
+  (`93 % · critical`). Nessun `aria-live`: l'aggiornamento periodico sarebbe rumore.
 
 ### Barra dei controlli (`--panel`, sotto la testata)
 - Gli stessi campi di oggi: instrument, granularity, strategy, from, to,
@@ -221,6 +270,15 @@ Le tavole di riferimento sono sulla tela "Logo parity-deriva", pagina
   trade lassù" del codice di oggi.
 - Tastiera come oggi: frecce o `j`/`k`, `escape` per tornare all'intervallo intero.
 
+### Titoli dei pannelli
+- `--font-title` 18 px (`report`, `closed trades`, `equity curve`, …); a destra,
+  sulla stessa linea di base, un dato di contesto in mono 12 px `--text-3`
+  (`AG01 · EUR_USD · H1`, `3 today`).
+- Dove il titolo è un `<summary>` che apre e chiude la sezione resta tale: la
+  classe va sul testo del titolo, non sul `<summary>`.
+- Fa eccezione l'intestazione del grafico prezzi (`EUR_USD · H1 · AG01`): sono
+  codici, restano in Plex.
+
 ### Pulsanti
 - Principale: `--accent` + `--on-accent`, 600 — uno per schermata.
 - Secondario: trasparente, bordo `--border`, testo `--text`, 500.
@@ -231,6 +289,44 @@ Le tavole di riferimento sono sulla tela "Logo parity-deriva", pagina
 ### Campi
 - Normale: bordo `--border`. Focus: bordo `--focus` + alone 3 px al 20 %.
 - Errore: bordo `--down` e messaggio sotto in 12 px `--down` (`not a date`).
+- **Parametri sì/no** (es. `intraday` nella simulazione, dove si possono provare
+  entrambi i valori): **segmentato `Y | N`**, alto 34 px come gli altri campi, così
+  la riga dei parametri resta allineata. I due segmenti sono checkbox indipendenti,
+  non radio: accesi entrambi = prova entrambi i valori.
+  - Contenitore: bordo `--border`, fondo `--bg`, padding 2 px, raggio 6 px.
+  - Segmento spento: testo `--text-3`, 500; hover fondo `--line` e testo `--text`.
+  - Segmento acceso: fondo `--text`, testo `--panel`, 600. Neutro di proposito:
+    l'ocra è di `Run` e del focus, blu, verde e rosso sono dei dati.
+  - Nessuno dei due acceso = zero combinazioni: bordo del gruppo `--down`.
+  - Focus: anello 2 px `--focus` sul segmento; disabilitato: opacità 0,45.
+  - Prova interattiva e CSS: `web/checkbox-proposte.html`, proposta 2 (scelta il
+    25/09/2026). Istruzioni per Claude Code: in fondo a `REFACTORING-claude-code.md`.
+
+### Dialog
+Tutti gli otto dialog (data, runs, live, help, sets, run, analysis, sim) hanno la
+stessa forma. Scelta del 25/09/2026: proposta 2 "titolo con contesto" di
+`web/dialog-testata-proposte.html`.
+
+- Foglio: fondo `--panel`, filetto `--line`, raggio 10 px, nessuna ombra; dietro
+  `--backdrop` (nero al 55 %).
+- **Testata** su fondo `--panel` (niente fascia di colore diverso), filetto `--line`
+  sotto, padding 13 · 12 · 13 · 20 px. Da sinistra:
+  - titolo in `h2`, collegato al dialog con `aria-labelledby` (oggi `<strong>`, che
+    lo screen reader non annuncia); minuscolo come tutti i testi; PD Instrument
+    22 px (§ 4). Dove il dialog mostra una lista (sets, runs, sim) il titolo è
+    seguito dal **conteggio** in pillola: mono 11 px, `--text-2`, bordo `--line`;
+  - sotto il titolo una **riga d'aiuto** in 12 px `--text-3`: che cosa c'è e che cosa
+    se ne fa (per sets: `kept on disk, newest first · click a row to open it · names
+    can be edited in place`). Il testo nasce dal commento HTML che oggi precede ogni
+    dialog. Nei dialog di un run il titolo resta corto (`run 41/17`, id in mono) e i
+    parametri scendono nella riga d'aiuto, in mono;
+  - a destra: i pulsanti propri del dialog (secondari, es. `backtest page`), il
+    promemoria `esc` (mono 11 px, bordo `--line`, `esc` chiude già da sé) e la
+    **chiusura**: quadrata 34 px, senza fondo né bordo, X in svg 16 px `--text-2`,
+    hover fondo `--line`, focus anello `--focus`. Mai tonda con fondo proprio.
+- Corpo: 16 · 20 · 20 px di margine per testo e moduli; a filo per le tabelle, con
+  la prima colonna a 20 px, sullo stesso filo del titolo. Intestazione della
+  tabella sticky come nella tabella dei trade.
 
 ## 7. Logo
 
@@ -251,6 +347,9 @@ File in `loghi/definitivo/` (dettagli nel README della cartella).
 - Area di rispetto: attorno al logo almeno l'altezza del sole.
 - Misure minime: verticale 120 px di larghezza, orizzontale 160 px, testata
   24 px di altezza, marchio 32 px. Sotto: favicon.
+- Spaziatura del nome: 0,18 em nelle versioni con tagline; **0,07 em con la
+  crenatura del font nella testata** (dal 25/09/2026: a 0,16 staccava troppo dai
+  titoli in PD Instrument). Script: `loghi/sorgenti/build_testata.py`.
 - Su fondi ocra o affollati: versione monocolore.
 - Mai Marcellus come testo dell'interfaccia; mai il logo dentro l'area dei dati.
 
