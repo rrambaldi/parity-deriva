@@ -79,11 +79,10 @@ if not errorlevel 1 (
 )
 git commit -m "Training livello 0 %WHAT% (%COMPUTERNAME%)"
 if errorlevel 1 goto :fail
-rem se intanto qualcuno ha spinto sul branch, prima si mette in pari
-git pull --rebase --autostash
-if errorlevel 1 goto :fail
-git push
-if errorlevel 1 goto :fail
+rem se intanto qualcuno ha spinto sul branch, prima si mette in pari.
+rem Il pull puo' riscrivere questo file mentre gira, e cmd lo legge dal disco una
+rem riga alla volta: pull, push e salto stanno su una riga sola, letta prima del pull.
+git pull --rebase --autostash && git push && goto :done || goto :fail
 
 :done
 echo.

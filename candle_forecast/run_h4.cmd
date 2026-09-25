@@ -21,8 +21,10 @@ if errorlevel 1 (
     goto :fail
 )
 set "NOPAUSE=1"
-call "%~dp0run.cmd" config\h4.toml
-if errorlevel 1 goto :fail
+rem run.cmd fa git pull, che puo' riscrivere anche questo file mentre gira:
+rem chiamata e salto stanno su una riga sola, letta prima della chiamata.
+call "%~dp0run.cmd" config\h4.toml && goto :copy || goto :fail
+:copy
 
 echo.
 echo [6] copio i risultati sul server: %SERVER%:%RESULTS%/h4
