@@ -176,37 +176,110 @@ function marginText(m) {
   document.fonts.load('11px "IBM Plex Mono"').then(redraw, () => {});
 
   /*
-   * How loaded the server is, before the pages: CPU, memory and every disk,
-   * from the same api/busy. A bar each with its value written after it: the
-   * bar is green, and red from HIGH up - the value says it too, so the
-   * colour is never the only sign (web/DESIGN.md § 1).
+   * How loaded the server is: one chip before the theme switch, and the
+   * detail in a panel on a click (web/DESIGN.md § 6, Risorse del server).
+   * Was: four green meters always on show, some 690 px of header, green even
+   * as they filled - and green here is long, a target, a gain. Now the chip
+   * says "server ok", or names the worst measure; high is ink, critical is
+   * red with a "!" - never the colour alone. Same api/busy, same round.
    */
-  const HIGH = 85;
-  const server = document.createElement('span');
-  server.id = 'server';
-  server.hidden = true;
-  brand.insertBefore(server, nav);
+  const HIGH = 80, CRIT = 90;
+  const ROUND = 5000;
+  const level = (v) => (v >= CRIT ? 'crit' : v >= HIGH ? 'warn' : '');
+  const ICO = '<svg class="sys-ico" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.2 11 10.4H1z" fill="currentColor"/>'
+    + '<path d="M6 4.6v2.9M6 8.9v.1" style="stroke: var(--panel)" stroke-width="1.4" stroke-linecap="round"/></svg>';
+  const sys = document.createElement('div');
+  sys.className = 'sys';
+  sys.id = 'sys';
+  sys.innerHTML = '<button type="button" class="sys-chip" id="sys-chip" aria-expanded="false" aria-controls="sys-pop" aria-label="server resources">'
+    + '<span class="sys-mini" aria-hidden="true"></span><span id="sys-text">server</span></button>'
+    + '<div class="sys-pop" id="sys-pop" role="dialog" aria-labelledby="sys-title" hidden>'
+    + '<h2 class="panel-title" id="sys-title">server</h2><div id="sys-rows"></div><p class="sys-foot" id="sys-foot"></p></div>';
+  brand.insertBefore(sys, toggle);
+  const chip = sys.querySelector('#sys-chip');
+  const pop = sys.querySelector('#sys-pop');
+  const mini = sys.querySelector('.sys-mini');
+  const text = sys.querySelector('#sys-text');
+  const rowsBox = sys.querySelector('#sys-rows');
+  const foot = sys.querySelector('#sys-foot');
+
   const gb = (bytes) => (bytes / 2 ** 30).toFixed(1);
-  const pct = (used, of) => Math.round(100 * used / of) + '%';
-  const meter = (name, share, value) => {
-    const p = Math.max(0, Math.min(100, share));
-    return `<span class="load${p >= HIGH ? ' high' : ''}"><span class="load-name">${name}</span>`
-      + `<span class="load-bar" aria-hidden="true"><span style="width:${p.toFixed(0)}%"></span></span>`
-      + `<span class="load-value">${value}</span></span>`;
+  // cpu, ram, then every disk the service lists, in its order; a disk by the
+  // top of its path (/mnt), the whole path in its tooltip. A disk's share is
+  // df's use%: the space kept for root is neither used nor free for us
+  const measures = (m) => [
+    { key: 'cpu', name: 'cpu', label: 'cpu', v: m.cpu, abs: `${m.cpus} cores` },
+    { key: 'ram', name: 'ram', label: 'ram', v: 100 * m.memUsed / m.memTotal,
+      abs: `${gb(m.memUsed)} / ${gb(m.memTotal)} GB` + (m.swapTotal ? ` · swap ${gb(m.swapUsed)} / ${gb(m.swapTotal)}` : '') },
+    ...m.disks.map((d) => {
+      const top = '/' + d.path.split('/')[1];
+      return { key: d.path, name: 'disk ' + top, label: `disk <span class="path">${top}</span>`, path: d.path,
+        v: 100 * d.used / (d.used + d.free), abs: `${gb(d.used)} / ${gb(d.used + d.free)} GB` };
+    }),
+  ].map((x) => ({ ...x, v: Math.round(Math.max(0, Math.min(100, x.v))) }));
+
+  // the nodes are made once for a set of measures and then only updated: an
+  // open panel must not close, nor lose the focus, every five seconds
+  let shown = '';
+  let rows = [];
+  const build = (list) => {
+    mini.innerHTML = list.map(() => '<i></i>').join('');
+    rowsBox.innerHTML = list.map((x) => '<div class="sys-row" role="meter" aria-valuemin="0" aria-valuemax="100"'
+      + ` aria-label="${x.name}"${x.path ? ` title="${x.path}"` : ''}><span class="l">${x.label}</span>`
+      + '<span class="track"><span class="fill"></span></span><span class="v"></span><span class="abs"></span></div>').join('');
+    rows = [...rowsBox.children];
+    shown = list.map((x) => x.key).join('|');
   };
-  const showServer = (m) => {
-    // df's use%: the space kept for root is neither used nor free for us
-    const disks = m.disks.map((d) => ({ ...d, name: '/' + d.path.split('/')[1],
-      pct: pct(d.used, d.used + d.free) }));
-    server.innerHTML = meter('cpu', m.cpu, Math.round(m.cpu) + '%')
-      + meter('ram', 100 * m.memUsed / m.memTotal, `${gb(m.memUsed)}/${gb(m.memTotal)}G`)
-      + disks.map((d) => meter(d.name, 100 * d.used / (d.used + d.free), d.pct)).join('');
-    server.title = `the server, red from ${HIGH}%: cpu ${m.cpu.toFixed(1)}% of ${m.cpus} cores\n`
-      + `ram ${gb(m.memUsed)} of ${gb(m.memTotal)} GB in use (${pct(m.memUsed, m.memTotal)})`
-      + (m.swapTotal ? `, swap ${gb(m.swapUsed)} of ${gb(m.swapTotal)} GB` : '')
-      + disks.map((d) => `\ndisk ${d.path}: ${gb(d.used)} GB used, ${gb(d.free)} GB free (${d.pct})`).join('');
-    server.hidden = false;
+  let last = null; // the measures and the time of the last good answer
+  const showServer = () => {
+    const age = last ? Date.now() - last.at : Infinity;
+    foot.textContent = (last ? `updated ${Math.round(age / 1000)} s ago · ` : 'no answer yet · ')
+      + `high from ${HIGH} %, critical from ${CRIT} %`;
+    if (age > 3 * ROUND) {
+      // nothing for three rounds: say so, and keep the last figures in the panel
+      chip.className = 'sys-chip stale';
+      text.textContent = 'server ?';
+      chip.title = last ? `no data since ${new Date(last.at).toISOString().slice(11, 19)} UTC` : 'no data yet';
+      return;
+    }
+    const list = last.list;
+    const bad = list.filter((x) => x.v >= HIGH).sort((a, b) => b.v - a.v);
+    const worst = bad[0];
+    chip.className = 'sys-chip' + (worst ? ' ' + level(worst.v) : '');
+    text.innerHTML = !worst ? 'server ok'
+      : (level(worst.v) === 'crit' ? ICO : '') + `${worst.name} <span class="v">${worst.v}%</span>`
+        + (bad.length > 1 ? ` +${bad.length - 1}` : '');
+    chip.title = list.map((x) => `${x.name} ${x.v} %`).join(' · ');
+    list.forEach((x, i) => {
+      const state = level(x.v);
+      const bar = mini.children[i];
+      bar.className = state;
+      bar.style.height = Math.max(2, Math.round(x.v / 100 * 14)) + 'px';
+      const row = rows[i];
+      row.className = 'sys-row' + (state ? ' ' + state : '');
+      row.setAttribute('aria-valuenow', x.v);
+      row.setAttribute('aria-valuetext', `${x.v} %` + (state === 'crit' ? ' · critical' : state === 'warn' ? ' · high' : ''));
+      row.querySelector('.fill').style.width = x.v + '%';
+      row.querySelector('.v').innerHTML = (state === 'crit' ? ICO : '') + x.v + '%';
+      row.querySelector('.abs').textContent = x.abs;
+    });
   };
+  const serverAnswer = (m) => {
+    const list = measures(m);
+    if (list.map((x) => x.key).join('|') !== shown) build(list);
+    last = { at: Date.now(), list };
+  };
+  // the panel: the chip opens and closes it, a click outside or esc closes it,
+  // and esc gives the focus back to the chip
+  const openPop = (open) => {
+    pop.hidden = !open;
+    chip.setAttribute('aria-expanded', String(open));
+  };
+  chip.addEventListener('click', () => openPop(pop.hidden));
+  document.addEventListener('click', (event) => { if (!pop.hidden && !sys.contains(event.target)) openPop(false); });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !pop.hidden) { openPop(false); chip.focus(); }
+  });
 
   const titles = Object.fromEntries([...nav.children].map((el) => [el.dataset.page, el.title]));
   const light = async () => {
@@ -220,10 +293,11 @@ function marginText(m) {
           el.classList.toggle('busy', !!on);
           el.title = titles[name] + (on ? ' - ' + what : '');
         }
-        if (busy.server) showServer(busy.server);
+        if (busy.server) serverAnswer(busy.server);
       } catch (error) { /* no answer, no light: the page itself is unaffected */ }
+      showServer();
     }
-    setTimeout(light, 5000);
+    setTimeout(light, ROUND);
   };
   light();
 })();

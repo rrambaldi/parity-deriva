@@ -41,8 +41,8 @@
 -->
 <header>
   <div id="brand">
-    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="201" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="201" height="28"></h1>
-    <span id="page-name">run</span>
+    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="179" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="179" height="28"></h1>
+    <span id="page-name" class="page-title">run</span>
     <span id="env-badge" class="badge">offline &middot; no orders</span>
     <!-- the runs of the table this one was opened from: see walkRuns() -->
     <span id="run-nav" hidden>
@@ -54,10 +54,18 @@
   </div>
 </header>
 
-<dialog id="help-dialog">
+<!-- how the chart is read: what its marks are, and what a click, the wheel
+     and a drag do on it. Opened by the (?) at the end of the legend -->
+<dialog id="help-dialog" class="sheet" aria-labelledby="help-title">
   <form method="dialog" class="dialog-head">
-    <strong>reading the chart</strong>
-    <button type="submit" class="dialog-close" aria-label="close" title="close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="dialog-heading">
+      <h2 class="dialog-title" id="help-title">reading the chart</h2>
+      <p class="dialog-sub">what the marks mean &middot; what a click, the wheel and a drag do &middot; times are UTC</p>
+    </div>
+    <div class="dialog-tools">
+      <span class="kbd" aria-hidden="true">esc</span>
+      <button type="submit" class="dialog-close" aria-label="close"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
   </form>
   <div class="dialog-body">
     <ul id="help-list">
@@ -73,10 +81,6 @@
       <li>the thin whiskers on a zoomed chart are the ask high and the bid low, which are the prices the fill rule reads</li>
     </ul>
   </div>
-  <form method="dialog" class="dialog-foot">
-    <span>esc to close</span>
-    <button type="submit" data-icon="close">close</button>
-  </form>
 </dialog>
 
 <p id="message" hidden></p>
@@ -141,7 +145,7 @@
   <section id="curve-panel" hidden>
     <details id="curve-box" open>
       <summary id="curve-head">
-        <span id="curve-title">indicators on their own scale</span>
+        <span id="curve-title" class="panel-title">indicators on their own scale</span>
         <span id="curve-note"></span>
       </summary>
       <canvas id="curve-chart" height="110"></canvas>
@@ -157,7 +161,7 @@
   <section id="levels-panel" hidden>
     <details id="levels-box">
       <summary id="levels-head">
-        <span id="levels-title">support &amp; resistance</span>
+        <span id="levels-title" class="panel-title">support &amp; resistance</span>
         <span id="levels-note"></span>
       </summary>
       <canvas id="levels-chart" height="240"></canvas>
@@ -165,7 +169,7 @@
   </section>
 
   <details id="legend-box" open>
-  <summary>legend</summary>
+  <summary><span class="panel-title">legend</span></summary>
   <!-- the curves this strategy declared, named and coloured by app.js -->
   <p class="legend" id="curves" hidden></p>
   <p class="legend">
@@ -208,7 +212,7 @@
   -->
   <details id="equity-box" open>
     <summary id="equity-head">
-      <span id="equity-title">capital</span>
+      <span id="equity-title" class="panel-title">capital</span>
       <span id="equity-note"></span>
     </summary>
     <canvas id="equity" height="200"></canvas>

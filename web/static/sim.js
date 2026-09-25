@@ -85,9 +85,27 @@ function runId(n) {
   return state.job && state.job.id ? `${state.job.id}/${n}` : `#${n}`;
 }
 
-function paramsText(params) {
+function paramsText(params, between = ' ') {
   return Object.entries(params || {})
-    .map(([k, v]) => `${k}=${paramValue(k, v)}`).join(' ');
+    .map(([k, v]) => `${k}=${paramValue(k, v)}`).join(between);
+}
+
+/*
+ * The head of the dialog a run opens in (sim.html): what it is and the run's
+ * id, short and in the mono, in the title; its parameters on the line under
+ * it, the whole of them in its tooltip when the line is cut.
+ */
+function runHead(what, n) {
+  const title = $('analysis-title');
+  title.textContent = what + ' ';
+  const id = document.createElement('span');
+  id.className = 'id';
+  id.textContent = runId(n);
+  title.append(id);
+  const row = state.rows.find((r) => r.n === n);
+  const sub = $('analysis-sub');
+  sub.textContent = row ? paramsText(row.params, ' \u00b7 ') : '';
+  sub.title = sub.textContent;
 }
 
 /* ----------------------------------------------------------------- fetch */
@@ -1278,7 +1296,7 @@ function openAnalysis(n) {
     body.append(dl);
   }
   body.append(...analysisNodes(row));
-  $('analysis-title').textContent = `analisi KPI \u00b7 ${runId(n)}`;
+  runHead('analisi KPI', n);
   $('analysis-dialog').showModal();
 }
 
@@ -1298,7 +1316,7 @@ async function openEntries(n, bars = '') {
   };
   const body = $('analysis-body');
   body.textContent = 'reading the M5 under the run\u2026 a long run takes up to a minute, once';
-  $('analysis-title').textContent = `entries \u00b7 ${runId(n)}`;
+  runHead('entries', n);
   if (!$('analysis-dialog').open) $('analysis-dialog').showModal();
   let r;
   try {
@@ -1381,8 +1399,11 @@ function fullStamp(ms) {
 async function openSets() {
   const body = $('sets-rows');
   body.textContent = '';
+  // how many, in the title: empty until the list is in
+  $('sets-count').textContent = '';
   if (!$('sets-dialog').open) $('sets-dialog').showModal();
   const { sweeps } = await ask('api/sweeps');
+  $('sets-count').textContent = sweeps.length;
   const stopped = sweeps.filter((set) => set.stopped).length;
   $('sets-drop-stopped').hidden = !stopped;
   $('sets-drop-stopped').textContent = `delete stopped (${stopped})`;

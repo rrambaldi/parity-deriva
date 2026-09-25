@@ -43,6 +43,18 @@ a { color: var(--accent-text); }
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
 
+/* titoli: nome della pagina, dialog, pannelli (DESIGN.md § 4). PD Instrument
+   has one weight: size and face make the order, and 400 with no synthesis
+   because an h2 is bold by default and the browser would fake it, badly.
+   Only titles - labels, fields, tables and figures stay in Plex */
+.page-title, .dialog-title, .panel-title { margin: 0; font-family: var(--font-title); font-weight: 400; font-synthesis: none; letter-spacing: var(--tracking-title); color: var(--text); }
+.page-title { font-size: var(--fs-h-page); line-height: 1.1; }
+.dialog-title { font-size: var(--fs-h-dialog); line-height: 1.15; }
+.panel-title { font-size: var(--fs-h-panel); line-height: 1.2; }
+/* a datum of context after a title, on its baseline (DESIGN.md § 6) */
+.panel-title .hint { font: var(--fs-small) var(--font-mono); letter-spacing: 0; color: var(--text-3); }
+.dialog-title .id { font: 500 17px var(--font-mono); letter-spacing: 0; }
+
 /* ------------------------------------------------------------ header */
 
 /* the header: the logo, the page, where the orders go, and the pages. The
@@ -73,12 +85,10 @@ h1 img { height: 28px; width: auto; }
 :root[data-theme="dark"] .logo-light { display: none; }
 :root[data-theme="dark"] .logo-dark { display: block; }
 
+/* the page's name, after a rule: a title (.page-title, below), not a label */
 #page-name {
-  font-size: var(--fs-title);
-  font-weight: 500;
   padding-left: var(--space-3);
   border-left: 1px solid var(--line);
-  line-height: 28px;
 }
 /* where the orders go, on every page and always in sight: whoever looks
    must know at any moment whether real money is moving */
@@ -124,23 +134,37 @@ h1 img { height: 28px; width: auto; }
 #theme button:hover { color: var(--text); }
 #theme button[aria-pressed="true"] { background: var(--raised); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
 
-/* how loaded the server is, just before the pages (menu.js) */
-#server { margin-left: auto; display: flex; gap: var(--space-3); font-family: var(--font-mono); font-size: var(--fs-small); color: var(--text-3); white-space: nowrap; }
-/* one meter: its name, a bar filled as far as it is used, the value */
-.load { display: inline-flex; align-items: center; gap: 6px; }
-.load-bar { width: 44px; height: 6px; border-radius: var(--radius-pill); background: var(--line); overflow: hidden; }
-.load-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--up); transition: width .4s; }
-.load-value { color: var(--text-2); min-width: 4ch; }
-.load.high .load-bar > span { background: var(--down); }
-.load.high .load-value { color: var(--down); }
-@media (prefers-reduced-motion: reduce) { .load-bar > span { transition: none; } }
-/* narrow: the meters on a line of their own under the pages, not between them */
-@media (max-width: 1100px) {
-  #server { order: 10; flex-basis: 100%; margin-left: 0; flex-wrap: wrap; row-gap: var(--space-1); }
-  #server:not([hidden]) + #menu { margin-left: auto; }
-}
-#server[hidden] { display: none; }
-#server:not([hidden]) + #menu { margin-left: 0; }
+/* risorse del server: spia in testata + pannello (DESIGN.md § 6). Was: a
+   strip of four green meters always on show, some 690 px of header; now one
+   chip that names the worst of them, and the four in a panel on a click
+   (menu.js). Never green: a full disk is not a gain */
+.sys { position: relative; flex: none; }
+.sys-chip { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px 0 9px; border: 1px solid var(--line); border-radius: var(--radius-s); background: transparent; color: var(--text-2); font: 500 12px var(--font-sans); white-space: nowrap; cursor: pointer; }
+.sys-chip:hover { border-color: var(--border); color: var(--text); }
+.sys-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.sys-chip.warn { border-color: var(--border); color: var(--text); }
+.sys-chip.crit { border-color: var(--down); color: var(--down); }
+.sys-chip.stale { border-style: dashed; color: var(--text-3); }
+.sys-chip .v { font: 500 12px var(--font-mono); }
+.sys-mini { display: flex; align-items: flex-end; gap: 2px; height: 14px; }
+.sys-mini i { width: 3px; border-radius: 1px; background: var(--text-3); }
+.sys-mini i.warn { background: var(--text); }
+.sys-mini i.crit { background: var(--down); }
+.sys-ico { width: 12px; height: 12px; flex: none; color: var(--down); }
+#sys-text { display: inline-flex; align-items: center; gap: 4px; }
+.sys-pop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; width: 300px; box-sizing: border-box; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-m); box-shadow: var(--shadow-float); }
+.sys-pop[hidden] { display: none; }
+.sys-pop .panel-title { margin: 0 0 8px; }
+.sys-row { --fill: var(--text-3); --val: var(--text-2); --w: 400; display: grid; grid-template-columns: 56px 1fr auto; align-items: center; gap: 4px 10px; padding: 5px 0; }
+.sys-row.warn { --fill: var(--text); --val: var(--text); --w: 600; }
+.sys-row.crit { --fill: var(--down); --val: var(--down); --w: 600; }
+.sys-row .l { font-size: 12px; color: var(--text-3); white-space: nowrap; }
+.sys-row .path { font-family: var(--font-mono); }
+.sys-row .track { display: block; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.sys-row .fill { display: block; height: 100%; border-radius: 2px; background: var(--fill); }
+.sys-row .v { display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px; min-width: 4ch; font: var(--w) 12px var(--font-mono); color: var(--val); }
+.sys-row .abs { grid-column: 2 / 4; margin-top: -2px; font: 11px var(--font-mono); color: var(--text-3); }
+.sys-foot { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11px; color: var(--text-3); }
 
 /* the pages, at the right of every header (menu.js) */
 #menu { margin-left: auto; display: flex; gap: var(--space-1); }
@@ -186,7 +210,7 @@ h1 img { height: 28px; width: auto; }
 
 form { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
 
-label, .yn {
+label, .field {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -195,8 +219,20 @@ label, .yn {
   letter-spacing: var(--tracking-label);
   color: var(--text-3);
 }
-/* a flag as a Y box and an N box, side by side under its name */
-.yn label { display: inline-flex; flex-direction: row; align-items: center; gap: 3px; }
+/* parametri sì/no: segmentato Y | N (DESIGN.md § 6, Campi). Was: two bare
+   system checkboxes; still two checkboxes, not a radio - both lit is a run of
+   each - each one under its segment, transparent, so a click, Tab, Space and
+   a screen reader work on it as they did */
+.yn { display: inline-flex; gap: 2px; height: var(--control-h); box-sizing: border-box; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--bg); }
+.yn label { position: relative; display: inline-flex; flex-direction: row; align-items: center; justify-content: center; min-width: 40px; padding: 0 10px; border-radius: 4px; color: var(--text-3); font: 500 13px var(--font-sans); text-transform: none; letter-spacing: 0; cursor: pointer; user-select: none; transition: background-color .12s, color .12s; }
+.yn input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.yn label:hover { color: var(--text); background: var(--line); }
+.yn label:has(input:checked) { color: var(--panel); background: var(--text); font-weight: 600; }
+.yn label:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 1px; }
+.yn label:has(input:disabled) { opacity: .45; cursor: default; }
+.yn:not(:has(input:checked)) { border-color: var(--down); }
+/* its own width under its name, not the name's */
+.field .yn { align-self: flex-start; }
 
 select, input, button {
   font-family: var(--font-sans);
@@ -298,7 +334,6 @@ section {
 #curve-head::-webkit-details-marker,
 #levels-head::-webkit-details-marker { display: none; }
 #chart-title, #equity-title, #levels-title, #curve-title { color: var(--text); }
-#equity-title, #levels-title, #curve-title { font-size: var(--fs-title); font-weight: 600; }
 /* the curve is not hovered but it is clicked: a click on it goes to the trade
    that made that step */
 #equity { cursor: pointer; }
@@ -510,37 +545,39 @@ tbody tr.empty:hover { background: none; }
   padding: 12px 16px;
   width: min(760px, calc(100vw - 32px));
 }
-/* a dialog stands off the page with a shadow. Open, it is a column: the head
-   and the foot stay put and only the body between them scrolls, so the
-   scrollbar starts under the head */
-dialog {
-  border-radius: var(--radius-l);
-  padding: 0;
-  overflow: hidden;
-  box-shadow: 0 18px 48px rgba(11, 26, 38, .30), 0 2px 8px rgba(11, 26, 38, .14);
-}
+/* a dialog: open, it is a column - the head stays put and only the body under
+   it scrolls, so the scrollbar starts under the head. No shadow: the backdrop
+   is what sets it off the page (DESIGN.md § 5) */
+dialog { padding: 0; overflow: hidden; }
 dialog[open] { display: flex; flex-direction: column; }
-dialog::backdrop { background: color-mix(in srgb, var(--brand-night) 55%, transparent); }
-.dialog-head, .dialog-foot { flex: none; display: flex; align-items: center; gap: var(--space-3); background: var(--raised); }
-.dialog-head { padding: var(--space-4) var(--space-6); border-bottom: 1px solid var(--line); }
-.dialog-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--space-5) var(--space-6); }
-.dialog-foot {
-  justify-content: space-between;
-  padding: var(--space-2) var(--space-6);
-  border-top: 1px solid var(--line);
-  font-size: var(--fs-small); color: var(--text-3);
-}
-.dialog-foot button { height: 28px; font-size: var(--fs-small); }
-#sets-drop-stopped { margin-left: auto; }
-.dialog-head strong { font-size: var(--fs-stat); font-weight: 600; }
-/* the close: a round cross that turns solid under the pointer */
-.dialog-close {
-  margin-left: auto; flex: none;
-  width: var(--control-h); height: var(--control-h); padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: var(--radius-pill); background: var(--panel); color: var(--text);
-}
-.dialog-close:hover { background: var(--text); border-color: var(--text); color: var(--panel); }
+dialog::backdrop { background: var(--backdrop); }
+
+/* dialog: foglio e testata "titolo con contesto" (DESIGN.md § 6, Dialog). Was:
+   a band of another colour over the table, a round close with a fill of its
+   own, and a <strong> for a title that a screen reader did not announce; now
+   the sheet's own surface, an h2 the dialog is labelled by, how many there
+   are and what to do with them under it */
+dialog.sheet { box-sizing: border-box; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--panel); color: var(--text); overflow: hidden; }
+dialog.sheet[open] { display: flex; flex-direction: column; }
+dialog.sheet::backdrop { background: var(--backdrop); } /* token in tokens.css: nessun rgba in app.css */
+/* nowrap: every form here wraps (the controls bar), and a head that wrapped
+   would drop its close under the title instead of cutting the help line */
+.dialog-head { flex: none; display: flex; flex-wrap: nowrap; align-items: center; gap: 16px; margin: 0; padding: 13px 12px 13px 20px; border-bottom: 1px solid var(--line); }
+.dialog-heading { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.dialog-title { display: flex; align-items: center; gap: 8px; margin: 0; min-width: 0; white-space: nowrap; } /* font e misura: aggiunta "font dei titoli" */
+.dialog-count { flex: none; font: 500 11px/18px var(--font-mono); color: var(--text-2); padding: 0 7px; border: 1px solid var(--line); border-radius: var(--radius-pill); }
+.dialog-count:empty { display: none; }
+.dialog-sub { margin: 0; font-size: var(--fs-small); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dialog-sub.mono { font-family: var(--font-mono); }
+.dialog-sub:empty { display: none; }
+.dialog-tools { margin-left: auto; flex: none; display: flex; align-items: center; gap: 8px; }
+.kbd { font: 500 11px/18px var(--font-mono); color: var(--text-3); padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; }
+.dialog-close { flex: none; width: var(--control-h); height: var(--control-h); display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-s); background: transparent; color: var(--text-2); cursor: pointer; transition: background-color .12s, color .12s; }
+.dialog-close:hover { background: var(--line); color: var(--text); }
+.dialog-close:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.dialog-body { min-height: 0; flex: 1; overflow: auto; padding: 16px 20px 20px; }
+.dialog-body.flush { padding: 0; }
+.dialog-body.flush th:first-child, .dialog-body.flush td:first-child { padding-left: 20px; }
 /* a question has no head: the room it would have taken */
 #ask-dialog { padding: var(--space-5) var(--space-6); }
 /* the yes or no asked before a long run, see askUser() */
@@ -650,9 +687,11 @@ dialog::backdrop { background: color-mix(in srgb, var(--brand-night) 55%, transp
 /* the saved sets of simulations */
 #sets-dialog { width: calc(100vw - 32px); max-width: none; }
 #sets-dialog, #ask-dialog { max-height: calc(100vh - 48px); }
-#sets-table th, #sets-table td, #runs-table th, #runs-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
-#sets-table th, #runs-table th { color: var(--text-3); font-weight: normal; }
-#sets-table .num, #runs-table .num { text-align: right; }
+/* the sets table has the trades table's look (a sticky head, the rows' rule),
+   flush with the sheet: see .dialog-body.flush */
+#runs-table th, #runs-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+#runs-table th { color: var(--text-3); font-weight: normal; }
+#runs-table .num { text-align: right; }
 #sets-table tbody tr, #runs-table tbody tr { cursor: pointer; }
 /* the mix's pick of a run from the simulation, see renderRuns() in mix.js */
 #runs-panel { overflow-x: auto; }
@@ -686,7 +725,6 @@ dialog::backdrop { background: color-mix(in srgb, var(--brand-night) 55%, transp
 /* the KPI comparison: a verdict colour always comes with its mark, and the
    one in the middle has no colour at all - it is neither a gain nor a loss */
 #kpi-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; margin-bottom: 6px; }
-#kpi-head strong { font-size: var(--fs-title); font-weight: 600; }
 #kpi-head .hint { color: var(--text-3); }
 #kpi-panel { overflow-x: auto; }
 #kpi-thead th { cursor: pointer; }
@@ -735,7 +773,7 @@ dialog::backdrop { background: color-mix(in srgb, var(--brand-night) 55%, transp
 #live-back { margin-left: auto; }
 #live-panel, #live-detail { overflow-x: auto; }
 /* a session started from the live page itself */
-#new-live h3 { font-size: var(--fs-title); margin: 0 0 8px; font-weight: 600; }
+#new-live h3 { margin: 0 0 8px; }
 #new-accounts { border: 1px solid var(--line); border-radius: var(--radius-s); margin: 0; padding: 4px 10px 8px;
   flex-basis: 100%; }
 #new-accounts legend { color: var(--text-3); padding: 0 4px; }
@@ -760,7 +798,7 @@ dialog::backdrop { background: color-mix(in srgb, var(--brand-night) 55%, transp
 #detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 @media (max-width: 900px) { #detail-grid { grid-template-columns: minmax(0, 1fr); } }
 #detail-title { font-size: var(--fs-title); font-weight: 600; }
-#live-detail h3 { font-size: var(--fs-body); margin: 12px 0 4px; color: var(--text-3); font-weight: normal; }
+#live-detail h3 { margin: 16px 0 6px; }
 #event-list { max-height: 360px; overflow-y: auto; font-size: var(--fs-small); background: var(--bg);
   border: 1px solid var(--line); border-radius: var(--radius-s); padding: 4px 8px; }
 .event { white-space: pre; }
@@ -816,13 +854,13 @@ dialog::backdrop { background: color-mix(in srgb, var(--brand-night) 55%, transp
 #sim-dialog td.params { font-size: 0.85em; color: var(--text-3); max-width: 360px; }
 /* the favourites dialog on the live page: the sets table's look */
 #sim-dialog { width: min(980px, calc(100vw - 32px)); }
-#sim-dialog table { width: 100%; border-collapse: collapse; }
-#sim-dialog th, #sim-dialog td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
-#sim-dialog th { color: var(--text-3); font-weight: normal; }
-#sim-dialog .num { text-align: right; }
+/* flush with the sheet like the sets table (.live-small is its look); what is
+   not the table keeps the head's 20 px */
+#sim-list:not(:has(> table)) { padding: 8px 20px; }
+#sim-list:has(> table) > :not(table), #sim-message { margin: 8px 20px; }
 #sim-dialog tr[data-pick] { cursor: pointer; }
 #sim-dialog tr[data-pick]:hover { background: var(--raised); }
-#sim-tabs { display: flex; gap: 8px; margin: 8px 0; }
+#sim-tabs { display: flex; gap: 8px; margin: 12px 20px 8px; }
 #sim-tabs button[aria-pressed="true"] { border-color: var(--entry); color: var(--text); }
 
 /* a phone: the page's margin shrinks, the panels keep their frame */

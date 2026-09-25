@@ -2011,6 +2011,7 @@ class HTTPTest(HTTPCase):
         # web/DESIGN.md: no CDN, so the page's fonts and pictures come from
         # web/static like its script does, each with its own type
         for path, kind in (('/static/IBMPlexSans-Regular.woff2', 'font/woff2'),
+                           ('/static/PDInstrument-Regular.woff2', 'font/woff2'),
                            ('/static/logo-chiaro.svg', 'image/svg+xml'),
                            ('/static/favicon-32.png', 'image/png')):
             status, _body, headers = self.get(path)
@@ -2023,7 +2024,7 @@ class HTTPTest(HTTPCase):
         self.assertEqual(status, 200)
         server = payload.pop('server')
         self.assertEqual(payload, {'simulate': False, 'live': 0})
-        # and how loaded the machine is, for the meters in the header
+        # and how loaded the machine is, for the chip in the header
         self.assertTrue(0 <= server['cpu'] <= 100)
         self.assertTrue(0 < server['memUsed'] <= server['memTotal'])
         self.assertTrue(server['disks'])
@@ -2208,7 +2209,8 @@ class HTTPTest(HTTPCase):
         # Was: only the three asset types, and __init__.py was the case.
         # Now: six types, and the fonts' licence - a file that is there, next
         # to them - is refused like the source is.
-        for path in ('/static/__init__.py', '/static/OFL-IBM-Plex.txt'):
+        for path in ('/static/__init__.py', '/static/OFL-IBM-Plex.txt',
+                     '/static/OFL-Instrument-Serif.txt'):
             status, _body, _headers = self.get(path)
             self.assertEqual(status, 404, path)
 

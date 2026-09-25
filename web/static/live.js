@@ -784,8 +784,12 @@ async function renderSim() {
   for (const b of $('sim-tabs').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.tab === pick.tab));
   list.textContent = '';
   simSay('');
+  // how many rows the list has, in the title: empty until it is in
+  const count = (n) => { $('sim-count').textContent = n; };
+  count('');
   if (pick.tab === 'runs') {
     const { runs } = await ask('api/runs');
+    count(runs.length);
     if (!runs.length) { list.textContent = 'nessun backtest salvato'; return; }
     const table = simTable(['', 'run', 'salvato', 'strategia', 'mercato', 'periodo', 'parametri', 'trade', 'capitale']);
     for (const run of runs) {
@@ -818,6 +822,7 @@ async function renderSim() {
     list.append(back, title);
     const table = simTable(['', '#', 'parametri', 'trade', 'netto', 'capitale', 'ROI', 'MDD%']);
     const rows = job.done.filter((r) => !r.error).sort((a, b) => (b.final || 0) - (a.final || 0));
+    count(rows.length);
     for (const r of rows) {
       const row = table.tBodies[0].insertRow();
       row.dataset.pick = String(r.n);
@@ -844,6 +849,7 @@ async function renderSim() {
     return;
   }
   const { sweeps } = await ask('api/sweeps');
+  count(sweeps.length);
   if (!sweeps.length) { list.textContent = 'nessuna simulazione salvata'; return; }
   const table = simTable(['set', 'nome', 'salvato', 'strategia', 'mercato', 'periodo', 'run', 'migliore']);
   for (const set of sweeps) {

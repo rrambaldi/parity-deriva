@@ -27,8 +27,8 @@
 
 <header>
   <div id="brand">
-    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="201" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="201" height="28"></h1>
-    <span id="page-name">simulate</span>
+    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="179" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="179" height="28"></h1>
+    <span id="page-name" class="page-title">simulate</span>
     <span id="env-badge" class="badge">offline &middot; no orders</span>
     <button type="button" id="sets-open" data-icon="sets" title="the sets of simulations already made">sets</button>
   </div>
@@ -69,14 +69,34 @@
       <div id="grid-account">
         <label>max stop (pips) <input type="text" id="g-maxStop" placeholder="none"></label>
         <label>hours UTC <input type="text" id="g-session" placeholder="07:00-16:00, none" size="18"></label>
-        <span class="yn" title="close whatever is open when the day ends. Y and N: both">intraday <span><label><input type="checkbox" id="g-intraday-y"> Y</label>
-          <label><input type="checkbox" id="g-intraday-n" checked> N</label></span></span>
-        <span class="yn" title="every order turned round: buy for sell, stop and target swapped. Y and N: both">inverti <span><label><input type="checkbox" id="g-inverse-y"> Y</label>
-          <label><input type="checkbox" id="g-inverse-n" checked> N</label></span></span>
-        <span class="yn" title="the stop moves with the price; the default follows the strategy. Y and N: both">trailing stop <span><label><input type="checkbox" id="g-trailing-y"> Y</label>
-          <label><input type="checkbox" id="g-trailing-n" checked> N</label></span></span>
-        <span class="yn" title="the target does not close the trade: once touched the stop goes there and follows. Y and N: both">trailing profit <span><label><input type="checkbox" id="g-trailProfit-y"> Y</label>
-          <label><input type="checkbox" id="g-trailProfit-n" checked> N</label></span></span>
+        <div class="field" title="close whatever is open when the day ends. Y and N: both">
+          <span class="field-label" id="lbl-intraday">intraday</span>
+          <div class="yn" role="group" aria-labelledby="lbl-intraday">
+            <label><input type="checkbox" id="g-intraday-y"> Y</label>
+            <label><input type="checkbox" id="g-intraday-n" checked> N</label>
+          </div>
+        </div>
+        <div class="field" title="every order turned round: buy for sell, stop and target swapped. Y and N: both">
+          <span class="field-label" id="lbl-inverse">inverti</span>
+          <div class="yn" role="group" aria-labelledby="lbl-inverse">
+            <label><input type="checkbox" id="g-inverse-y"> Y</label>
+            <label><input type="checkbox" id="g-inverse-n" checked> N</label>
+          </div>
+        </div>
+        <div class="field" title="the stop moves with the price; the default follows the strategy. Y and N: both">
+          <span class="field-label" id="lbl-trailing">trailing stop</span>
+          <div class="yn" role="group" aria-labelledby="lbl-trailing">
+            <label><input type="checkbox" id="g-trailing-y"> Y</label>
+            <label><input type="checkbox" id="g-trailing-n" checked> N</label>
+          </div>
+        </div>
+        <div class="field" title="the target does not close the trade: once touched the stop goes there and follows. Y and N: both">
+          <span class="field-label" id="lbl-trailProfit">trailing profit</span>
+          <div class="yn" role="group" aria-labelledby="lbl-trailProfit">
+            <label><input type="checkbox" id="g-trailProfit-y"> Y</label>
+            <label><input type="checkbox" id="g-trailProfit-n" checked> N</label>
+          </div>
+        </div>
         <label title="the stop follows the price this many pips behind, starting once that level reaches the entry (break even); until then the strategy's stop holds. Ignored when trailing stop is N only">trail (pips) <input type="text" id="g-trailPips" placeholder="none" size="10"></label>
         <label>max bars <input type="text" id="g-maxBars" placeholder="none"></label>
         <label title="initial stop distance x this: 1 as the strategy, 1.5 half as far again">SL &times; <input type="text" id="g-slScale" placeholder="1" size="10"></label>
@@ -105,12 +125,19 @@
 
 <!-- the sets kept on disk (web/service.py saveSweep), newest first. A click
      on a row opens it; the name can be edited in place -->
-<dialog id="sets-dialog">
+<dialog id="sets-dialog" class="sheet" aria-labelledby="sets-title">
   <form method="dialog" class="dialog-head">
-    <strong>simulation sets</strong>
-    <button type="submit" class="dialog-close" aria-label="close" title="close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="dialog-heading">
+      <h2 class="dialog-title" id="sets-title">simulation sets <span class="dialog-count" id="sets-count"></span></h2>
+      <p class="dialog-sub">kept on disk, newest first &middot; click a row to open it &middot; names can be edited in place</p>
+    </div>
+    <div class="dialog-tools">
+      <button type="button" id="sets-drop-stopped" hidden data-icon="delete" title="delete every set that was stopped before its last run">delete stopped</button>
+      <span class="kbd" aria-hidden="true">esc</span>
+      <button type="submit" class="dialog-close" aria-label="close"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
   </form>
-  <div class="dialog-body">
+  <div class="dialog-body flush">
     <table id="sets-table">
       <thead><tr><th>id</th><th>saved (UTC)</th><th>name</th><th>strategy</th><th>instrument</th><th>tf</th>
         <th>from</th><th>to</th><th>varied</th><th class="num">runs</th>
@@ -118,26 +145,23 @@
       <tbody id="sets-rows"></tbody>
     </table>
   </div>
-  <form method="dialog" class="dialog-foot">
-    <span>esc to close</span>
-    <button type="button" id="sets-drop-stopped" hidden data-icon="delete" title="delete every set that was stopped before its last run">delete stopped</button>
-    <button type="submit" data-icon="close">close</button>
-  </form>
 </dialog>
 
 <!-- one run's KPIs read out in words: see analyse() in sim.js -->
-<dialog id="analysis-dialog">
+<dialog id="analysis-dialog" class="sheet" aria-labelledby="analysis-title">
   <form method="dialog" class="dialog-head">
-    <strong id="analysis-title"></strong>
-    <button type="submit" class="dialog-close" aria-label="close" title="close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="dialog-heading">
+      <h2 class="dialog-title" id="analysis-title"></h2>
+      <p class="dialog-sub mono" id="analysis-sub"></p>
+    </div>
+    <div class="dialog-tools">
+      <span class="kbd" aria-hidden="true">esc</span>
+      <button type="submit" class="dialog-close" aria-label="close"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
   </form>
   <div class="dialog-body">
     <div id="analysis-body"></div>
   </div>
-  <form method="dialog" class="dialog-foot">
-    <span>esc to close</span>
-    <button type="submit" data-icon="close">close</button>
-  </form>
 </dialog>
 
 <p id="message" hidden></p>
@@ -171,7 +195,7 @@
        value above and lists its values under the table -->
   <div id="sim-effects" hidden>
     <div id="effects-head">
-      <strong>parameter analysis</strong>
+      <h2 class="panel-title">parameter analysis</h2>
       <label>metric <select id="effects-metric"></select></label>
     </div>
     <table id="effects-table">
@@ -213,7 +237,7 @@
   counts the targets met - no single one of them is the answer.
 -->
 <section id="kpi-panel" hidden>
-  <div id="kpi-head"><strong>KPI comparison</strong>
+  <div id="kpi-head"><h2 class="panel-title">KPI comparison</h2>
     <span class="hint">percentages of the account · Sharpe on weekday returns, risk free 0 · click a column to rank</span></div>
   <table id="kpi-table">
     <thead id="kpi-thead"></thead>

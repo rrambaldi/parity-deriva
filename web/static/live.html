@@ -27,8 +27,8 @@
 
 <header>
   <div id="brand">
-    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="201" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="201" height="28"></h1>
-    <span id="page-name">live</span>
+    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="179" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="179" height="28"></h1>
+    <span id="page-name" class="page-title">live</span>
     <span id="env-badge" class="badge live">live &middot; real money</span>
     <span id="live-clock" class="hint"></span>
   </div>
@@ -103,7 +103,7 @@
   run and sweep to pick from, starred or not.
 -->
 <section id="new-live">
-  <h3>new live session</h3>
+  <h3 class="panel-title">new live session</h3>
   <div class="new-grid">
     <form id="new-form" autocomplete="off">
       <label>strategia <select id="new-strategy"></select></label>
@@ -124,12 +124,18 @@
 
 <!-- every simulated form on disk, to pick one or star it: the saved backtest
      runs, and the sweeps with their runs -->
-<dialog id="sim-dialog">
+<dialog id="sim-dialog" class="sheet" aria-labelledby="sim-dialog-title">
   <form method="dialog" class="dialog-head">
-    <strong>strategie simulate</strong>
-    <button type="submit" class="dialog-close" aria-label="close" title="close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="dialog-heading">
+      <h2 class="dialog-title" id="sim-dialog-title">strategie simulate <span class="dialog-count" id="sim-count"></span></h2>
+      <p class="dialog-sub">every simulated form on disk &middot; click a row to pick it &middot; the star keeps it among the favourites</p>
+    </div>
+    <div class="dialog-tools">
+      <span class="kbd" aria-hidden="true">esc</span>
+      <button type="submit" class="dialog-close" aria-label="close"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
   </form>
-  <div class="dialog-body">
+  <div class="dialog-body flush">
     <div id="sim-tabs">
       <button type="button" data-tab="sweeps" aria-pressed="true">simulazioni (sweep)</button>
       <button type="button" data-tab="runs" aria-pressed="false">backtest salvati</button>
@@ -137,10 +143,6 @@
     <div id="sim-list"><p class="hint">leggo&hellip;</p></div>
     <p id="sim-message" class="hint" hidden></p>
   </div>
-  <form method="dialog" class="dialog-foot">
-    <span>esc to close</span>
-    <button type="submit" data-icon="close">close</button>
-  </form>
 </dialog>
 
 <!-- the session clicked: its capital, its trades, what it logged -->
@@ -149,20 +151,20 @@
   <canvas id="live-equity" height="220"></canvas>
   <div id="detail-grid">
     <div>
-      <h3>open positions</h3>
+      <h3 class="panel-title">open positions</h3>
       <table class="live-small"><thead><tr><th>deal</th><th>opened</th><th class="num">units</th><th class="num">price</th></tr></thead>
         <tbody id="open-rows"></tbody></table>
-      <h3>closed trades</h3>
+      <h3 class="panel-title">closed trades</h3>
       <table class="live-small"><thead><tr><th>deal</th><th>opened</th><th>closed</th><th class="num">units</th>
         <th class="num">entry</th><th class="num">exit</th><th class="num">P&amp;L</th><th>reason</th></tr></thead>
         <tbody id="closed-rows"></tbody></table>
     </div>
     <div>
-      <h3>events <span class="hint">newest first</span></h3>
+      <h3 class="panel-title">events <span class="hint">newest first</span></h3>
       <div id="event-list"></div>
     </div>
   </div>
-  <h3>console</h3>
+  <h3 class="panel-title">console</h3>
   <pre id="console"></pre>
 </section>
 

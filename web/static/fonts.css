@@ -47,3 +47,16 @@
   font-style: normal;
   font-display: swap;
 }
+
+/*
+ * PD Instrument (titoli: nome della pagina, dialog, pannelli - web/DESIGN.md
+ * § 4): Instrument Serif allargato x1,08, un peso solo. Licenza SIL OFL 1.1
+ * in OFL-Instrument-Serif.txt.
+ */
+@font-face {
+  font-family: "PD Instrument";
+  src: url("PDInstrument-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
