@@ -1,7 +1,7 @@
 # H4 dal 2003 (NZD dal 2006) da CSV esportati, non ricampionato dallo store M5 (che parte dal 2015).
 # Candele allineate a UTC (00, 04 ... 20), non all'ancora 17:00 New York di L0-P3.
 # Stessa griglia, modelli e iperparametri del livello 0 M5 (systems.toml). Si lancia con
-#   python -m candle_forecast.cli --config config/h4.toml prepare | run
+#   python -m candle_forecast.cli --config config/h4.toml prepare | run      (su Windows: run_h4.cmd)
 
 # Livello 0. Ogni voce porta il codice della decisione da cui viene
 # (tabella completa nel README). DA-CONFERMARE = scelta tecnica non coperta dal
@@ -77,7 +77,7 @@ learning_rate = 0.05
 num_leaves = 31
 seed = 42
 early_stopping_rounds = 50     # DA-CONFERMARE
-num_threads = 1                # server a 2 core condiviso: con 0 (tutti) i thread si contendono la CPU
+num_threads = 0                # 0 = tutti i core; sul server (2 core condivisi) 1 è 4 volte più veloce
 
 [gru]                          # L0-P8
 hidden = 32
@@ -87,4 +87,4 @@ batch = 256
 seeds = [0, 1, 2]
 max_epochs = 30                # DA-CONFERMARE
 patience = 3                   # DA-CONFERMARE
-num_threads = 1                # server a 2 core condiviso: con 0 (tutti) i thread si contendono la CPU
+num_threads = 0                # 0 = tutti i core; sul server (2 core condivisi) 1 è 4 volte più veloce

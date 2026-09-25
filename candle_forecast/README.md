@@ -121,8 +121,9 @@ $PY -m candle_forecast.cli --config config/h4.toml run --instrument EURUSD
   export riempiono così weekend e festivi) e quelle con un prezzo ASK sotto il BID (GBPUSD 4, USDJPY 9,
   GBPJPY 1, NZDJPY 2, quasi tutte aperture della domenica 2006-2009). Tutto il resto passa dalla
   stessa validazione dell'M5, e se c'è una violazione si ferma.
-- `num_threads = 1`: sul server a 2 core, condiviso con il servizio web, LightGBM con 2 thread è
-  4 volte più lento che con 1. Su un PC libero si può rimettere 0.
+- Sul PC: doppio clic su `run_h4.cmd`, che fa tutto quello che fa `run.cmd` con `config\h4.toml`.
+- Se lo lanci sul server metti `num_threads = 1`: con 2 core condivisi con il servizio web,
+  LightGBM con 2 thread è 4 volte più lento che con 1.
 
 ## Decisioni
 

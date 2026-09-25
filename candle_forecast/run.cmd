@@ -6,12 +6,19 @@ rem    2. test (se falliscono si ferma: niente training su codice rotto)
 rem    3. prepare: scompatta stores\EUR_USD.hd5.zip, report, campioni
 rem    4. run: baseline, LightGBM, GRU su tutti i sistemi del config
 rem    5. commit e push dei risultati (modelli, summary, report), se lo chiedi
-rem  Si lancia con doppio clic o da "Anaconda Prompt":  run.cmd
+rem  Si lancia con doppio clic o da "Anaconda Prompt":  run.cmd [config]
+rem  Senza argomenti usa config\systems.toml (EURUSD M5); run_h4.cmd passa config\h4.toml.
 rem  Prima volta: circa 5 minuti di installazione. Il training: ore.
 rem ============================================================================
 setlocal
 cd /d "%~dp0"
 set "ENV=candle_forecast"
+set "CFG="
+set "WHAT=EURUSD M5"
+if not "%~1"=="" (
+    set "CFG=--config %~1"
+    set "WHAT=%~n1"
+)
 
 rem --- conda: dal PATH o dalle installazioni standard -------------------------
 where conda >nul 2>nul
@@ -48,12 +55,12 @@ if errorlevel 1 goto :fail
 
 echo.
 echo [3/5] prepare
-python -m candle_forecast.cli prepare
+python -m candle_forecast.cli %CFG% prepare
 if errorlevel 1 goto :fail
 
 echo.
 echo [4/5] training su tutti i sistemi (lungo)
-python -m candle_forecast.cli run
+python -m candle_forecast.cli %CFG% run
 if errorlevel 1 goto :fail
 
 echo.
@@ -69,7 +76,7 @@ if not errorlevel 1 (
     echo niente di nuovo da committare
     goto :done
 )
-git commit -m "Training livello 0 su EURUSD M5 (%COMPUTERNAME%)"
+git commit -m "Training livello 0 %WHAT% (%COMPUTERNAME%)"
 if errorlevel 1 goto :fail
 rem se intanto qualcuno ha spinto sul branch, prima si mette in pari
 git pull --rebase --autostash
