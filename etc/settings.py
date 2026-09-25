@@ -345,6 +345,14 @@ TWELVEDATA_SPREAD = None
 # account, instrument, granularity, bar), next to sessions.db. SQLite in WAL
 # mode, because the sessions are separate processes and the HDF5 warehouse
 # does not take concurrent appends. See data/candledb.py.
+# The MCP endpoint (web/mcp.py). PUBLIC_URL is where an assistant reaches
+# the service, path included, when a proxy serves it under one and does not
+# send X-Forwarded-Prefix; the sandbox is the memory and the seconds one
+# backtest asked over MCP may take (web/sandbox.py).
+PUBLIC_URL = dotenv('PARITY_DERIVA_PUBLIC_URL')
+MCP_SANDBOX_MB = int(dotenv('PARITY_DERIVA_MCP_SANDBOX_MB', '1024'))
+MCP_SANDBOX_SECONDS = int(dotenv('PARITY_DERIVA_MCP_SANDBOX_SECONDS', '240'))
+
 CANDLE_DB = dotenv('PARITY_DERIVA_CANDLE_DB', os.path.join(DATA_DIR, 'live', 'candles.db'))
 
 # --------------------------------------------------------------------------

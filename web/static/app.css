@@ -333,7 +333,22 @@ section {
 #slope-note { color: var(--text-3); }
 #calendar-box { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
 #calendar-state { color: var(--text-3); margin: 4px 0 6px; }
-#calendar-how { color: var(--text-2); margin: 0 0 8px; padding-left: 20px; line-height: 1.6; }
+#calendar-how, #mcp-how { color: var(--text-2); margin: 0 0 8px; padding-left: 20px; line-height: 1.6; }
+#mcp-state, #mcp-note { color: var(--text-3); margin: 4px 0 6px; }
+#mcp-how code, #mcp-token code { overflow-wrap: anywhere; }
+#mcp-actions, #mcp-token { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }
+#mcp-token[hidden], #mcp-strategies[hidden] { display: none; }
+#mcp-strategies td:last-child { white-space: nowrap; }
+#mcp-strategies td:last-child button + button { margin-left: 6px; }
+/* a phone: the name, the state and the actions, the buttons one under another */
+@media (max-width: 600px) {
+  #mcp-strategies th:nth-child(3), #mcp-strategies td:nth-child(3),
+  #mcp-strategies th:nth-child(4), #mcp-strategies td:nth-child(4) { display: none; }
+  #mcp-strategies td:last-child { white-space: normal; }
+  #mcp-strategies td:last-child button { display: block; margin: 2px 0; }
+  #mcp-strategies td:last-child button + button { margin-left: 0; }
+}
+#mcp-source { max-height: 60vh; overflow: auto; font-family: var(--font-mono); font-size: var(--fs-small); background: var(--raised); padding: 8px; border-radius: var(--radius-s); }
 #calendar-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 
 #detail-box { color: var(--text-3); display: inline-flex; gap: 4px; align-items: center; }
@@ -408,7 +423,7 @@ canvas {
 #legend-box > summary { cursor: pointer; width: max-content; }
 #help-open { height: 20px; padding: 0 7px; border-radius: 50%; line-height: 18px; }
 #help-dialog { width: min(640px, calc(100vw - 32px)); }
-#data-panel { margin: var(--space-4) auto; }
+#data-panel, #mcp-panel { margin: var(--space-4) auto; }
 #help-list { margin: 0; padding-left: 18px; line-height: 1.5; }
 #help-list li + li { margin-top: 6px; }
 
@@ -487,7 +502,7 @@ tbody tr.empty:hover { background: none; }
 
 /* the dialogs, and the settings page's data panel that looks like one:
    the exports waiting, and the import's own report */
-#data-panel, dialog {
+#data-panel, #mcp-panel, dialog {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
@@ -547,9 +562,9 @@ dialog::backdrop { background: color-mix(in srgb, var(--brand-night) 55%, transp
 #data-loaded div + div { margin-top: 4px; }
 #data-loaded .dim, #data-dir { color: var(--text-3); }
 #data-dir { margin-bottom: 6px; overflow-wrap: anywhere; font-size: var(--fs-small); }
-#data-files { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-#data-files th, #data-files td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
-#data-files th { color: var(--text-3); font-weight: normal; }
+#data-files, #mcp-strategies { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+#data-files th, #data-files td, #mcp-strategies th, #mcp-strategies td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+#data-files th, #mcp-strategies th { color: var(--text-3); font-weight: normal; }
 #data-files td:first-child { overflow-wrap: anywhere; }
 #data-files td.missing { color: var(--down); }
 #data-rows tr { cursor: pointer; }

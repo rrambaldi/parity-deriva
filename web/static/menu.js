@@ -111,7 +111,7 @@ function marginText(m) {
   item('simulate', './', "one run, or every combination of a strategy's parameters");
   item('mix', 'mix', 'runs of different sets traded side by side: their capitals added up');
   item('live', 'live', 'the sessions trading on the accounts, as they go');
-  item('settings', 'settings', 'data: stores and imports');
+  item('settings', 'settings', 'data: stores and imports; AI assistants (MCP)');
   const brand = document.getElementById('brand');
   brand.appendChild(nav);
 

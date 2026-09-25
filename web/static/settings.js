@@ -267,6 +267,102 @@ $('data-import').addEventListener('click', () => dataAction(async () => {
   await followImport(await post('api/imports/run', JSON.stringify({ sets })));
 }));
 
+/* ------------------------------------------------------ the AI assistants */
+
+/*
+ * The MCP door (web/mcp.py): the token an assistant connects with, shown
+ * once when it is made, and the strategies the assistants wrote. A draft is
+ * only ever backtested in a sandbox; enabling it makes it a strategy like the
+ * others - simulations, sets, live sessions - so that step is here, after
+ * reading the code, where no assistant can reach.
+ */
+const mcpSay = (text) => { $('mcp-note').textContent = text; };
+
+async function showMcp(state) {
+  state = state || await ask('api/mcp');
+  $('mcp-url').textContent = new URL('mcp', location.href).href;
+  $('mcp-state').textContent = (state.secret ? 'a token is set' : 'no token yet: make one to connect an assistant')
+    + (state.clients.length ? ` \u00b7 connected: ${state.clients.join(', ')}` : '');
+  $('mcp-disconnect').disabled = !state.clients.length;
+  const rows = $('mcp-rows');
+  rows.textContent = '';
+  for (const s of state.strategies) {
+    const tr = rows.insertRow();
+    for (const text of [s.name, s.state, s.submitted ? day(s.submitted) : '', s.description || '']) {
+      tr.insertCell().textContent = text;
+    }
+    const cell = tr.insertCell();
+    for (const [action, icon] of s.state === 'draft'
+      ? [['view', 'view'], ['enable', 'yes'], ['delete', 'delete']] : [['view', 'view'], ['disable', 'stop']]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = button.dataset.action = action;
+      button.dataset.icon = icon;
+      button.dataset.name = s.name;
+      cell.appendChild(button);
+    }
+  }
+  $('mcp-strategies').hidden = !state.strategies.length;
+}
+
+$('mcp-rows').addEventListener('click', async (event) => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  const { name, action } = button.dataset;
+  try {
+    if (action === 'view') {
+      const found = await ask('api/mcp/source?name=' + encodeURIComponent(name));
+      $('mcp-source').textContent = `# ${name}`
+        + (found.problems.length ? `\n# problems:\n# ${found.problems.join('\n# ')}` : '')
+        + '\n\n' + found.source;
+      $('mcp-source').hidden = false;
+      return;
+    }
+    const asked = {
+      enable: `Enable ${name}? It will run inside the service: in the simulations, the sets and `
+        + 'the live sessions. Read its code first.',
+      disable: `Disable ${name}? It goes back to being a draft; a live session already running it `
+        + 'keeps it until stopped.',
+      delete: `Delete the draft ${name}? Its saved backtests stay.`,
+    }[action];
+    if (!confirm(asked)) return;
+    await showMcp(await post('api/mcp/strategy', JSON.stringify({ name, action })));
+    mcpSay(`${name}: ${action}d`);
+  } catch (error) {
+    mcpSay(String(error.message || error));
+  }
+});
+
+$('mcp-secret').addEventListener('click', async () => {
+  const state = await ask('api/mcp');
+  if (state.secret && !confirm('A new token disconnects every assistant connected with the old one. Go on?')) return;
+  try {
+    const made = await post('api/mcp/secret', '{}');
+    $('mcp-token-text').textContent = made.secret;
+    $('mcp-token').hidden = false;
+    mcpSay('the token is shown only now: copy it into the connector or the editor');
+    await showMcp();
+  } catch (error) {
+    mcpSay(String(error.message || error));
+  }
+});
+
+$('mcp-copy').addEventListener('click', () => {
+  navigator.clipboard.writeText($('mcp-token-text').textContent)
+    .then(() => mcpSay('copied'), () => mcpSay('copy it by hand: the browser refused'));
+});
+
+$('mcp-disconnect').addEventListener('click', async () => {
+  if (!confirm('Disconnect every assistant? Each one will have to connect again with the token.')) return;
+  try {
+    await showMcp(await post('api/mcp/disconnect', '{}'));
+    mcpSay('disconnected');
+  } catch (error) {
+    mcpSay(String(error.message || error));
+  }
+});
+
+showMcp().catch((error) => mcpSay(String(error.message || error)));
 showCalendar();
 loadStores().then(loadImports).catch((error) => dataLog([String(error.message || error)]));
 // an import started earlier, from this page or another, is picked up

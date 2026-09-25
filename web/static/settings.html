@@ -94,6 +94,37 @@
   <pre id="data-log" hidden></pre>
 </section>
 
+<!--
+  The door for an AI assistant of your own (web/mcp.py): the token it
+  connects with, who holds one, and the strategies it wrote. They are drafts,
+  backtested only in a sandbox, until enabled here after reading the code.
+-->
+<section id="mcp-panel">
+  <strong>AI assistants (MCP)</strong>
+  <div id="mcp-state"></div>
+  <ol id="mcp-how">
+    <li>make a token: it is shown once, keep it somewhere safe</li>
+    <li>claude.ai, Claude Desktop, ChatGPT, Gemini: add a custom connector with
+        the address <code id="mcp-url"></code> - the page it opens asks for the token</li>
+    <li>Cursor, VS Code, a CLI: the same address, with the header
+        <code>Authorization: Bearer &lt;token&gt;</code></li>
+  </ol>
+  <div id="mcp-actions">
+    <button type="button" id="mcp-secret" data-icon="add">new token</button>
+    <button type="button" id="mcp-disconnect" data-icon="close">disconnect all</button>
+  </div>
+  <div id="mcp-token" hidden>
+    <code id="mcp-token-text"></code>
+    <button type="button" id="mcp-copy" data-icon="copy">copy</button>
+  </div>
+  <p id="mcp-note" role="status"></p>
+  <table id="mcp-strategies" hidden>
+    <thead><tr><th>strategy</th><th>state</th><th>submitted</th><th>description</th><th></th></tr></thead>
+    <tbody id="mcp-rows"></tbody>
+  </table>
+  <pre id="mcp-source" hidden></pre>
+</section>
+
 <script src="static/menu.js"></script>
 <script src="static/settings.js"></script>
 </body>

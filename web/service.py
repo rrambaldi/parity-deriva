@@ -77,8 +77,8 @@ from parity_deriva.data.candledb import CandleDB
 from parity_deriva.etc import settings
 from parity_deriva.lib import indicators
 from parity_deriva.performance import report as report_module
-from parity_deriva.strategy import plugins
-from parity_deriva.web import livesessions
+from parity_deriva.strategy import plugins, uploaded
+from parity_deriva.web import livesessions, mcp, oauth
 
 
 def strategies():
@@ -334,6 +334,12 @@ class Service(object):
 		# calendar page cannot guess it, so the allowance above is an
 		# allowance for the script you pasted and not for that site.
 		self.token = secrets.token_urlsafe(18)
+		# the MCP endpoint's door (web/oauth.py), the strategies written
+		# over it that somebody enabled, and its one sandbox at a time
+		dataDir = getattr(self.setup, 'DATA_DIR', '') or '.'
+		self.oauth = oauth.Authority(os.path.join(dataDir, 'mcp.json'))
+		ledger.STRATEGIES.update(uploaded.backtest(dataDir))
+		self._sandbox = threading.Lock()
 
 	# --------------------------------------------------------------- stores
 
@@ -1565,7 +1571,8 @@ class Service(object):
 		sweep = getattr(self, '_sweep', None) or {}
 		together = getattr(self, '_together', None) or {}
 		return {'simulate': bool(sweep.get('running') or together.get('running')
-								 or self._progress.get('running')),
+								 or self._progress.get('running')
+								 or self._sandbox.locked()),
 				'live': self.live.running(),
 				'server': self.machine()}
 
@@ -2687,6 +2694,8 @@ class Handler(BaseHTTPRequestHandler):
 		query = urllib.parse.parse_qs(parsed.query)
 
 		try:
+			if mcp.route(self, 'GET', route, query):
+				return
 			# the simulation is the home page: one run is a set of one. /sim
 			# is kept for the links made before it was
 			if route in ('/', '/sim'):
@@ -2839,6 +2848,10 @@ class Handler(BaseHTTPRequestHandler):
 		route = parsed.path
 		query = urllib.parse.parse_qs(parsed.query)
 		try:
+			# MCP and OAuth have their own door, and the settings page's
+			# MCP routes check the header themselves
+			if mcp.route(self, 'POST', route, query):
+				return
 			# the calendar route also takes the collector's token, because a
 			# script running on forexfactory's page cannot send a custom
 			# header to this port. Everything else needs the header.
@@ -2867,12 +2880,19 @@ class Handler(BaseHTTPRequestHandler):
 				# a run of a simulation set run again because the set was
 				# saved without it: it is kept with the set, once
 				sweep, sweepRun = fields.pop('sweep', None), fields.pop('sweepRun', None)
-				payload = self.runBacktest(
-					dict((k, [str(v)]) for k, v in fields.items()
-						 if v is not None and v != ''
-						 and k not in ('cachedOnly', 'confirmed')),
-					cachedOnly=cachedOnly,
-					confirmed=bool(fields.get('confirmed')))
+				try:
+					payload = self.runBacktest(
+						dict((k, [str(v)]) for k, v in fields.items()
+							 if v is not None and v != ''
+							 and k not in ('cachedOnly', 'confirmed')),
+						cachedOnly=cachedOnly,
+						confirmed=bool(fields.get('confirmed')))
+				except ServiceError:
+					# a reload of a run whose strategy this service does not
+					# import - a draft backtested over MCP - is still on disk
+					if not cachedOnly:
+						raise
+					payload = None
 				form = dict((k, v) for k, v in fields.items()
 							if k not in ('cachedOnly', 'confirmed'))
 				if payload is None:

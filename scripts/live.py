@@ -48,7 +48,7 @@ from parity_deriva.event.saver import EventSaver
 from parity_deriva.lib.utils import getLogger, granularityToTimedelta
 from parity_deriva.portfolio.moneymanager import MoneyManager
 from parity_deriva.portfolio.trailer import Trailer
-from parity_deriva.strategy import plugins
+from parity_deriva.strategy import plugins, uploaded
 from parity_deriva.trading import providers
 from parity_deriva.trading.engine import Engine
 from parity_deriva.trading.parity import ParityMonitor
@@ -106,6 +106,8 @@ STRATEGIES = {
 # ladder itself is portfolio/trailer.py, registered below whenever a strategy
 # asks for that capability.
 STRATEGIES.update(plugins.live())
+# and the ones written over MCP that somebody enabled (strategy/uploaded.py)
+STRATEGIES.update(uploaded.live(settings.DATA_DIR))
 
 #: the BO engines measure how long a run of candle directions persists and
 #: place no orders at all, so there is nothing for the shadow to fill and
