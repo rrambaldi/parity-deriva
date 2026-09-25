@@ -1,4 +1,6 @@
-"""Sorgente CSV (`pack-csv` -> `prepare`): candele già H4, piatte del weekend tolte e contate."""
+"""Sorgente .tbz (come data/EURUSD_M5.tbz): candele già H4, piatte del weekend e ASK < BID tolte e contate."""
+import tarfile
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -15,7 +17,7 @@ test = 0.125
 early_stop_tail = 0.10
 [instruments.X]
 tick = 0.00001
-csv = { H4 = "X_H4.csv" }
+tbz = { H4 = "X_H4.tbz" }
 [grid]
 instruments = ["X"]
 timeframes = ["H4"]
@@ -28,14 +30,16 @@ indicators = []
 """
 
 
-def _project(tmp_path, bid, ask):
-    (tmp_path / "config").mkdir()
+def _project(tmp_path, bid, ask, sides=("BID", "ASK")):
+    for d in ("config", "stores"):
+        (tmp_path / d).mkdir()
     (tmp_path / "config" / "h4.toml").write_text(TOML)
-    for name, d in (("bid", bid), ("ask", ask)):
-        d.to_csv(tmp_path / f"{name}.csv", index=False)
-    cfg = config.load(tmp_path / "config" / "h4.toml")
-    cli.pack_csv(cfg, "X", "H4", tmp_path / "bid.csv", tmp_path / "ask.csv")
-    return cfg
+    with tarfile.open(tmp_path / "stores" / "X_H4.tbz", "w:bz2") as tar:
+        for side, d in zip(sides, (bid, ask)):
+            f = tmp_path / f"x_h4_20200106_20200119-{side}.csv"
+            d.to_csv(f, index=False)
+            tar.add(f, arcname=f.name)
+    return config.load(tmp_path / "config" / "h4.toml")
 
 
 @pytest.fixture
@@ -72,3 +76,10 @@ def test_ask_below_bid_dropped(tmp_path, frames):
     ts = pd.to_datetime(np.load(out / "candles.npz")["ts"], utc=True)
     assert pd.Timestamp(bid.loc[3, "timestamp"], unit="ms", tz="UTC") not in ts
     assert len(ts) == len(bid) - n_flat - 1
+
+
+def test_side_missing_stops(tmp_path, frames):
+    bid, ask, _ = frames
+    cfg = _project(tmp_path, bid, ask, sides=("BID", "bid"))
+    with pytest.raises(data.DataError, match="-ASK.csv"):
+        cli.prepare(cfg, "X", "H4")

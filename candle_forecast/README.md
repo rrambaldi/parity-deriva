@@ -109,19 +109,24 @@ Lo store M5 parte dal 2015, cioè circa 18.600 candele H4. Per averne il doppio,
 esportati a parte (BID e ASK, dal 2003; le coppie con NZD dal 2006), non dal ricampionamento dell'M5.
 Dieci coppie, ognuna un sistema a sé: niente miscuglio fra mercati.
 
+I dati non stanno in git. Sul server sono in `parity-deriva/data/<COPPIA>_H4.tbz`, come
+`EURUSD_M5.tbz`: dentro ci sono `<coppia>_h4_<dal>_<al>-BID.csv` e `-ASK.csv`, così come escono
+dall'export. Sul PC basta un doppio clic su `run_h4.cmd`: scarica i `.tbz` in `stores/` con `scp`
+(server, porta e cartella sono in cima allo script), poi fa quello che fa `run.cmd` con
+`config\h4.toml`. `prepare` legge il `.tbz` così com'è, senza ricampionare.
+
 ```bash
-# una volta per coppia, dove ci sono i CSV: BID e ASK in un CSV solo, zippato in stores/ (in git)
-$PY -m candle_forecast.cli --config config/h4.toml pack-csv EURUSD H4 eurusd_h4-BID.csv eurusd_h4-ASK.csv
 $PY -m candle_forecast.cli --config config/h4.toml prepare --instrument EURUSD
 $PY -m candle_forecast.cli --config config/h4.toml run --instrument EURUSD
 ```
 
+- Una coppia nuova: il suo `.tbz` nella `data/` del server e una voce `[instruments.<COPPIA>]` in
+  `config/h4.toml`, con `tick` e `tbz`.
 - Le candele H4 dei CSV sono allineate a UTC (00, 04 ... 20), non all'ancora 17:00 New York di L0-P3.
 - `prepare` toglie, e conta in `data_report.txt`, le candele piatte su BID e ASK (high = low: alcuni
   export riempiono così weekend e festivi) e quelle con un prezzo ASK sotto il BID (GBPUSD 4, USDJPY 9,
   GBPJPY 1, NZDJPY 2, quasi tutte aperture della domenica 2006-2009). Tutto il resto passa dalla
   stessa validazione dell'M5, e se c'è una violazione si ferma.
-- Sul PC: doppio clic su `run_h4.cmd`, che fa tutto quello che fa `run.cmd` con `config\h4.toml`.
 - Se lo lanci sul server metti `num_threads = 1`: con 2 core condivisi con il servizio web,
   LightGBM con 2 thread è 4 volte più lento che con 1.
 
@@ -150,7 +155,7 @@ $PY -m candle_forecast.cli --config config/h4.toml run --instrument EURUSD
 | APERTO-3 | Candele mancanti | la candela mancante non esiste: la sequenza continua per indice, nessuna finestra esclusa; i buchi restano nel report. Nei timeframe ricampionati le incomplete si tengono come sono | deciso | `config` `exclude_gap_windows = false` |
 | APERTO-4 | Primo sistema | EURUSD M5, mid, tutti gli N e M | deciso | `config` |
 | APERTO-5 | Indicatori | SMA100 sul close, ATR14 (Wilder), EMA21 sul close; riscaldamento: via le prime 99 candele, finché SMA100 non c'è | deciso | `indicators.py`, `config` |
-| H4-1 | Sorgente H4 | CSV BID e ASK dal 2003 (`pack-csv`), candele allineate a UTC; tolte e contate le piatte su BID e ASK e quelle con ASK sotto BID | deciso | `config/h4.toml`, `data.read_csv` |
+| H4-1 | Sorgente H4 | `.tbz` con i CSV BID e ASK dal 2003 (scp dal server), candele allineate a UTC; tolte e contate le piatte su BID e ASK e quelle con ASK sotto BID | deciso | `config/h4.toml`, `data.read_tbz` |
 
 ### Scelte tecniche non coperte dal prompt (DA-CONFERMARE)
 

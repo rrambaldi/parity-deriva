@@ -1,4 +1,5 @@
 # H4 dal 2003 (NZD dal 2006) da CSV esportati, non ricampionato dallo store M5 (che parte dal 2015).
+# I dati sono stores/<coppia>_H4.tbz, come data/EURUSD_M5.tbz: run_h4.cmd li scarica dal server con scp.
 # Candele allineate a UTC (00, 04 ... 20), non all'ancora 17:00 New York di L0-P3.
 # Stessa griglia, modelli e iperparametri del livello 0 M5 (systems.toml). Si lancia con
 #   python -m candle_forecast.cli --config config/h4.toml prepare | run      (su Windows: run_h4.cmd)
@@ -18,43 +19,43 @@ early_stop_tail = 0.10         # L0-P9: ultimo 10% del training
 
 [instruments.EURUSD]
 tick = 0.00001
-csv = { H4 = "EURUSD_H4.csv" }
+tbz = { H4 = "EURUSD_H4.tbz" }
 
 [instruments.GBPUSD]
 tick = 0.00001
-csv = { H4 = "GBPUSD_H4.csv" }
+tbz = { H4 = "GBPUSD_H4.tbz" }
 
 [instruments.USDJPY]
 tick = 0.001
-csv = { H4 = "USDJPY_H4.csv" }
+tbz = { H4 = "USDJPY_H4.tbz" }
 
 [instruments.NZDUSD]
 tick = 0.00001
-csv = { H4 = "NZDUSD_H4.csv" }
+tbz = { H4 = "NZDUSD_H4.tbz" }
 
 [instruments.EURGBP]
 tick = 0.00001
-csv = { H4 = "EURGBP_H4.csv" }
+tbz = { H4 = "EURGBP_H4.tbz" }
 
 [instruments.EURJPY]
 tick = 0.001
-csv = { H4 = "EURJPY_H4.csv" }
+tbz = { H4 = "EURJPY_H4.tbz" }
 
 [instruments.GBPJPY]
 tick = 0.001
-csv = { H4 = "GBPJPY_H4.csv" }
+tbz = { H4 = "GBPJPY_H4.tbz" }
 
 [instruments.EURNZD]
 tick = 0.00001
-csv = { H4 = "EURNZD_H4.csv" }
+tbz = { H4 = "EURNZD_H4.tbz" }
 
 [instruments.GBPNZD]
 tick = 0.00001
-csv = { H4 = "GBPNZD_H4.csv" }
+tbz = { H4 = "GBPNZD_H4.tbz" }
 
 [instruments.NZDJPY]
 tick = 0.001
-csv = { H4 = "NZDJPY_H4.csv" }
+tbz = { H4 = "NZDJPY_H4.tbz" }
 
 [grid]
 instruments = ["EURUSD", "GBPUSD", "USDJPY", "NZDUSD", "EURGBP", "EURJPY", "GBPJPY", "EURNZD", "GBPNZD", "NZDJPY"]   # una coppia per volta, niente miscuglio

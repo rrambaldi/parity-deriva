@@ -1,6 +1,7 @@
 """Adapter BID/ASK M5, validazione e report (Parte 1). Nessuna correzione silenziosa."""
 from __future__ import annotations
 
+import tarfile
 from pathlib import Path
 
 import numpy as np
@@ -8,7 +9,7 @@ import pandas as pd
 
 OHLC = ["open", "high", "low", "close"]
 BAR = pd.Timedelta(minutes=5)
-BARS = {"M5": BAR, "H1": pd.Timedelta(hours=1), "H4": pd.Timedelta(hours=4)}   # passo fisso: sorgenti CSV
+BARS = {"M5": BAR, "H1": pd.Timedelta(hours=1), "H4": pd.Timedelta(hours=4)}   # passo fisso: sorgenti .tbz
 NY = "America/New_York"
 
 
@@ -29,13 +30,23 @@ def read_store(path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     return _sides(frame)
 
 
-def read_csv(path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, int]]:
-    """Il CSV di `pack-csv`: timestamp in ms UTC (inizio barra, L0-P5), bid_o ... ask_c.
+def read_tbz(path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, int]]:
+    """Un archivio come `data/EURUSD_M5.tbz` di parity_deriva: due CSV esportati, `...-BID.csv` e
+    `...-ASK.csv` (timestamp in ms UTC, inizio barra, L0-P5; open, high, low, close[, volume]).
     Si tolgono, e si contano nel report (H4-1), le candele piatte su BID e ASK (high = low: il mercato
     chiuso che alcuni export riempiono, weekend e Natale) e quelle con un prezzo ASK sotto il BID
     (poche aperture della domenica 2006-2009): per il resto sono candele mancanti (APERTO-3)."""
-    frame = pd.read_csv(path)
-    frame.index = pd.to_datetime(frame.pop("timestamp"), unit="ms", utc=True)
+    sides = {}
+    with tarfile.open(path) as tar:
+        for m in tar.getmembers():
+            for side in ("bid", "ask"):
+                if m.name.endswith(f"-{side.upper()}.csv"):
+                    d = pd.read_csv(tar.extractfile(m), index_col="timestamp")[OHLC]
+                    sides[side] = d.rename(columns=lambda c: f"{side}_{c[0]}")
+    if len(sides) != 2:
+        raise DataError(f"== {Path(path).name} ==\n- servono un -BID.csv e un -ASK.csv, trovati: {sorted(sides)}")
+    frame = pd.concat([sides["bid"], sides["ask"]], axis=1)   # un timestamp su un lato solo: NaN, lo ferma validate
+    frame.index = pd.to_datetime(frame.index, unit="ms", utc=True)
     flat = (frame["bid_h"] == frame["bid_l"]) & (frame["ask_h"] == frame["ask_l"])
     crossed = pd.concat([frame[f"ask_{c}"] < frame[f"bid_{c}"] for c in "ohlc"], axis=1).any(axis=1) & ~flat
     dropped = {"piatte su BID e ASK (mercato chiuso)": int(flat.sum()), "con ASK sotto BID": int(crossed.sum())}

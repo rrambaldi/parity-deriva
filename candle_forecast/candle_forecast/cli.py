@@ -27,34 +27,34 @@ def prepare(cfg: dict[str, Any], instrument: str, timeframe: str) -> Path:
     out = cfg["results_dir"] / f"{instrument}_{timeframe}_{kind}"
     out.mkdir(parents=True, exist_ok=True)
 
-    csv_zip = inst["csv_zip"].get(timeframe)
-    src = csv_zip or inst.get("store_zip")
+    tbz = inst["tbz"].get(timeframe)
+    src = tbz or inst.get("store_zip")
     if src is None or not src.exists():
-        raise SystemExit(f"{src or instrument + ': né store né CSV ' + timeframe} mancante: "
-                         "lancia `pack-stores` o `pack-csv`")
-    path = stores.unpack(src)
+        raise SystemExit(f"{src or instrument + ': né store né .tbz ' + timeframe} mancante: "
+                         + ("run_h4.cmd lo scarica dal server" if tbz else "lancia `pack-stores`"))
     try:
-        if csv_zip:
-            bid, ask, dropped = data.read_csv(path)
+        if tbz:
+            bid, ask, dropped = data.read_tbz(src)
             m5 = data.validate(bid, ask, instrument, inst["tick"])   # qui sono già candele `timeframe`
         else:
-            m5 = data.load_store(path, instrument, inst["tick"])
+            m5 = data.load_store(stores.unpack(src), instrument, inst["tick"])
     except data.DataError as e:
         (out / "data_report.txt").write_text(e.report + "\n")
         raise
-    report = [data.format_report(f"validazione {instrument} ({src.name}, sha256 {stores.zip_sha(src)[:12]})", [])]
-    if csv_zip:
+    sha = stores.sha256(src) if tbz else stores.zip_sha(src)
+    report = [data.format_report(f"validazione {instrument} ({src.name}, sha256 {sha[:12]})", [])]
+    if tbz:
         report[0] += "\ncandele tolte (H4-1): " + ", ".join(f"{k} {v}" for k, v in dropped.items())
-    gaps = data.find_gaps(m5.index, data.BARS[timeframe] if csv_zip else data.BAR)
+    gaps = data.find_gaps(m5.index, data.BARS[timeframe] if tbz else data.BAR)
     report.append(data.gap_report(instrument, m5.index, gaps))
     gaps.to_csv(out / "gaps.csv", index=False)
 
-    if csv_zip:
+    if tbz:
         candles = resample.price_series(m5, kind).assign(n_bars=1, n_expected=1)
     else:
         candles = resample.resample(resample.price_series(m5, kind), timeframe)
     report.append(f"== candele {timeframe} ==\n" + resample.incomplete_stats(candles))
-    if timeframe == "M5" or csv_zip:
+    if timeframe == "M5" or tbz:
         brk = data.breaks(len(candles), gaps)
     else:
         # APERTO-3: le candele incomplete si tengono come sono. Il break (usato solo con
@@ -119,21 +119,6 @@ def pack_stores(cfg: dict[str, Any], names: list[str]) -> None:
         size = inst["store_zip"].stat().st_size / 1e6
         print(f"{name}: {src} -> {inst['store_zip']} ({size:.1f} MB) "
               + ("scritto" if written else "invariato, non riscritto"))
-
-
-def pack_csv(cfg: dict[str, Any], instrument: str, timeframe: str, bid: str, ask: str) -> None:
-    """Due CSV esportati (timestamp in ms, open, high, low, close[, volume]), BID e ASK, in un CSV
-    solo, zippato in stores/ (da mettere in git). Nessuna correzione: la validazione la fa `prepare`."""
-    name = cfg["instruments"][instrument].get("csv", {}).get(timeframe)
-    if not name:
-        raise SystemExit(f"[instruments.{instrument}] non ha csv.{timeframe} nel config")
-    sides = [pd.read_csv(f, index_col="timestamp")[data.OHLC].add_prefix(f"{s}_").rename(columns=lambda c: c[:5])
-             for s, f in (("bid", bid), ("ask", ask))]
-    dst = cfg["root"] / "stores" / name
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    pd.concat(sides, axis=1).to_csv(dst)        # outer join: un timestamp su un lato solo diventa NaN
-    written = stores.pack(dst, cfg["instruments"][instrument]["csv_zip"][timeframe])
-    print(f"{instrument} {timeframe}: {bid} + {ask} -> {dst}.zip " + ("scritto" if written else "invariato"))
 
 
 # ---------------------------------------------------------------- run
@@ -263,11 +248,6 @@ def main(argv: list[str] | None = None) -> None:
     pp.add_argument("--timeframe")
     pk = sub.add_parser("pack-stores", help="zippa gli store da DATA_DIR in stores/ (per git)")
     pk.add_argument("--instrument", nargs="*", help="default: tutti quelli in [instruments]")
-    pc = sub.add_parser("pack-csv", help="CSV BID e ASK di un timeframe in stores/ (per git)")
-    pc.add_argument("instrument")
-    pc.add_argument("timeframe")
-    pc.add_argument("bid")
-    pc.add_argument("ask")
     pr = sub.add_parser("run", help="baseline + modelli sulla validazione")
     pr.add_argument("--instrument", nargs="*")
     pr.add_argument("--N", type=int, nargs="*")
@@ -279,8 +259,6 @@ def main(argv: list[str] | None = None) -> None:
     cfg = config.load(a.config)
     if a.cmd == "pack-stores":
         pack_stores(cfg, a.instrument or list(cfg["instruments"]))
-    elif a.cmd == "pack-csv":
-        pack_csv(cfg, a.instrument, a.timeframe, a.bid, a.ask)
     elif a.cmd == "prepare":
         for i in [a.instrument] if a.instrument else cfg["grid"]["instruments"]:
             for tf in [a.timeframe] if a.timeframe else cfg["grid"]["timeframes"]:
