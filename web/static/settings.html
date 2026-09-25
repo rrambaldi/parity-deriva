@@ -48,12 +48,35 @@
     <tbody id="data-rows"></tbody>
   </table>
   <div id="data-actions">
-    <label>upload CSV
-      <input type="file" id="data-file" accept=".csv,text/csv" multiple>
+    <label>upload CSV or JSON
+      <input type="file" id="data-file" accept=".csv,.json,text/csv,application/json" multiple>
     </label>
     <button type="button" id="data-upload" data-icon="upload">upload</button>
     <button type="button" id="data-import" class="primary" data-icon="import">import selected</button>
   </div>
+  <!-- what scripts/import_csv.py reads: dukascopy-node's own output -->
+  <details id="data-format">
+    <summary>what an export looks like</summary>
+    <p>Two files a series, one a side:
+      <code>&lt;instrument&gt;_&lt;tf&gt;_&lt;from&gt;_&lt;to&gt;-ASK.csv</code> and <code>-BID.csv</code>,
+      e.g. <code>eurusd_m5_20150101_20260920-ASK.csv</code>. The instrument as eurusd or
+      EUR_USD, the timeframe m1, m5, m15, m30, h1, h4 or d1, the two days as YYYYMMDD.</p>
+    <p>CSV: this header, then a row a candle. The timestamp is when the candle opens, in UTC
+      milliseconds since 1970.</p>
+    <pre>timestamp,open,high,low,close,volume
+1420070400000,1.20985,1.21005,1.20962,1.20983,321.5</pre>
+    <p>JSON, the same name ending in <code>.json</code>: an array of candles with the same fields,
+      as objects or as rows in that order.</p>
+    <pre>[{"timestamp": 1420070400000, "open": 1.20985, "high": 1.21005, "low": 1.20962, "close": 1.20983, "volume": 321.5}]
+[[1420070400000, 1.20985, 1.21005, 1.20962, 1.20983, 321.5]]</pre>
+    <p>Both are what <a href="https://github.com/Leo4815162342/dukascopy-node" target="_blank"
+      rel="noopener">dukascopy-node</a> writes (<code>-f csv</code>, <code>-f json</code>,
+      <code>-f array</code>); <code>-v</code> adds the volume, which the import needs, and
+      <code>-fn</code> gives the name:</p>
+    <pre>npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p ask -fn eurusd_m5_20150101_20260920-ASK
+npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p bid -fn eurusd_m5_20150101_20260920-BID</pre>
+    <p>A long M1 or M5 series is better as CSV: a JSON is read whole into memory.</p>
+  </details>
   <!--
     The economic calendar. Collected by the browser and not by the service:
     the site refuses a datacentre address after a handful of requests, and
@@ -146,8 +169,8 @@
       <p class="dialog-sub" id="source-sub"></p>
     </div>
     <div class="dialog-tools">
+      <span id="source-actions"></span>
       <button type="button" id="source-download" data-icon="import">download</button>
-      <span class="kbd" aria-hidden="true">esc</span>
       <button type="submit" class="dialog-close" aria-label="close"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
     </div>
   </form>

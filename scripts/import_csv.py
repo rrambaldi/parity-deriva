@@ -7,6 +7,14 @@ command line:
     <instrument>_<timeframe>_<from>_<to>-<ASK|BID>.csv
     eurusd_d1_20160121_20260920-ASK.csv  ->  EUR_USD.hd5, key /D
 
+A side is a CSV with the header timestamp,open,high,low,close,volume - the
+timestamp in UTC epoch milliseconds, the candle's open - or the same fields as
+JSON, an array of objects or of rows in that order: what dukascopy-node writes
+with -f csv, -f json or -f array, and -v for the volume.
+
+    npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -p ask -v \
+        -f csv -fn eurusd_m5_20150101_20260920-ASK      # and -p bid ... -BID
+
 The two sides are one store row: the file pair is read together, mid is the
 average of ask and bid leg by leg, and volume is taken from the BID file (the
 two differ slightly and the store holds a single figure). A stem with only one
@@ -32,6 +40,7 @@ Because the record lives on the key, a store deleted or rebuilt forgets it.
 import argparse
 import glob
 import hashlib
+import json
 import os
 import re
 import sys
@@ -41,6 +50,10 @@ import pandas as pd
 from parity_deriva.etc import settings
 
 LEGS = {'open': 'o', 'high': 'h', 'low': 'l', 'close': 'c'}
+#: a side's fields, in the order a CSV header and a JSON row have them
+FIELDS = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+#: the files a side can be
+EXTENSIONS = ('.csv', '.json')
 NAME = re.compile(r'^(?P<instrument>[^_]+)_(?P<timeframe>[^_]+)_'
                   r'(?P<dtfrom>\d+)_(?P<dtto>\d+)-(?P<side>ASK|BID)$',
                   re.IGNORECASE)
@@ -73,8 +86,8 @@ def granularity(raw):
 
 def parse_name(path):
     """(instrument, granularity, side) from the filename, or None."""
-    stem = os.path.basename(path)
-    stem = stem[:-4] if stem.lower().endswith('.csv') else stem
+    stem, extension = os.path.splitext(os.path.basename(path))
+    stem = stem if extension.lower() in EXTENSIONS else stem + extension
     match = NAME.match(stem)
     if match is None:
         return None
@@ -85,16 +98,31 @@ def parse_name(path):
 
 def read_side(path, progress=None):
     """
-    One CSV as a frame indexed by its epoch-millisecond timestamp. Read in
-    chunks so that progress(bytes read so far) can be told as it goes.
+    One side as a frame indexed by its epoch-millisecond timestamp. A CSV is
+    read in chunks so that progress(bytes read so far) can be told as it goes.
     """
-    parts = []
-    with open(path, 'rb') as handle:
-        for chunk in pd.read_csv(handle, chunksize=200000):
-            parts.append(chunk)
-            if progress is not None:
-                progress(handle.tell())
-    frame = pd.concat(parts, ignore_index=True)
+    if path.lower().endswith('.json'):
+        # ponytail: read whole, a few times its size in memory; a long M1 or
+        # M5 series goes as CSV, or this becomes a streaming parser
+        with open(path) as handle:
+            rows = json.load(handle)
+        if not isinstance(rows, list):
+            raise ValueError("%s is not a JSON array of candles" % os.path.basename(path))
+        frame = pd.DataFrame(rows, columns=FIELDS if rows and isinstance(rows[0], list) else None)
+        if progress is not None:
+            progress(os.path.getsize(path))
+    else:
+        parts = []
+        with open(path, 'rb') as handle:
+            for chunk in pd.read_csv(handle, chunksize=200000):
+                parts.append(chunk)
+                if progress is not None:
+                    progress(handle.tell())
+        frame = pd.concat(parts, ignore_index=True)
+    missing = [f for f in FIELDS if f not in frame.columns]
+    if missing:
+        raise ValueError("%s has no %s (dukascopy-node leaves the volume out without -v)"
+                         % (os.path.basename(path), ', '.join(missing)))
     frame.index = pd.to_datetime(frame['timestamp'], unit='ms').dt.as_unit('us')
     frame.index.name = None
     return frame
@@ -173,7 +201,7 @@ def merge(path, key, frame, dry_run=False):
 
 def set_name(path):
     """The import set a file belongs to: its name without -ASK/-BID.csv."""
-    return re.sub(r'-(ASK|BID)(\.csv)?$', '', os.path.basename(path),
+    return re.sub(r'-(ASK|BID)(\.csv|\.json)?$', '', os.path.basename(path),
                   flags=re.IGNORECASE)
 
 
@@ -222,7 +250,7 @@ def pairs(paths, report=print):
     for path in paths:
         parsed = parse_name(path)
         if parsed is None:
-            report("skipping %s: name is not <instrument>_<tf>_<from>_<to>-<SIDE>.csv"
+            report("skipping %s: name is not <instrument>_<tf>_<from>_<to>-<SIDE>.csv or .json"
                   % os.path.basename(path))
             continue
         instrument, gran, side = parsed
@@ -231,10 +259,10 @@ def pairs(paths, report=print):
 
 
 def expand(paths):
-    """Directories stand for the CSV files in them."""
+    """Directories stand for the CSV and JSON files in them."""
     out = []
     for path in paths:
-        out.extend(sorted(glob.glob(os.path.join(path, '*.csv')))
+        out.extend(sorted(f for e in EXTENSIONS for f in glob.glob(os.path.join(path, '*' + e)))
                    if os.path.isdir(path) else [path])
     return out
 

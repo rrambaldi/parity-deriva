@@ -218,8 +218,29 @@ EPOCH = datetime.datetime(1970, 1, 1)
 #: the largest CSV one upload may carry. An M5 decade is under 50 MB a side.
 MAX_UPLOAD = 1024 * 1024 * 1024
 
-#: the first line import_csv.read_side expects of every export
+#: the first line import_csv.read_side expects of every CSV export
 CSV_HEADER = b'timestamp,open,high,low,close,volume'
+
+
+def exportProblem(name, head):
+	"""
+	Why the first bytes of an uploaded side are not a candle export, or None:
+	a CSV starts with CSV_HEADER, a JSON is an array of rows or of objects
+	with those fields (dukascopy-node -f array, -f json). The rest of the file
+	is the import's to judge.
+	"""
+	if name.lower().endswith('.json'):
+		flat = b''.join(head.split())
+		if flat.startswith(b'[[') or flat.startswith(b'[{') and all(
+				b'"%s":' % field in flat for field in CSV_HEADER.split(b',')):
+			return None
+		return ("%s is not a JSON array of {%s}: dukascopy-node -f json -v writes one"
+				% (name, CSV_HEADER.decode().replace(',', ', ')))
+	header = head.split(b'\n', 1)[0].strip()
+	if header == CSV_HEADER:
+		return None
+	return "%s starts with %r, not %r" % (name, header[:80].decode('utf-8', 'replace'),
+										  CSV_HEADER.decode())
 
 
 @functools.lru_cache(maxsize=None)
@@ -414,7 +435,8 @@ class Service(object):
 		sets = {}
 		names = sorted(os.listdir(directory)) if os.path.isdir(directory) else []
 		for name in names:
-			parsed = importer().parse_name(name) if name.lower().endswith('.csv') else None
+			parsed = importer().parse_name(name) \
+				if name.lower().endswith(importer().EXTENSIONS) else None
 			if parsed is None:
 				continue
 			instrument, granularity, side = parsed
@@ -429,7 +451,7 @@ class Service(object):
 
 	def upload(self, name, stream, length):
 		"""
-		Write one uploaded CSV into IMPORT_DIR under its own name.
+		Write one uploaded side, CSV or JSON, into IMPORT_DIR under its own name.
 
 		The name has to be the one import_csv reads everything from, so it is
 		checked against that pattern rather than sanitised - which also keeps
@@ -454,20 +476,19 @@ class Service(object):
 					out.write(chunk)
 					received += len(chunk)
 			with open(part, 'rb') as check:
-				header = check.readline().strip()
+				head = check.read(4096)
 			name = name or ''
-			if name != os.path.basename(name) or not name.lower().endswith('.csv') \
+			if name != os.path.basename(name) or not name.lower().endswith(importer().EXTENSIONS) \
 					or importer().parse_name(name) is None:
 				raise ServiceError(
-					"%r is not <instrument>_<tf>_<from>_<to>-<ASK|BID>.csv, "
+					"%r is not <instrument>_<tf>_<from>_<to>-<ASK|BID>.csv (or .json), "
 					"which is the name the import reads the series from" % name)
 			if received != length:
 				raise ServiceError("upload cut short: %d of %d bytes"
 								   % (received, length))
-			if header != CSV_HEADER:
-				raise ServiceError("%s starts with %r, not %r"
-								   % (name, header[:80].decode('utf-8', 'replace'),
-									  CSV_HEADER.decode()))
+			problem = exportProblem(name, head)
+			if problem:
+				raise ServiceError(problem)
 			os.replace(part, os.path.join(directory, name))
 		finally:
 			if os.path.exists(part):

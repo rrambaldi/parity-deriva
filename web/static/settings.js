@@ -243,7 +243,7 @@ $('data-all').addEventListener('change', () => {
 
 $('data-upload').addEventListener('click', () => dataAction(async () => {
   const files = Array.from($('data-file').files || []);
-  if (!files.length) { dataLog(['choose a CSV on this computer to upload first']); return; }
+  if (!files.length) { dataLog(['choose a CSV or JSON on this computer to upload first']); return; }
   const lines = [];
   for (const file of files) {
     dataLog(lines.concat([`uploading ${file.name} ...`]));
@@ -277,6 +277,24 @@ $('data-import').addEventListener('click', () => dataAction(async () => {
  * reading the code, where no assistant can reach.
  */
 const mcpSay = (text) => { $('mcp-note').textContent = text; };
+
+// what can be done with a strategy in its state: on its row, and but for view
+// in the head of its code's dialog
+function mcpButtons(s, view) {
+  const actions = s.state === 'draft' ? [['enable', 'yes'], ['delete', 'delete']]
+    : [['disable', 'stop'], ['delete', 'delete']];
+  if (view) actions.unshift(['view', 'view']);
+  if (s.state !== 'draft' && s.proposed && !s.pull) actions.push(['pull', 'upload', 'pull request']);
+  return actions.map(([action, icon, label]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label || action;
+    button.dataset.action = action;
+    button.dataset.icon = icon;
+    button.dataset.name = s.name;
+    return button;
+  });
+}
 // the rows last shown, by name: what the code's dialog says above it
 let mcpStrategies = {};
 
@@ -309,19 +327,8 @@ async function showMcp(state) {
       tr.cells[1].append(' \u00b7 proposed');
       tr.cells[1].title = s.proposed.note;
     }
-    const cell = tr.insertCell();
-    const actions = s.state === 'draft'
-      ? [['view', 'view'], ['enable', 'yes'], ['delete', 'delete']] : [['view', 'view'], ['disable', 'stop']];
-    if (s.state !== 'draft' && s.proposed && !s.pull) actions.push(['pull', 'upload', 'pull request']);
-    for (const [action, icon, label] of actions) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = label || action;
-      button.dataset.action = action;
-      button.dataset.icon = icon;
-      button.dataset.name = s.name;
-      cell.appendChild(button);
-    }
+    tr.cells[4].title = 'double click: the whole description';
+    tr.insertCell().append(...mcpButtons(s, true));
   }
   $('mcp-strategies').hidden = !state.strategies.length;
   const asked = $('mcp-request-rows');
@@ -357,8 +364,17 @@ $('mcp-request-rows').addEventListener('click', async (event) => {
   }
 });
 
-$('mcp-rows').addEventListener('click', async (event) => {
-  const button = event.target.closest('button');
+// a row is one line; a double click opens it on the whole description
+$('mcp-rows').addEventListener('dblclick', (event) => {
+  if (event.target.closest('button, a')) return;
+  event.target.closest('tr').classList.toggle('open');
+  getSelection().removeAllRanges();
+});
+
+// the buttons on a row, and the same ones in the code's dialog, which closes
+// once what they do is done
+async function mcpAct(event) {
+  const button = event.target.closest('button[data-action]');
   if (!button) return;
   const { name, action } = button.dataset;
   try {
@@ -366,6 +382,7 @@ $('mcp-rows').addEventListener('click', async (event) => {
       const found = await ask('api/mcp/source?name=' + encodeURIComponent(name));
       const s = mcpStrategies[name] || {};
       $('source-title').textContent = name;
+      $('source-actions').replaceChildren(...mcpButtons(s, false));
       $('source-sub').textContent = [s.state, `by ${s.client || 'unknown'}`,
         s.submitted ? day(s.submitted) : '',
         found.problems.length ? `${found.problems.length} problems` : 'no problems found']
@@ -389,25 +406,36 @@ $('mcp-rows').addEventListener('click', async (event) => {
         + `description go out, public. The assistant's note:\n\n${(s.proposed || {}).note || ''}`)) return;
       mcpSay(`${name}: opening the pull request\u2026`);
       const state = await post('api/mcp/pull', JSON.stringify({ name }));
+      $('source-dialog').close();
       await showMcp(state);
       const made = state.strategies.find((x) => x.name === name);
       mcpSay(made && made.pull ? `${name}: pull request ${made.pull.url}` : `${name}: done`);
       return;
     }
-    const asked = {
+    const enabled = (mcpStrategies[name] || {}).state === 'enabled';
+    let asked = {
       enable: `Enable ${name}? It will run inside the service: in the simulations, the sets and `
         + 'the live sessions. Read its code first.',
-      disable: `Disable ${name}? It goes back to being a draft; a live session already running it `
-        + 'keeps it until stopped.',
-      delete: `Delete the draft ${name}? Its saved backtests stay.`,
+      disable: `Disable ${name}? It goes back to being a draft.`,
+      delete: enabled ? `Delete ${name}? It is enabled: it is disabled first, then deleted. `
+        + 'Its saved backtests stay.' : `Delete the draft ${name}? Its saved backtests stay.`,
     }[action];
+    // turning off an enabled one: what trades it or simulates it now, said
+    // first - nothing of it is stopped here (web/mcp.py uses)
+    if (action === 'disable' || (action === 'delete' && enabled)) {
+      const { uses } = await ask('api/mcp/uses?name=' + encodeURIComponent(name));
+      if (uses.length) asked += `\n\nIn use now:\n- ${uses.join('\n- ')}\n\nTurn it off all the same?`;
+    }
     if (!confirm(asked)) return;
     await showMcp(await post('api/mcp/strategy', JSON.stringify({ name, action })));
+    $('source-dialog').close();
     mcpSay(`${name}: ${action}d`);
   } catch (error) {
     mcpSay(String(error.message || error));
   }
-});
+}
+$('mcp-rows').addEventListener('click', mcpAct);
+$('source-actions').addEventListener('click', mcpAct);
 
 // each file named as download named it, NAME@N.py: back as NAME, whose next
 // version it becomes (a browser's " (1)" for a second copy goes too)

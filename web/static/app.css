@@ -375,15 +375,27 @@ section {
 #mcp-actions, #mcp-files, #mcp-token { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }
 #mcp-token[hidden], #mcp-strategies[hidden], #mcp-requests[hidden] { display: none; }
 #mcp-strategies td:last-child { white-space: nowrap; }
-#mcp-strategies td:nth-child(3), #mcp-strategies td:nth-child(5) { white-space: normal; }
+/* a strategy is one line, its description cut to the room left; a double
+   click opens the row on all of it */
+#mcp-strategies td:nth-child(5) { max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; }
+#mcp-strategies tr.open td:nth-child(5) { white-space: normal; }
+#mcp-rows td { cursor: default; }
+#source-actions { display: contents; }
 #mcp-strategies td:last-child button + button { margin-left: 6px; }
 /* a phone: the name, the state and the actions, the buttons one under another */
+/* a phone: each strategy a block - name and state, its description's line
+   under them, then the buttons - and the code's dialog puts its buttons
+   under the title */
 @media (max-width: 600px) {
-  #mcp-strategies th:nth-child(4), #mcp-strategies td:nth-child(4),
-  #mcp-strategies th:nth-child(5), #mcp-strategies td:nth-child(5) { display: none; }
-  #mcp-strategies td:last-child { white-space: normal; }
-  #mcp-strategies td:last-child button { display: block; margin: 2px 0; }
-  #mcp-strategies td:last-child button + button { margin-left: 0; }
+  #mcp-strategies thead { display: none; }
+  #mcp-rows tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; border-bottom: 1px solid var(--line); padding: 4px 0; }
+  #mcp-rows td { border: 0; }
+  #mcp-rows td:nth-child(3), #mcp-rows td:nth-child(4) { display: none; }
+  #mcp-rows td:nth-child(5), #mcp-rows td:last-child { grid-column: 1 / -1; }
+  #mcp-rows td:nth-child(5) { max-width: none; width: auto; }
+  #mcp-rows td:last-child { white-space: normal; }
+  #mcp-rows td:last-child button { white-space: nowrap; margin: 2px 6px 2px 0; }
+  #source-dialog .dialog-head { flex-wrap: wrap; row-gap: 8px; }
 }
 #source-dialog { width: min(980px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
 #mcp-source { margin: 0; overflow: auto; font-family: var(--font-mono); font-size: var(--fs-small); background: var(--raised); padding: 8px; border-radius: var(--radius-s); }
@@ -615,6 +627,11 @@ dialog.sheet::backdrop { background: var(--backdrop); } /* token in tokens.css: 
 #data-progress { flex: 1; height: 10px; accent-color: var(--entry); }
 #data-progress-text { color: var(--text-3); white-space: nowrap; }
 #data-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+/* the export's format, folded away under the upload */
+#data-format { margin: 10px 0 0; color: var(--text-2); }
+#data-format > summary { cursor: pointer; width: max-content; color: var(--text-3); }
+#data-format p { margin: 8px 0 4px; max-width: 110ch; line-height: 1.5; }
+#data-format pre { margin: 0; padding: 8px; overflow-x: auto; background: var(--raised); border-radius: var(--radius-s); font-size: var(--fs-small); }
 #data-log {
   margin: 10px 0 0;
   padding: 8px;

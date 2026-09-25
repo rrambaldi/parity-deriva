@@ -291,6 +291,28 @@ class MCPTest(StoreCase):
 		self.assertTrue(opened['head'].startswith('me:strategy/EVERY-THIRD-v1-'), opened)
 		self.assertEqual(pull('EVERY-THIRD 1')[0], 400)  # one pull request a version
 
+		# what runs it, said on the page before it is turned off: a sweep here
+		uses = lambda: json.loads(self.http('/api/mcp/uses?name=EVERY-THIRD%201')[1])['uses']
+		self.assertEqual(uses(), [])
+		self.service._sweep = {'running': True, 'fields': {'strategy': 'EVERY-THIRD 1'}, 'grid': {},
+							   'total': 3, 'done': [{}]}
+		self.assertEqual(uses(), ["a sweep with it, 1 of 3 runs done: the runs left will fail"])
+		self.service._sweep = None
+		live = self.service.live
+		with unittest.mock.patch.multiple(
+				live, ids=lambda: ['S1'], alive=lambda meta: True,
+				meta=lambda s: {'fields': {'strategy': 'EVERY-THIRD 1'}, 'provider': 'oanda',
+								'accountName': 'Demo'},
+				summary=lambda s: {'open': [{}, {}]}):
+			self.assertEqual(uses(), ["live session S1 on oanda Demo: 2 open trades - it keeps "
+									  "trading it until stopped on the live page"])
+		# deleted while enabled: disabled first, then gone
+		status, raw, _ = self.http('/api/mcp/strategy', {'name': 'EVERY-THIRD 1', 'action': 'delete'},
+								   {'X-Parity-Deriva': '1'})
+		self.assertEqual(status, 200, raw)
+		self.assertNotIn('EVERY-THIRD 1', ledger.STRATEGIES)
+		self.assertNotIn('EVERY-THIRD 1', [s['name'] for s in json.loads(raw)['strategies']])
+
 		# a new secret throws every token away
 		self.service.oauth.newSecret()
 		self.assertEqual(self.http('/mcp', {'jsonrpc': '2.0', 'id': 1, 'method': 'ping'},

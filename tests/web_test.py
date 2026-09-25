@@ -2259,6 +2259,20 @@ class ImportTest(HTTPCase):
             self.assertEqual(status, 400, name)
         self.assertEqual(os.listdir(os.path.join(self.tmpdir, 'import')), [])
 
+    def test_a_json_side_is_taken_as_dukascopy_node_writes_it(self):
+        rows = [dict(zip(['timestamp', 'open', 'high', 'low', 'close', 'volume'],
+                         [float(v) for v in line.split(',')]))
+                for line in self.body('ASK').decode().split()[1:]]
+        name = (self.NAME % 'ASK')[:-4] + '.json'
+        status, payload = self.upload(name, json.dumps(rows, indent=2).encode())
+        self.assertEqual(status, 200, payload)
+        status, listing = self.json('/api/imports')
+        self.assertEqual([(s['set'], sorted(s['sides'])) for s in listing['sets']],
+                         [('eurusd_m5_20180301_20180302', ['ASK'])])
+        status, payload = self.upload(name, b'{"candles": []}')
+        self.assertEqual(status, 400)
+        self.assertIn('JSON array', payload['error'])
+
     def test_a_file_that_is_not_a_candle_export_is_refused(self):
         status, payload = self.upload(self.NAME % 'ASK', b'hello\n')
         self.assertEqual(status, 400)

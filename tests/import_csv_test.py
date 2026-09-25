@@ -6,6 +6,7 @@ checkable in the head, which is what the import has to get right: the pairing
 of the two sides, and that a second run changes nothing.
 """
 
+import json
 import os
 import sys
 import unittest
@@ -43,6 +44,16 @@ class ImportCase(TempDirCase):
                                 base + 0.002, 100.4 + i))
         return path
 
+    def json_side(self, side, rows, rows_not_objects=False):
+        """The csv() side written as dukascopy-node's -f json, or -f array."""
+        path = self.csv(side, rows)
+        frame = pd.read_csv(path)
+        os.remove(path)
+        with open(path[:-4] + '.json', 'w') as handle:
+            json.dump(frame.values.tolist() if rows_not_objects
+                      else frame.to_dict('records'), handle, indent=2)
+        return path[:-4] + '.json'
+
     def store_key(self, path, key='/D'):
         store = pd.HDFStore(path, mode='r')
         try:
@@ -70,6 +81,13 @@ class TestNames(unittest.TestCase):
             import_csv.parse_name("/tmp/eurusd_d1_20160121_20260920-ASK.csv"),
             ('EUR_USD', 'D', 'ASK'))
 
+    def test_a_json_name_is_parsed_the_same(self):
+        self.assertEqual(
+            import_csv.parse_name("eurusd_d1_20160121_20260920-BID.json"),
+            ('EUR_USD', 'D', 'BID'))
+        self.assertEqual(import_csv.set_name("eurusd_d1_20160121_20260920-BID.json"),
+                         "eurusd_d1_20160121_20260920")
+
     def test_unrecognised_name_is_not_parsed(self):
         self.assertIsNone(import_csv.parse_name("prices.csv"))
 
@@ -94,6 +112,32 @@ class TestImport(ImportCase):
         self.assertAlmostEqual(frame['mid_o'].iloc[1], 1.1015)
         self.assertEqual(frame['volume'].iloc[1], 101)
         self.assertEqual(frame.index[0], pd.Timestamp('1970-01-01'))
+
+    def test_a_json_pair_is_stored_as_its_csv_would_be(self):
+        self.csv('ASK', range(3))
+        self.csv('BID', range(3))
+        self.run_import()
+        from_csv = self.store_key(self.path("EUR_USD.hd5"))
+        for name in os.listdir(self.tmpdir):
+            os.remove(self.path(name))
+        # one side objects, the other rows: dukascopy-node's json and array
+        self.json_side('ASK', range(3))
+        self.json_side('BID', range(3), rows_not_objects=True)
+        self.assertEqual(self.run_import(), 0)
+        pd.testing.assert_frame_equal(from_csv, self.store_key(self.path("EUR_USD.hd5")))
+
+    def test_a_side_without_its_volume_is_refused(self):
+        self.csv('BID', range(3))
+        path = self.json_side('ASK', range(3))
+        with open(path) as handle:
+            rows = [dict((k, v) for k, v in r.items() if k != 'volume') for r in json.load(handle)]
+        with open(path, 'w') as handle:
+            json.dump(rows, handle)
+        lines = []
+        self.assertEqual(import_csv.main([self.tmpdir, '--data-dir', self.tmpdir],
+                                         report=lines.append), 1)
+        self.assertIn('no volume', ' '.join(lines))
+        self.assertFalse(os.path.exists(self.path("EUR_USD.hd5")))
 
     def test_running_twice_changes_nothing(self):
         self.csv('ASK', range(3))

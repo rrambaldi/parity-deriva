@@ -749,14 +749,54 @@ def act(service, name, action):
 			if os.path.exists(a):
 				os.replace(a, os.path.join(where, os.path.basename(a)))
 	elif action == 'delete':
+		# an enabled one is disabled first: what the page asked about (uses)
+		if live and not draft:
+			act(service, name, 'disable')
+			draft = uploaded.drafts(dataDir(service)).get(name)
 		if not draft:
-			raise ToolError("only a draft is deleted; disable %s first" % name)
+			raise ToolError("no uploaded strategy %r" % name)
 		for a in (draft, draft[:-3] + '.json'):
 			if os.path.exists(a):
 				os.remove(a)
 	else:
 		raise ToolError("the action is enable, disable or delete")
 	return status(service)
+
+
+def uses(service, name):
+	"""
+	What runs `name` now, a line each, for the page to say before it is
+	disabled or deleted: the live sessions trading it, with their open trades,
+	and the simulations. Nothing here is stopped - that stays the user's.
+	"""
+	out = []
+	live = service.live
+	for session in live.ids():
+		try:
+			meta = live.meta(session)
+			if (meta.get('fields') or {}).get('strategy') != name or not live.alive(meta):
+				continue
+			held = len(live.summary(session)['open'])
+		except (web().livesessions.LiveError, OSError, ValueError):
+			continue
+		out.append("live session %s on %s %s: %s - it keeps trading it until stopped on the "
+				   "live page" % (session, meta.get('provider'), meta.get('accountName') or meta.get('account'),
+								  "%d open trade%s" % (held, '' if held == 1 else 's') if held else "no open trade"))
+	sweep = getattr(service, '_sweep', None) or {}
+	grid = sweep.get('grid') or {}
+	swept = sweep.get('running') and name in (
+		web().gridValues('strategy', grid['strategy']) if 'strategy' in grid
+		else [(sweep.get('fields') or {}).get('strategy')])
+	if swept:
+		out.append("a sweep with it, %d of %d runs done: the runs left will fail"
+				   % (len(sweep.get('done') or ()), sweep.get('total') or 0))
+	# the backtest running now, when it is not that sweep's: a single run, or
+	# the mix simulated together. ponytail: a mix's queued runs are not seen,
+	# that would take reading each run's fields
+	progress = service._progress
+	if not swept and progress.get('running') and progress.get('strategy') == name:
+		out.append("a backtest of it is running now: it goes on to its end")
+	return out
 
 
 # --------------------------------------------------------------- the routes
@@ -859,6 +899,8 @@ def route(handler, method, path, query):
 	try:
 		if method == 'GET' and path == '/api/mcp':
 			return reply(handler, 200, status(handler.service))
+		if method == 'GET' and path == '/api/mcp/uses':
+			return reply(handler, 200, {'uses': uses(handler.service, handler.one(query, 'name') or '')})
 		if method == 'GET' and path == '/api/mcp/source':
 			return reply(handler, 200, source(handler.service, handler.one(query, 'name') or ''))
 		if method != 'POST' or handler.headers.get('X-Parity-Deriva') != '1':
