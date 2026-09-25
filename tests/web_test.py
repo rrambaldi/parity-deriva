@@ -2011,7 +2011,12 @@ class HTTPTest(HTTPCase):
         # what the menu lights up: nothing, in a service that runs nothing
         status, payload = self.json('/api/busy')
         self.assertEqual(status, 200)
+        server = payload.pop('server')
         self.assertEqual(payload, {'simulate': False, 'live': 0})
+        # and how loaded the machine is, for the meters in the header
+        self.assertTrue(0 <= server['cpu'] <= 100)
+        self.assertTrue(0 < server['memUsed'] <= server['memTotal'])
+        self.assertTrue(server['disks'])
 
     def test_the_stores_route(self):
         status, payload = self.json('/api/stores')

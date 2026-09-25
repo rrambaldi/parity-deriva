@@ -175,6 +175,39 @@ function marginText(m) {
   // Mono is in they measure the fallback, so they are drawn again once it is
   document.fonts.load('11px "IBM Plex Mono"').then(redraw, () => {});
 
+  /*
+   * How loaded the server is, before the pages: CPU, memory and every disk,
+   * from the same api/busy. A bar each with its value written after it: the
+   * bar is green, and red from HIGH up - the value says it too, so the
+   * colour is never the only sign (web/DESIGN.md § 1).
+   */
+  const HIGH = 85;
+  const server = document.createElement('span');
+  server.id = 'server';
+  server.hidden = true;
+  brand.insertBefore(server, nav);
+  const gb = (bytes) => (bytes / 2 ** 30).toFixed(1);
+  const pct = (used, of) => Math.round(100 * used / of) + '%';
+  const meter = (name, share, value) => {
+    const p = Math.max(0, Math.min(100, share));
+    return `<span class="load${p >= HIGH ? ' high' : ''}"><span class="load-name">${name}</span>`
+      + `<span class="load-bar" aria-hidden="true"><span style="width:${p.toFixed(0)}%"></span></span>`
+      + `<span class="load-value">${value}</span></span>`;
+  };
+  const showServer = (m) => {
+    // df's use%: the space kept for root is neither used nor free for us
+    const disks = m.disks.map((d) => ({ ...d, name: '/' + d.path.split('/')[1],
+      pct: pct(d.used, d.used + d.free) }));
+    server.innerHTML = meter('cpu', m.cpu, Math.round(m.cpu) + '%')
+      + meter('ram', 100 * m.memUsed / m.memTotal, `${gb(m.memUsed)}/${gb(m.memTotal)}G`)
+      + disks.map((d) => meter(d.name, 100 * d.used / (d.used + d.free), d.pct)).join('');
+    server.title = `the server, red from ${HIGH}%: cpu ${m.cpu.toFixed(1)}% of ${m.cpus} cores\n`
+      + `ram ${gb(m.memUsed)} of ${gb(m.memTotal)} GB in use (${pct(m.memUsed, m.memTotal)})`
+      + (m.swapTotal ? `, swap ${gb(m.swapUsed)} of ${gb(m.swapTotal)} GB` : '')
+      + disks.map((d) => `\ndisk ${d.path}: ${gb(d.used)} GB used, ${gb(d.free)} GB free (${d.pct})`).join('');
+    server.hidden = false;
+  };
+
   const titles = Object.fromEntries([...nav.children].map((el) => [el.dataset.page, el.title]));
   const light = async () => {
     // a tab in the background asks nothing; it asks again once shown
@@ -187,6 +220,7 @@ function marginText(m) {
           el.classList.toggle('busy', !!on);
           el.title = titles[name] + (on ? ' - ' + what : '');
         }
+        if (busy.server) showServer(busy.server);
       } catch (error) { /* no answer, no light: the page itself is unaffected */ }
     }
     setTimeout(light, 5000);

@@ -1548,7 +1548,42 @@ class Service(object):
 		together = getattr(self, '_together', None) or {}
 		return {'simulate': bool(sweep.get('running') or together.get('running')
 								 or self._progress.get('running')),
-				'live': self.live.running()}
+				'live': self.live.running(),
+				'server': self.machine()}
+
+	def machine(self):
+		"""
+		How loaded the server is, for the header of every page: the CPU since
+		the last ask (since boot on the first), the memory in use and every
+		disk. Straight from /proc - Linux only, the one place this runs.
+		"""
+		with open('/proc/stat') as f:
+			ticks = [int(n) for n in f.readline().split()[1:]]
+		idle, total = ticks[3] + ticks[4], sum(ticks)
+		last = getattr(self, '_ticks', None) or (0, 0)
+		self._ticks = (idle, total)
+		if total <= last[1]:
+			last = (0, 0)
+		cpu = 100 * (1 - (idle - last[0]) / (total - last[1]))
+		mem = {}
+		with open('/proc/meminfo') as f:
+			for line in f:
+				key, value = line.split(':')
+				mem[key] = int(value.split()[0]) * 1024
+		disks, seen = [], set()
+		with open('/proc/mounts') as f:
+			for line in f:
+				device, path = line.split()[:2]
+				# one entry per disk: /home is the same disk as /mnt/..., bound
+				if device.startswith('/dev/') and not device.startswith('/dev/loop') and device not in seen:
+					seen.add(device)
+					usage = shutil.disk_usage(path)
+					disks.append({'path': path, 'used': usage.used, 'free': usage.free,
+								  'total': usage.total})
+		return {'cpu': round(cpu, 1), 'cpus': os.cpu_count(),
+				'memTotal': mem['MemTotal'], 'memUsed': mem['MemTotal'] - mem['MemAvailable'],
+				'swapTotal': mem['SwapTotal'], 'swapUsed': mem['SwapTotal'] - mem['SwapFree'],
+				'disks': disks}
 
 	def progress(self):
 		"""
