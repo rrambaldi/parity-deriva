@@ -1232,11 +1232,21 @@ class EstimateTest(StoreCase):
 
     def test_the_rate_is_the_last_run_s(self):
         """Seeded with a measured figure and replaced by this machine's."""
-        self.assertEqual(self.service.estimate('EUR_USD', 'H1')['rate'],
-                         service_module.TICKS_A_SECOND)
+        ahead = self.service.estimate('EUR_USD', 'H1')
+        self.assertEqual(ahead['rate'], service_module.TICKS_A_SECOND)
+        self.assertFalse(ahead['measured'])
         self.service.backtest('EUR_USD', 'H1')
-        self.assertNotEqual(self.service.estimate('EUR_USD', 'H1')['rate'],
-                            service_module.TICKS_A_SECOND)
+        ahead = self.service.estimate('EUR_USD', 'H1')
+        self.assertNotEqual(ahead['rate'], service_module.TICKS_A_SECOND)
+        self.assertTrue(ahead['measured'])
+
+    def test_the_rate_outlives_a_restart(self):
+        """A restart that went back to the seed warned of hours that were not
+        there: the last run's rate is kept on disk and read back."""
+        self.service.backtest('EUR_USD', 'H1')
+        rate = self.service.estimate('EUR_USD', 'H1')['rate']
+        again = service_module.Service(setup=self.settings).estimate('EUR_USD', 'H1')
+        self.assertEqual((again['rate'], again['measured']), (rate, True))
 
     def test_the_seconds_follow_the_bars(self):
         ahead = self.service.estimate('EUR_USD', 'H1')

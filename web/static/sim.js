@@ -354,7 +354,8 @@ async function simulate(event) {
         const question = `${combos} runs, each walking ${ahead.ticks.toLocaleString()} bars`
           + ` from ${fields.from || 'the start'} to ${fields.to || 'the end'}`
           + (ahead.fine ? ` (${ahead.granularity} candles and the ${ahead.fine} bars under them)` : '')
-          + `.\n\nAt the ${ahead.rate.toLocaleString()} bars a second the last run managed,`
+          + (ahead.measured ? `.\n\nAt the ${ahead.rate.toLocaleString()} bars a second the last run managed,`
+            : `.\n\nAt ${ahead.rate.toLocaleString()} bars a second, a guess until a run has been timed here,`)
           + ` that is about ${howLong(ahead.seconds * combos)} in all.\n\nRun it anyway?`;
         if (!await askUser(question)) return;
       }

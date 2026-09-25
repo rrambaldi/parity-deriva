@@ -311,9 +311,16 @@ class Service(object):
 		self._sweepGoing.set()
 		# one excursion analysis at a time: each reads the M5 under its run
 		self._excursionLock = threading.Lock()
-		# what the last run managed, bars a second. Seeded with a measured
-		# figure and replaced by this machine's own as soon as it has one
-		self._rate = float(TICKS_A_SECOND)
+		# what the last run managed, bars a second. Kept on disk, or every
+		# restart would go back to the seed and the page would warn of hours
+		# that are not there; the seed is only for a service that never ran
+		self._rate, self._measured = float(TICKS_A_SECOND), False
+		try:
+			with open(self.ratePath()) as handle:
+				self._rate, self._measured = float(json.load(handle)['rate']), True
+		except (OSError, ValueError, KeyError, TypeError, AttributeError):
+			# AttributeError: a setup with no DATA_DIR, which keeps nothing
+			pass
 		# the live sessions: a backtest's form trading on an account
 		self.live = livesessions.LiveSessions(
 			os.path.join(getattr(self.setup, 'DATA_DIR', '') or '.', 'live'))
@@ -600,6 +607,10 @@ class Service(object):
 	def runsDir(self):
 		return getattr(self.setup, 'RUNS_DIR', None) \
 			or os.path.join(self.setup.DATA_DIR, 'runs')
+
+	def ratePath(self):
+		"""Where the last run's bars a second are kept, for the next estimate."""
+		return os.path.join(self.runsDir(), 'rate.json')
 
 	@staticmethod
 	def runId(fields):
@@ -1253,7 +1264,12 @@ class Service(object):
 				# The last run and not an average over every run: a machine
 				# that has just been given more cores should not be talked
 				# out of it by a week of slower ones
-				self._rate = ahead['ticks'] / spent
+				self._rate, self._measured = ahead['ticks'] / spent, True
+				try:
+					os.makedirs(self.runsDir(), exist_ok=True)
+					self._write(self.ratePath(), json.dumps({'rate': self._rate}).encode())
+				except (OSError, AttributeError):
+					self.logger.exception("cannot keep the rate")
 			payload = self.payload(result, time.time() - started,
 								   self.indicatorSpecs(strategy, params),
 								   self.setupBars(strategy))
@@ -1515,6 +1531,8 @@ class Service(object):
 				'fine': fine, 'bars': bars, 'ticks': total,
 				'seconds': round(total / self._rate, 1),
 				'rate': round(self._rate),
+				# False while the rate is the seed and no run has been timed
+				'measured': self._measured,
 				# the chart's side of the size: over the limit the page asks
 				# before running, and sends confirmed when told yes
 				'limit': self.max_candles}
