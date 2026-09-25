@@ -114,12 +114,13 @@
     <table id="sets-table">
       <thead><tr><th>id</th><th>saved (UTC)</th><th>name</th><th>strategy</th><th>instrument</th><th>tf</th>
         <th>from</th><th>to</th><th>varied</th><th class="num">runs</th>
-        <th class="num">best capital</th><th></th></tr></thead>
+        <th class="num">best capital</th><th class="num" title="the highest score of its runs, 0-100: the rank the KPI table orders them by">best score</th><th></th></tr></thead>
       <tbody id="sets-rows"></tbody>
     </table>
   </div>
   <form method="dialog" class="dialog-foot">
     <span>esc to close</span>
+    <button type="button" id="sets-drop-stopped" hidden data-icon="delete" title="delete every set that was stopped before its last run">delete stopped</button>
     <button type="submit" data-icon="close">close</button>
   </form>
 </dialog>

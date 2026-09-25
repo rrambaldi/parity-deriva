@@ -6,6 +6,7 @@ expandGrid), the strategy arguments read off a handler's own source
 """
 
 import datetime
+import json
 import unittest
 
 from parity_deriva.event.event import CandleEvent, TransactionEvent
@@ -250,6 +251,23 @@ class TestSavedSweeps(TempDirCase):
         self.service.saveSweep(job)
         opened = self.service.savedSweep('20260923-120000-abcdef')
         self.assertAlmostEqual(opened['done'][0]['kpi']['score'], 50.0)
+
+    def test_the_list_says_the_best_score_even_of_a_set_saved_without_it(self):
+        job = self.job()
+        job['done'][0]['kpi'] = {'score': 40.0}
+        job['done'][1]['kpi'] = {'score': 62.5}
+        self.service.saveSweep(job)
+        self.assertEqual(self.service.sweeps()[0]['bestScore'], 62.5)
+        # a summary from before the score: read off the set, then kept
+        meta = self.service.sweepPath(job['id'], '.meta.json')
+        with open(meta) as handle:
+            old = json.load(handle)
+        del old['bestScore']
+        with open(meta, 'w') as handle:
+            json.dump(old, handle)
+        self.assertEqual(self.service.sweeps()[0]['bestScore'], 62.5)
+        with open(meta) as handle:
+            self.assertEqual(json.load(handle)['bestScore'], 62.5)
 
     def test_renamed_and_deleted(self):
         self.service.saveSweep(self.job())

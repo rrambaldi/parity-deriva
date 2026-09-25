@@ -1291,9 +1291,12 @@ async function openSets() {
   body.textContent = '';
   if (!$('sets-dialog').open) $('sets-dialog').showModal();
   const { sweeps } = await ask('api/sweeps');
+  const stopped = sweeps.filter((set) => set.stopped).length;
+  $('sets-drop-stopped').hidden = !stopped;
+  $('sets-drop-stopped').textContent = `delete stopped (${stopped})`;
   if (!sweeps.length) {
     const cell = body.insertRow().insertCell();
-    cell.colSpan = 12;
+    cell.colSpan = 13;
     cell.textContent = 'no set saved yet: one is kept every time a simulation ends';
     return;
   }
@@ -1303,7 +1306,8 @@ async function openSets() {
     const cells = [set.id, fullStamp(set.saved), null, set.strategy, set.instrument,
       set.granularity, set.from, set.to, (set.varied || []).join(', '),
       `${set.runs}${set.runs < set.total ? ' of ' + set.total : ''}${set.stopped ? ' (stopped)' : ''}`,
-      set.best === null || set.best === undefined ? '' : amount(set.best)];
+      set.best === null || set.best === undefined ? '' : amount(set.best),
+      set.bestScore === null || set.bestScore === undefined ? '' : set.bestScore.toFixed(1)];
     cells.forEach((text, i) => {
       const cell = row.insertCell();
       if (i === 2) {
@@ -1368,6 +1372,17 @@ $('sets-rows').addEventListener('click', async (event) => {
     await loadSet(row.dataset.id);
   } catch (error) { setsError(error); }
 });
+// every set stopped before its last run, after one question
+$('sets-drop-stopped').addEventListener('click', async () => {
+  try {
+    const stopped = (await ask('api/sweeps')).sweeps.filter((set) => set.stopped);
+    if (!stopped.length) return;
+    if (!await askUser(`Delete the ${stopped.length} stopped set${stopped.length === 1 ? '' : 's'}? It cannot be undone.`, 'delete')) return;
+    for (const set of stopped) await post('api/sweeps/' + set.id, { delete: true });
+    await openSets();
+  } catch (error) { setsError(error); }
+});
+
 // a name is saved when the box is left, or on enter
 $('sets-rows').addEventListener('change', (event) => {
   const row = event.target.closest('tr[data-id]');

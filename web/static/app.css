@@ -498,6 +498,7 @@ dialog::backdrop { background: color-mix(in srgb, var(--brand-night) 55%, transp
   font-size: var(--fs-small); color: var(--text-3);
 }
 .dialog-foot button { height: 28px; font-size: var(--fs-small); }
+#sets-drop-stopped { margin-left: auto; }
 .dialog-head strong { font-size: var(--fs-stat); font-weight: 600; }
 /* the close: a round cross that turns solid under the pointer */
 .dialog-close {

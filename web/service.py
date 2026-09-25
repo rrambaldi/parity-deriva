@@ -1663,6 +1663,8 @@ class Service(object):
 		"""What the list shows, without opening the whole set."""
 		ok = [row for row in job['done'] if not row.get('error')]
 		top = max(ok, key=lambda row: row.get('final') or 0) if ok else None
+		scores = [row['kpi']['score'] for row in ok
+				  if (row.get('kpi') or {}).get('score') is not None]
 		fields = job.get('fields') or {}
 		return {'id': job['id'], 'name': job.get('name') or '',
 				'saved': int(job.get('finished', time.time()) * 1000),
@@ -1674,7 +1676,10 @@ class Service(object):
 				'leverage': fields.get('leverage'),
 				'stopped': bool(job.get('cancel')), 'varied': job.get('varied'),
 				'best': top and top.get('final'),
-				'bestParams': top and top.get('params')}
+				'bestParams': top and top.get('params'),
+				# the highest score of its runs (report.score): the rank the
+				# KPI table orders them by
+				'bestScore': max(scores) if scores else None}
 
 	def _write(self, path, body):
 		# aside and renamed, so the list never reads half a file
@@ -1701,9 +1706,19 @@ class Service(object):
 				continue
 			try:
 				with open(os.path.join(where, name)) as handle:
-					out.append(json.load(handle))
+					meta = json.load(handle)
 			except (OSError, ValueError):
 				continue
+			if 'bestScore' not in meta:
+				# a summary written before it had the score: the set is read
+				# once, and the summary kept with it
+				try:
+					meta = self.sweepSummary(self.savedSweep(meta['id']))
+					self._write(self.sweepPath(meta['id'], '.meta.json'),
+								json.dumps(meta).encode())
+				except (ServiceError, OSError, ValueError, KeyError):
+					self.logger.exception("cannot score the set %s" % name)
+			out.append(meta)
 		return sorted(out, key=lambda row: row.get('saved', 0), reverse=True)
 
 	def savedSweep(self, sweep):
