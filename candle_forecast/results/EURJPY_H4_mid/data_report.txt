@@ -1,0 +1,54 @@
+== validazione EURJPY (EURJPY_H4.tbz, sha256 beaeea66ade0) ==
+nessuna violazione
+candele tolte (H4-1): piatte su BID e ASK (mercato chiuso) 0, con ASK sotto BID 0
+
+== buchi EURJPY (2003-08-04 00:00:00+00:00 -> 2026-09-21 20:00:00+00:00, 37333 barre) ==
+barre dentro la chiusura del weekend: 1205
+buchi fuori dal weekend: 21, barre mancanti totali: 88
+distribuzione barre mancanti per buco: 1: 0, 2: 0, 3-6: 21, 7-12: 0, 13-48: 0, 49-288: 0, >288: 0
+i 30 più lunghi:
+  2015-12-31 20:00:00+00:00 -> 2016-01-03 20:00:00+00:00  mancanti 6  (delta 4320 min)
+  2020-12-31 20:00:00+00:00 -> 2021-01-03 20:00:00+00:00  mancanti 6  (delta 4320 min)
+  2019-12-31 20:00:00+00:00 -> 2020-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2014-12-31 20:00:00+00:00 -> 2015-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2013-12-31 20:00:00+00:00 -> 2014-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2024-12-31 20:00:00+00:00 -> 2025-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2025-12-31 20:00:00+00:00 -> 2026-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2023-12-29 20:00:00+00:00 -> 2024-01-01 20:00:00+00:00  mancanti 5  (delta 4320 min)
+  2017-12-29 20:00:00+00:00 -> 2018-01-01 20:00:00+00:00  mancanti 5  (delta 4320 min)
+  2018-12-31 20:00:00+00:00 -> 2019-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2020-12-25 04:00:00+00:00 -> 2020-12-27 20:00:00+00:00  mancanti 4  (delta 3840 min)
+  2013-01-01 00:00:00+00:00 -> 2013-01-01 20:00:00+00:00  mancanti 4  (delta 1200 min)
+  2015-12-25 04:00:00+00:00 -> 2015-12-27 20:00:00+00:00  mancanti 4  (delta 3840 min)
+  2014-12-25 04:00:00+00:00 -> 2014-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2013-12-25 04:00:00+00:00 -> 2013-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2017-12-25 04:00:00+00:00 -> 2017-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2018-12-25 04:00:00+00:00 -> 2018-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2019-12-25 04:00:00+00:00 -> 2019-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2023-12-25 04:00:00+00:00 -> 2023-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2024-12-25 04:00:00+00:00 -> 2024-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2025-12-25 04:00:00+00:00 -> 2025-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+
+== candele H4 ==
+candele: 37333, incomplete: 0 (0.00%)
+
+== indicatori ['sma100', 'atr14', 'ema21'] (APERTO-5) ==
+riscaldamento: scartate le prime 99 candele, primo input valido 2003-08-26 00:00:00+00:00
+finestre che attraversano un buco: tenute: la candela mancante non esiste (APERTO-3)
+
+== segmenti (candele [lo, hi)) ==
+  fit          0-25200    2003-08-04 00:00:00+00:00 -> 2019-03-13 00:00:00+00:00
+  es       25200-27999    2019-03-13 04:00:00+00:00 -> 2020-12-04 20:00:00+00:00
+  train        0-27999    2003-08-04 00:00:00+00:00 -> 2020-12-04 20:00:00+00:00
+  val      27999-32666    2020-12-06 20:00:00+00:00 -> 2023-10-27 04:00:00+00:00
+  test     32666-37333    2023-10-27 08:00:00+00:00 -> 2026-09-21 20:00:00+00:00
+
+== campioni per sistema ==
+  N=21  M=1  fit=25080  es=2778  train=27879  val=4646  test=4646  excluded_gaps=0
+  N=21  M=2  fit=25079  es=2777  train=27878  val=4645  test=4645  excluded_gaps=0
+  N=37  M=1  fit=25064  es=2762  train=27863  val=4630  test=4630  excluded_gaps=0
+  N=37  M=2  fit=25063  es=2761  train=27862  val=4629  test=4629  excluded_gaps=0
+  N=42  M=1  fit=25059  es=2757  train=27858  val=4625  test=4625  excluded_gaps=0
+  N=42  M=2  fit=25058  es=2756  train=27857  val=4624  test=4624  excluded_gaps=0
+  N=108 M=1  fit=24993  es=2691  train=27792  val=4559  test=4559  excluded_gaps=0
+  N=108 M=2  fit=24992  es=2690  train=27791  val=4558  test=4558  excluded_gaps=0

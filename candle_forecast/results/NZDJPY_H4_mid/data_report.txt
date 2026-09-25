@@ -1,0 +1,60 @@
+== validazione NZDJPY (NZDJPY_H4.tbz, sha256 f1438953a81f) ==
+nessuna violazione
+candele tolte (H4-1): piatte su BID e ASK (mercato chiuso) 12007, con ASK sotto BID 2
+
+== buchi NZDJPY (2006-01-03 00:00:00+00:00 -> 2026-09-21 20:00:00+00:00, 33393 barre) ==
+barre dentro la chiusura del weekend: 1072
+buchi fuori dal weekend: 27, barre mancanti totali: 109
+distribuzione barre mancanti per buco: 1: 3, 2: 1, 3-6: 21, 7-12: 2, 13-48: 0, 49-288: 0, >288: 0
+i 30 più lunghi:
+  2006-12-22 20:00:00+00:00 -> 2006-12-26 08:00:00+00:00  mancanti 8  (delta 5040 min)
+  2006-12-29 20:00:00+00:00 -> 2007-01-02 04:00:00+00:00  mancanti 7  (delta 4800 min)
+  2015-12-31 20:00:00+00:00 -> 2016-01-03 20:00:00+00:00  mancanti 6  (delta 4320 min)
+  2020-12-31 20:00:00+00:00 -> 2021-01-03 20:00:00+00:00  mancanti 6  (delta 4320 min)
+  2013-12-31 20:00:00+00:00 -> 2014-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2014-12-31 20:00:00+00:00 -> 2015-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2024-12-31 20:00:00+00:00 -> 2025-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2017-12-29 20:00:00+00:00 -> 2018-01-01 20:00:00+00:00  mancanti 5  (delta 4320 min)
+  2019-12-31 20:00:00+00:00 -> 2020-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2025-12-31 20:00:00+00:00 -> 2026-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2012-12-31 20:00:00+00:00 -> 2013-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2023-12-29 20:00:00+00:00 -> 2024-01-01 20:00:00+00:00  mancanti 5  (delta 4320 min)
+  2018-12-31 20:00:00+00:00 -> 2019-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2020-12-25 04:00:00+00:00 -> 2020-12-27 20:00:00+00:00  mancanti 4  (delta 3840 min)
+  2015-12-25 04:00:00+00:00 -> 2015-12-27 20:00:00+00:00  mancanti 4  (delta 3840 min)
+  2014-12-25 04:00:00+00:00 -> 2014-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2013-12-25 04:00:00+00:00 -> 2013-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2017-12-25 04:00:00+00:00 -> 2017-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2018-12-25 04:00:00+00:00 -> 2018-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2019-12-25 04:00:00+00:00 -> 2019-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2023-12-25 04:00:00+00:00 -> 2023-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2024-12-25 04:00:00+00:00 -> 2024-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2025-12-25 04:00:00+00:00 -> 2025-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2007-02-09 20:00:00+00:00 -> 2007-02-12 08:00:00+00:00  mancanti 2  (delta 3600 min)
+  2012-12-25 08:00:00+00:00 -> 2012-12-25 16:00:00+00:00  mancanti 1  (delta 480 min)
+  2006-01-20 20:00:00+00:00 -> 2006-01-23 04:00:00+00:00  mancanti 1  (delta 3360 min)
+  2006-06-01 16:00:00+00:00 -> 2006-06-02 00:00:00+00:00  mancanti 1  (delta 480 min)
+
+== candele H4 ==
+candele: 33393, incomplete: 0 (0.00%)
+
+== indicatori ['sma100', 'atr14', 'ema21'] (APERTO-5) ==
+riscaldamento: scartate le prime 99 candele, primo input valido 2006-01-25 08:00:00+00:00
+finestre che attraversano un buco: tenute: la candela mancante non esiste (APERTO-3)
+
+== segmenti (candele [lo, hi)) ==
+  fit          0-22540    2006-01-03 00:00:00+00:00 -> 2019-12-26 16:00:00+00:00
+  es       22540-25044    2019-12-26 20:00:00+00:00 -> 2021-07-18 20:00:00+00:00
+  train        0-25044    2006-01-03 00:00:00+00:00 -> 2021-07-18 20:00:00+00:00
+  val      25044-29218    2021-07-19 00:00:00+00:00 -> 2024-02-18 20:00:00+00:00
+  test     29218-33393    2024-02-19 00:00:00+00:00 -> 2026-09-21 20:00:00+00:00
+
+== campioni per sistema ==
+  N=21  M=1  fit=22420  es=2483  train=24924  val=4153  test=4154  excluded_gaps=0
+  N=21  M=2  fit=22419  es=2482  train=24923  val=4152  test=4153  excluded_gaps=0
+  N=37  M=1  fit=22404  es=2467  train=24908  val=4137  test=4138  excluded_gaps=0
+  N=37  M=2  fit=22403  es=2466  train=24907  val=4136  test=4137  excluded_gaps=0
+  N=42  M=1  fit=22399  es=2462  train=24903  val=4132  test=4133  excluded_gaps=0
+  N=42  M=2  fit=22398  es=2461  train=24902  val=4131  test=4132  excluded_gaps=0
+  N=108 M=1  fit=22333  es=2396  train=24837  val=4066  test=4067  excluded_gaps=0
+  N=108 M=2  fit=22332  es=2395  train=24836  val=4065  test=4066  excluded_gaps=0

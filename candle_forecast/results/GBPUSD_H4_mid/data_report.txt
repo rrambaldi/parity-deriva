@@ -1,0 +1,55 @@
+== validazione GBPUSD (GBPUSD_H4.tbz, sha256 1c97b8f567be) ==
+nessuna violazione
+candele tolte (H4-1): piatte su BID e ASK (mercato chiuso) 0, con ASK sotto BID 4
+
+== buchi GBPUSD (2003-05-04 20:00:00+00:00 -> 2026-09-21 20:00:00+00:00, 37729 barre) ==
+barre dentro la chiusura del weekend: 1213
+buchi fuori dal weekend: 22, barre mancanti totali: 90
+distribuzione barre mancanti per buco: 1: 1, 2: 0, 3-6: 21, 7-12: 0, 13-48: 0, 49-288: 0, >288: 0
+i 30 più lunghi:
+  2020-12-31 20:00:00+00:00 -> 2021-01-03 20:00:00+00:00  mancanti 6  (delta 4320 min)
+  2015-12-31 20:00:00+00:00 -> 2016-01-03 20:00:00+00:00  mancanti 6  (delta 4320 min)
+  2014-12-31 20:00:00+00:00 -> 2015-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2019-12-31 20:00:00+00:00 -> 2020-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2012-12-31 20:00:00+00:00 -> 2013-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2013-12-31 20:00:00+00:00 -> 2014-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2024-12-31 20:00:00+00:00 -> 2025-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2025-12-31 20:00:00+00:00 -> 2026-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2023-12-29 20:00:00+00:00 -> 2024-01-01 20:00:00+00:00  mancanti 5  (delta 4320 min)
+  2017-12-29 20:00:00+00:00 -> 2018-01-01 20:00:00+00:00  mancanti 5  (delta 4320 min)
+  2018-12-31 20:00:00+00:00 -> 2019-01-01 20:00:00+00:00  mancanti 5  (delta 1440 min)
+  2020-12-25 04:00:00+00:00 -> 2020-12-27 20:00:00+00:00  mancanti 4  (delta 3840 min)
+  2015-12-25 04:00:00+00:00 -> 2015-12-27 20:00:00+00:00  mancanti 4  (delta 3840 min)
+  2013-12-25 04:00:00+00:00 -> 2013-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2019-12-25 04:00:00+00:00 -> 2019-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2014-12-25 04:00:00+00:00 -> 2014-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2017-12-25 04:00:00+00:00 -> 2017-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2018-12-25 04:00:00+00:00 -> 2018-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2024-12-25 04:00:00+00:00 -> 2024-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2023-12-25 04:00:00+00:00 -> 2023-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2025-12-25 04:00:00+00:00 -> 2025-12-25 20:00:00+00:00  mancanti 3  (delta 960 min)
+  2003-08-01 16:00:00+00:00 -> 2003-08-03 20:00:00+00:00  mancanti 1  (delta 3120 min)
+
+== candele H4 ==
+candele: 37729, incomplete: 0 (0.00%)
+
+== indicatori ['sma100', 'atr14', 'ema21'] (APERTO-5) ==
+riscaldamento: scartate le prime 99 candele, primo input valido 2003-05-26 20:00:00+00:00
+finestre che attraversano un buco: tenute: la candela mancante non esiste (APERTO-3)
+
+== segmenti (candele [lo, hi)) ==
+  fit          0-25467    2003-05-04 20:00:00+00:00 -> 2019-02-12 00:00:00+00:00
+  es       25467-28296    2019-02-12 04:00:00+00:00 -> 2020-11-12 16:00:00+00:00
+  train        0-28296    2003-05-04 20:00:00+00:00 -> 2020-11-12 16:00:00+00:00
+  val      28296-33012    2020-11-12 20:00:00+00:00 -> 2023-10-16 20:00:00+00:00
+  test     33012-37729    2023-10-17 00:00:00+00:00 -> 2026-09-21 20:00:00+00:00
+
+== campioni per sistema ==
+  N=21  M=1  fit=25347  es=2808  train=28176  val=4695  test=4696  excluded_gaps=0
+  N=21  M=2  fit=25346  es=2807  train=28175  val=4694  test=4695  excluded_gaps=0
+  N=37  M=1  fit=25331  es=2792  train=28160  val=4679  test=4680  excluded_gaps=0
+  N=37  M=2  fit=25330  es=2791  train=28159  val=4678  test=4679  excluded_gaps=0
+  N=42  M=1  fit=25326  es=2787  train=28155  val=4674  test=4675  excluded_gaps=0
+  N=42  M=2  fit=25325  es=2786  train=28154  val=4673  test=4674  excluded_gaps=0
+  N=108 M=1  fit=25260  es=2721  train=28089  val=4608  test=4609  excluded_gaps=0
+  N=108 M=2  fit=25259  es=2720  train=28088  val=4607  test=4608  excluded_gaps=0
