@@ -4,6 +4,8 @@
     python -m parity_deriva.scripts.entry_excursions path/run.json.gz --bars 4,8,16
     python -m parity_deriva.scripts.entry_excursions --selfcheck
 
+La stessa analisi è sulla pagina simulate, pulsante entries di un run (api/sweeps/<id>/<n>/excursions).
+
 Legge un run salvato (i trade e le candele del grafico, saveSweepRun in web/service.py) e le M5
 dello store sotto. Da ogni fill (entryTime, entryPrice), nel verso del trade e sul lato che lo
 chiude (bid per un long, ask per uno short, come backtest/resolution.py):
@@ -53,9 +55,9 @@ def load(args):
 		return json.load(handle)
 
 
-def m5frame(payload):
-	"""Le M5 dello store sul periodo del run, con i tempi in ms come le candele del payload."""
-	frame = store.load(os.path.join(settings.DATA_DIR, payload['instrument'] + '.hd5'), 'M5',
+def m5frame(payload, path):
+	"""Le M5 dello store in path sul periodo del run, con i tempi in ms come le candele del payload."""
+	frame = store.load(path, 'M5',
 					   pd.Timestamp(payload['from'], unit='ms'),
 					   pd.Timestamp(payload['to'], unit='ms') + pd.Timedelta(days=30))
 	out = {k: frame[k].to_numpy() for k in ('ask_o', 'bid_o', 'ask_h', 'ask_l', 'ask_c',
@@ -133,32 +135,70 @@ def block_ci(x, block=BLOCK, n=1000, seed=0):
 	return tuple(np.percentile(means, [2.5, 97.5]))
 
 
-def report(f, N, tf):
+def num(x):
+	"""Un numero per il JSON: NaN (un gruppo vuoto) diventa None."""
+	return None if x is None or not np.isfinite(x) else round(float(x), 4)
+
+
+def summary(f):
+	"""Le due tabelle di un N: stats per (chi, unità) e la griglia stop 1R / target k*R."""
 	s, b = f[f.who == 'strategia'].sort_values('when'), f[f.who == 'base']
 	half = s.when.median()
-	print(f"===== N={N} barre {tf}   trade {len(s)}, base {len(b)}")
-	rows = {}
+	stats = []
 	for who, d in (('strategia', s), ('base', b)):
 		for unit, div in (('R', d.R), ('pip', d.pip), ('ATR', d.atr)):
-			rows[(who, unit)] = {
-				'MFE q10': (d.mfe / div).quantile(.1), 'MFE q50': (d.mfe / div).median(), 'MFE q90': (d.mfe / div).quantile(.9),
-				'MAE q10': (d.mae / div).quantile(.1), 'MAE q50': (d.mae / div).median(), 'MAE q90': (d.mae / div).quantile(.9),
-				'close media': (d.close / div).mean(), 'P(close>0)': (d.close > 0).mean()}
-	print(pd.DataFrame(rows).T.round(2).to_string())
-	grid = {}
+			mfe, mae = d.mfe / div, d.mae / div
+			stats.append(dict(who=who, unit=unit, mfe=[num(mfe.quantile(q)) for q in (.1, .5, .9)],
+							  mae=[num(mae.quantile(q)) for q in (.1, .5, .9)],
+							  close=num((d.close / div).mean()), up=num((d.close > 0).mean())))
+	grid = []
 	for k in TARGETS:
 		col = 'k%g' % k
 		lo, hi = block_ci(s[col])
-		grid['%gR' % k] = {'P(target)': (s[col] == k).mean(), 'P(stop)': (s[col] == -1).mean(),
-						   'E[R]': s[col].mean(), 'IC95 lo': lo, 'IC95 hi': hi,
-						   'E[R] base': b[col].mean(), 'edge': s[col].mean() - b[col].mean(),
-						   'E[R] A': s[col][s.when <= half].mean(), 'E[R] B': s[col][s.when > half].mean()}
-	print(f"-- stop a 1R, target k*R, altrimenti chiuso dopo {N} barre (A|B al {pd.Timestamp(half, unit='ms'):%Y-%m-%d})")
-	print(pd.DataFrame(grid).T.round(3).to_string(), '\n')
+		grid.append(dict(k=k, target=num((s[col] == k).mean()), stop=num((s[col] == -1).mean()),
+						 e=num(s[col].mean()), lo=num(lo), hi=num(hi), base=num(b[col].mean()),
+						 edge=num(s[col].mean() - b[col].mean()),
+						 a=num(s[col][s.when <= half].mean()), b=num(s[col][s.when > half].mean())))
+	return dict(trades=len(s), random=len(b), half=int(half), stats=stats, grid=grid)
+
+
+def analyse(payload, m5, bars=None):
+	"""Tutto quello che lo script stampa e la pagina mostra, per ogni N di bars."""
+	tf, inst = payload['granularity'], payload['instrument']
+	pip = 0.01 if 'JPY' in inst else pipSize(inst, settings)
+	out = dict(strategy=payload['strategy'], instrument=inst, granularity=tf,
+			   trades=len(payload['trades']), coherence=coherence(payload['trades'], m5), bars=[])
+	for N in bars or BARS.get(tf, (1, 4, 16)):
+		f = measure(payload['trades'], payload['candles'], m5, N, pip)
+		if f.empty or not (f.who == 'strategia').any():
+			out['bars'].append(dict(N=N, trades=0))
+		else:
+			out['bars'].append(dict(summary(f), N=N))
+	return out
+
+
+def report(r, tf):
+	N = r['N']
+	if not r['trades']:
+		print(f"===== N={N}: nessun trade con {N} barre dopo l'ingresso\n")
+		return
+	print(f"===== N={N} barre {tf}   trade {r['trades']}, base {r['random']}")
+	rows = {}
+	for x in r['stats']:
+		rows[(x['who'], x['unit'])] = dict(zip(('MFE q10', 'MFE q50', 'MFE q90'), x['mfe']),
+										   **dict(zip(('MAE q10', 'MAE q50', 'MAE q90'), x['mae'])),
+										   **{'close media': x['close'], 'P(close>0)': x['up']})
+	print(pd.DataFrame(rows).T.astype(float).round(2).to_string())
+	grid = pd.DataFrame(r['grid']).set_index('k').astype(float)
+	grid.index = ['%gR' % k for k in grid.index]
+	grid.columns = ['P(target)', 'P(stop)', 'E[R]', 'IC95 lo', 'IC95 hi', 'E[R] base', 'edge', 'E[R] A', 'E[R] B']
+	print(f"-- stop a 1R, target k*R, altrimenti chiuso dopo {N} barre (A|B al {pd.Timestamp(r['half'], unit='ms'):%Y-%m-%d})")
+	print(grid.round(3).to_string(), '\n')
 
 
 def coherence(trades, m5):
-	"""Dal fill all'uscita vera: un trade chiuso a target deve aver toccato il target, a stop lo stop."""
+	"""Dal fill all'uscita vera: un trade chiuso a target deve aver toccato il target, a stop lo stop.
+	{'target': [visti, toccati], 'stop': [...]}"""
 	seen = {'TAKE_PROFIT_ORDER': [0, 0], 'STOP_LOSS_ORDER': [0, 0]}
 	for t in trades:
 		level = t['takeProfit'] if t['outcome'] == 'TAKE_PROFIT_ORDER' else t['stopFinal'] or t['stopLoss']
@@ -175,8 +215,7 @@ def coherence(trades, m5):
 		down = long == (t['outcome'] == 'STOP_LOSS_ORDER')
 		seen[t['outcome']][0] += 1
 		seen[t['outcome']][1] += bool(lo <= level + 1e-9 if down else hi >= level - 1e-9)
-	print('coerenza con il ledger (dal fill all\'uscita, M5): '
-		  + ', '.join('%s %d/%d toccati' % (k.split('_')[0].lower(), v[1], v[0]) for k, v in seen.items() if v[0]))
+	return {'target': seen['TAKE_PROFIT_ORDER'], 'stop': seen['STOP_LOSS_ORDER']}
 
 
 def selfcheck():
@@ -213,17 +252,11 @@ if __name__ == '__main__':
 		ap.error('serve il file del run, o id del set e numero del run')
 	pd.set_option('display.width', 220)
 	payload = load(a.run)
-	tf, inst = payload['granularity'], payload['instrument']
-	pip = 0.01 if 'JPY' in inst else pipSize(inst, settings)
-	m5 = m5frame(payload)
-	trades = payload['trades']
-	print(f"######## {payload['strategy']} {inst} {tf}  {pd.Timestamp(payload['from'], unit='ms'):%Y-%m-%d}"
-		  f" -> {pd.Timestamp(payload['to'], unit='ms'):%Y-%m-%d}  trade {len(trades)}")
-	coherence(trades, m5)
-	print()
-	for N in [int(x) for x in a.bars.split(',')] if a.bars else BARS.get(tf, (1, 4, 16)):
-		f = measure(trades, payload['candles'], m5, N, pip)
-		if f.empty or not (f.who == 'strategia').any():
-			print(f"===== N={N}: nessun trade con {N} barre dopo l'ingresso\n")
-			continue
-		report(f, N, tf)
+	m5 = m5frame(payload, os.path.join(settings.DATA_DIR, payload['instrument'] + '.hd5'))
+	r = analyse(payload, m5, [int(x) for x in a.bars.split(',')] if a.bars else None)
+	print(f"######## {r['strategy']} {r['instrument']} {r['granularity']}  {pd.Timestamp(payload['from'], unit='ms'):%Y-%m-%d}"
+		  f" -> {pd.Timestamp(payload['to'], unit='ms'):%Y-%m-%d}  trade {r['trades']}")
+	print('coerenza con il ledger (dal fill all\'uscita, M5): '
+		  + ', '.join('%s %d/%d toccati' % (k, v[1], v[0]) for k, v in r['coherence'].items() if v[0]) + '\n')
+	for x in r['bars']:
+		report(x, r['granularity'])

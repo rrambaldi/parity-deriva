@@ -309,6 +309,8 @@ class Service(object):
 		# progress report, and the sweep itself between two runs
 		self._sweepGoing = threading.Event()
 		self._sweepGoing.set()
+		# one excursion analysis at a time: each reads the M5 under its run
+		self._excursionLock = threading.Lock()
 		# what the last run managed, bars a second. Seeded with a measured
 		# figure and replaced by this machine's own as soon as it has one
 		self._rate = float(TICKS_A_SECOND)
@@ -1809,6 +1811,34 @@ class Service(object):
 			leverage = None
 		return self.withMargin(payload, parseLeverage(_text(leverage)))
 
+	def sweepExcursions(self, sweep, n, bars=None):
+		"""
+		Where price went after every entry of one saved run, against random
+		entries at the same hour: scripts/entry_excursions.py, which prints the
+		same. It reads the M5 under the run, seconds to a minute, so the answer
+		is kept next to the run and goes with its set.
+		"""
+		from parity_deriva.scripts import entry_excursions
+		bars = sorted(set(bars)) if bars else None
+		kept = os.path.join(self.sweepPath(sweep, ''), '%d.excursions%s.json' % (
+			int(n), '-' + '-'.join(map(str, bars)) if bars else ''))
+		try:
+			with open(kept) as handle:
+				return json.load(handle)
+		except (OSError, ValueError):
+			pass
+		payload = self.sweepPayload(sweep, n)
+		if payload is None:
+			raise ServiceError("run %s of this set is not on disk: open it with view "
+							   "once, then ask again" % n)
+		# ponytail: beside a running backtest, not after it; take self._lock
+		# instead if the memory of the two together is ever too much
+		with self._excursionLock:
+			m5 = entry_excursions.m5frame(payload, self.storePath(payload['instrument']))
+			out = entry_excursions.analyse(payload, m5, bars)
+		self._write(kept, json.dumps(out).encode())
+		return out
+
 	def sweepPayload(self, sweep, n):
 		"""A run saved by saveSweepRun as it was saved, or None."""
 		try:
@@ -2368,6 +2398,19 @@ def backtestArgs(get):
 		leverage=parseLeverage(get('leverage')))
 
 
+def parseBars(text):
+	"""The N of an excursion analysis, comma separated; empty is the timeframe's own."""
+	if not (text or '').strip():
+		return None
+	try:
+		bars = [int(x) for x in text.split(',') if x.strip()]
+	except ValueError:
+		raise ServiceError("bars: whole numbers, comma separated")
+	if not bars or len(bars) > 8 or min(bars) < 1 or max(bars) > 2000:
+		raise ServiceError("bars: from 1 to 8 of them, each from 1 to 2000")
+	return bars
+
+
 def parseLeverage(text):
 	"""The account's leverage, n for n:1; None is the setting's."""
 	value = parseInt(text, 'leverage', None)
@@ -2641,11 +2684,16 @@ class Handler(BaseHTTPRequestHandler):
 			if route == '/api/sweeps':
 				return self.sendJSON({'sweeps': self.service.sweeps()})
 			if route.startswith('/api/sweeps/'):
-				# <id> is the set, <id>/<n> one run of it, whole
+				# <id> is the set, <id>/<n> one run of it, whole, and
+				# <id>/<n>/excursions where price went after its entries
 				sweep, _, n = route[len('/api/sweeps/'):].partition('/')
 				if n:
-					if not n.isdigit():
+					n, _, what = n.partition('/')
+					if not n.isdigit() or what not in ('', 'excursions'):
 						raise ServiceError("no such run")
+					if what:
+						return self.sendJSON(self.service.sweepExcursions(
+							sweep, n, parseBars(self.one(query, 'bars'))))
 					return self.sendJSON(self.service.sweepRun(sweep, n))
 				return self.sendJSON(self.service.savedSweep(sweep))
 			if route == '/api/stores':

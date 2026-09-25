@@ -639,6 +639,7 @@ function rowClick(event) {
   const action = event.target.dataset.action;
   if (action === 'view') return openPage(n, event.currentTarget);
   if (action === 'analisi') return openAnalysis(n);
+  if (action === 'entries') return openEntries(n).catch((error) => message(String(error.message || error)));
   state.pinned = state.pinned === n ? null : n;
   state.pick = n;
   draw();
@@ -999,7 +1000,9 @@ function renderKpi() {
       }
       line.appendChild(td);
     }
-    line.append(actions([['analisi', 'what these KPIs say about the run, in words']]), starCell(row));
+    line.append(actions([['analisi', 'what these KPIs say about the run, in words'],
+                         ['entries', 'where price went after each entry, against random entries at the same hour']]),
+                starCell(row));
     body.appendChild(line);
   });
 }
@@ -1276,6 +1279,94 @@ function openAnalysis(n) {
   body.append(...analysisNodes(row));
   $('analysis-title').textContent = `analisi KPI \u00b7 ${runId(n)}`;
   $('analysis-dialog').showModal();
+}
+
+/*
+ * Where price went after the run's entries, against random entries at the
+ * same UTC hour and side (scripts/entry_excursions.py, which prints the same;
+ * api/sweeps/<id>/<n>/excursions). One N on show at a time, its buttons on top;
+ * the box asks for other N.
+ */
+async function openEntries(n, bars = '') {
+  if (!state.job || !state.job.id) return;
+  const el = (tag, text, cls) => {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (cls) node.className = cls;
+    return node;
+  };
+  const body = $('analysis-body');
+  body.textContent = 'reading the M5 under the run\u2026 a long run takes up to a minute, once';
+  $('analysis-title').textContent = `entries \u00b7 ${runId(n)}`;
+  if (!$('analysis-dialog').open) $('analysis-dialog').showModal();
+  let r;
+  try {
+    r = await ask(`api/sweeps/${state.job.id}/${n}/excursions` + (bars ? '?bars=' + encodeURIComponent(bars) : ''));
+  } catch (error) { body.textContent = String(error.message || error); return; }
+  body.textContent = '';
+  const c = r.coherence || {};
+  const checked = ['target', 'stop'].filter((k) => c[k] && c[k][0]).map((k) => `${k} ${c[k][1]}/${c[k][0]}`).join(', ');
+  body.append(
+    el('p', `${r.strategy} on ${r.instrument} ${r.granularity} \u00b7 ${r.trades} trades`
+      + (checked ? ` \u00b7 the ledger's exits touched on the M5: ${checked}` : '')),
+    el('p', 'From each fill, on the side that closes the trade: MFE is how far price went its way, MAE how far'
+      + ' against, close where it stands after N bars. random: the same from bars at the same UTC hour and side,'
+      + ' with a stop as many ATR wide. E[R]: the result per trade with the stop at 1R and the target at k R,'
+      + ' or the close after N bars when neither is touched; an M5 touching both counts as the stop. Spread included.', 'hint'));
+  const pick = el('div');
+  pick.id = 'entries-bars';
+  const view = el('div');
+  const signed = (v) => v === null || v === undefined ? 'n/a'
+    : (v > 0 ? '+' : v < 0 ? '\u2212' : '') + Math.abs(v).toFixed(2);
+  const share = (v) => v === null || v === undefined ? 'n/a' : (100 * v).toFixed(0) + '%';
+  const tone = (v) => 'num' + (v > 0 ? ' good' : v < 0 ? ' bad' : '');
+  const table = (head, rows) => {
+    const t = el('table');
+    const tr = t.createTHead().insertRow();
+    for (const h of head) tr.append(el('th', h));
+    const tb = t.createTBody();
+    for (const cells of rows) {
+      const line = tb.insertRow();
+      for (const [text, cls] of cells) line.append(el('td', text, cls));
+    }
+    return t;
+  };
+  const show = (x) => {
+    for (const b of pick.querySelectorAll('button')) b.setAttribute('aria-pressed', String(Number(b.dataset.n) === x.N));
+    view.textContent = '';
+    if (!x.trades) { view.append(el('p', `no trade has ${x.N} bars after its entry`)); return; }
+    view.append(el('h3', `after ${x.N} ${r.granularity} bars \u00b7 ${x.trades} entries, ${x.random} random`));
+    view.append(table(['', 'MFE q10', 'MFE q50', 'MFE q90', 'MAE q10', 'MAE q50', 'MAE q90', 'close, mean', 'close > 0'],
+      x.stats.map((s) => [[`${s.who === 'strategia' ? 'strategy' : 'random'} \u00b7 ${s.unit}`],
+        ...s.mfe.map((v) => [signed(v), 'num']), ...s.mae.map((v) => [signed(v), 'num']),
+        [signed(s.close), tone(s.close)], [share(s.up), 'num']])));
+    view.append(el('h3', `stop at 1R, target at k R, else closed after ${x.N} bars`));
+    view.append(table(['target', 'P(target)', 'P(stop)', 'E[R]', '95% CI', 'random E[R]', 'edge', 'E[R] A', 'E[R] B'],
+      x.grid.map((g) => [[`${g.k}R`], [share(g.target), 'num'], [share(g.stop), 'num'], [signed(g.e), tone(g.e)],
+        [`${signed(g.lo)} .. ${signed(g.hi)}`, 'num'], [signed(g.base), tone(g.base)], [signed(g.edge), tone(g.edge)],
+        [signed(g.a), tone(g.a)], [signed(g.b), tone(g.b)]])));
+    view.append(el('p', `edge = E[R] less the random one. A and B: the entries up to ${stamp(x.half)} and after;`
+      + ' the CI resamples blocks of 10 entries in a row.', 'hint'));
+  };
+  for (const x of r.bars) {
+    const b = el('button', `N ${x.N}`);
+    b.type = 'button';
+    b.dataset.n = x.N;
+    b.addEventListener('click', () => show(x));
+    pick.append(b);
+  }
+  const box = el('input');
+  box.type = 'text';
+  box.placeholder = r.bars.map((x) => x.N).join(',');
+  box.value = bars;
+  box.title = 'other N, comma separated, up to 8';
+  const again = el('button', 'measure');
+  again.type = 'button';
+  again.dataset.icon = 'entries';
+  again.addEventListener('click', () => openEntries(n, box.value.trim()).catch((e) => message(String(e.message || e))));
+  pick.append(box, again);
+  body.append(pick, view);
+  if (r.bars.length) show(r.bars[0]);
 }
 
 /* ---------------------------------------------------------- saved sets */

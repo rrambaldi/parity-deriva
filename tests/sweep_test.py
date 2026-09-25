@@ -8,6 +8,7 @@ expandGrid), the strategy arguments read off a handler's own source
 import datetime
 import json
 import unittest
+from unittest import mock
 
 from parity_deriva.event.event import CandleEvent, TransactionEvent
 from parity_deriva.portfolio.session import MAX_LENGTH, TradeTimer
@@ -268,6 +269,29 @@ class TestSavedSweeps(TempDirCase):
         self.assertEqual(self.service.sweeps()[0]['bestScore'], 62.5)
         with open(meta) as handle:
             self.assertEqual(json.load(handle)['bestScore'], 62.5)
+
+    def test_the_entries_of_a_run_are_measured_once_then_read_back(self):
+        from parity_deriva.scripts import entry_excursions
+        sweep = '20260923-120000-abcdef'
+        self.service.saveSweep(self.job())
+        self.service.saveSweepRun(sweep, 1, {'instrument': 'EUR_USD', 'trades': [], 'candles': []})
+        with mock.patch.object(entry_excursions, 'm5frame', return_value={}), \
+                mock.patch.object(entry_excursions, 'analyse', return_value={'bars': []}) as analyse:
+            self.assertEqual(self.service.sweepExcursions(sweep, '1'), {'bars': []})
+            self.assertEqual(self.service.sweepExcursions(sweep, '1'), {'bars': []})
+            self.service.sweepExcursions(sweep, '1', [16, 4])
+        self.assertEqual(analyse.call_count, 2, "the second ask is read off the disk")
+        self.assertEqual(analyse.call_args[0][2], [4, 16])
+        # a run never kept is refused, not run again
+        with self.assertRaises(ServiceError):
+            self.service.sweepExcursions(sweep, '2')
+
+    def test_the_bars_asked_are_a_few_whole_numbers(self):
+        self.assertIsNone(service.parseBars(''))
+        self.assertEqual(service.parseBars('4, 16'), [4, 16])
+        for bad in ('4.5', '0', '1,2,3,4,5,6,7,8,9', 'x'):
+            with self.assertRaises(ServiceError):
+                service.parseBars(bad)
 
     def test_renamed_and_deleted(self):
         self.service.saveSweep(self.job())
