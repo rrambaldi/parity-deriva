@@ -370,20 +370,23 @@ section {
 #calendar-state { color: var(--text-3); margin: 4px 0 6px; }
 #calendar-how, #mcp-how { color: var(--text-2); margin: 0 0 8px; padding-left: 20px; line-height: 1.6; }
 #mcp-state, #mcp-note { color: var(--text-3); margin: 4px 0 6px; }
+#mcp-note { white-space: pre-line; }
 #mcp-how code, #mcp-token code { overflow-wrap: anywhere; }
-#mcp-actions, #mcp-token { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }
-#mcp-token[hidden], #mcp-strategies[hidden] { display: none; }
+#mcp-actions, #mcp-files, #mcp-token { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }
+#mcp-token[hidden], #mcp-strategies[hidden], #mcp-requests[hidden] { display: none; }
 #mcp-strategies td:last-child { white-space: nowrap; }
+#mcp-strategies td:nth-child(3), #mcp-strategies td:nth-child(5) { white-space: normal; }
 #mcp-strategies td:last-child button + button { margin-left: 6px; }
 /* a phone: the name, the state and the actions, the buttons one under another */
 @media (max-width: 600px) {
-  #mcp-strategies th:nth-child(3), #mcp-strategies td:nth-child(3),
-  #mcp-strategies th:nth-child(4), #mcp-strategies td:nth-child(4) { display: none; }
+  #mcp-strategies th:nth-child(4), #mcp-strategies td:nth-child(4),
+  #mcp-strategies th:nth-child(5), #mcp-strategies td:nth-child(5) { display: none; }
   #mcp-strategies td:last-child { white-space: normal; }
   #mcp-strategies td:last-child button { display: block; margin: 2px 0; }
   #mcp-strategies td:last-child button + button { margin-left: 0; }
 }
-#mcp-source { max-height: 60vh; overflow: auto; font-family: var(--font-mono); font-size: var(--fs-small); background: var(--raised); padding: 8px; border-radius: var(--radius-s); }
+#source-dialog { width: min(980px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
+#mcp-source { margin: 0; overflow: auto; font-family: var(--font-mono); font-size: var(--fs-small); background: var(--raised); padding: 8px; border-radius: var(--radius-s); }
 #calendar-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 
 #detail-box { color: var(--text-3); display: inline-flex; gap: 4px; align-items: center; }
@@ -458,7 +461,6 @@ canvas {
 #legend-box > summary { cursor: pointer; width: max-content; }
 #help-open { height: 20px; padding: 0 7px; border-radius: 50%; line-height: 18px; }
 #help-dialog { width: min(640px, calc(100vw - 32px)); }
-#data-panel, #mcp-panel { margin: var(--space-4) auto; }
 #help-list { margin: 0; padding-left: 18px; line-height: 1.5; }
 #help-list li + li { margin-top: 6px; }
 
@@ -535,9 +537,8 @@ tbody tr.empty:hover { background: none; }
 
 /* ------------------------------------------------------------ dialogs */
 
-/* the dialogs, and the settings page's data panel that looks like one:
-   the exports waiting, and the import's own report */
-#data-panel, #mcp-panel, dialog {
+/* the dialogs; the settings page's panels are plain sections, full width */
+dialog {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
@@ -599,14 +600,18 @@ dialog.sheet::backdrop { background: var(--backdrop); } /* token in tokens.css: 
 #data-loaded div + div { margin-top: 4px; }
 #data-loaded .dim, #data-dir { color: var(--text-3); }
 #data-dir { margin-bottom: 6px; overflow-wrap: anywhere; font-size: var(--fs-small); }
-#data-files, #mcp-strategies { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-#data-files th, #data-files td, #mcp-strategies th, #mcp-strategies td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
-#data-files th, #mcp-strategies th { color: var(--text-3); font-weight: normal; }
-#data-files td:first-child { overflow-wrap: anywhere; }
+#data-files, #mcp-strategies, #mcp-requests { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+#data-files th, #data-files td, #mcp-strategies th, #mcp-strategies td, #mcp-requests th, #mcp-requests td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+#data-files th, #mcp-strategies th, #mcp-requests th { color: var(--text-3); font-weight: normal; }
+/* a request is read, not scanned: its text wraps */
+#mcp-requests td:nth-child(4) { white-space: pre-wrap; min-width: 24em; }
+#mcp-requests tbody tr { cursor: default; vertical-align: top; }
+#data-files td:nth-child(2) { white-space: normal; overflow-wrap: anywhere; }
 #data-files td.missing { color: var(--down); }
 #data-rows tr { cursor: pointer; }
 #data-rows tr:hover td { background: var(--raised); }
 #data-progress-box { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+#data-progress-box[hidden] { display: none; }
 #data-progress { flex: 1; height: 10px; accent-color: var(--entry); }
 #data-progress-text { color: var(--text-3); white-space: nowrap; }
 #data-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }

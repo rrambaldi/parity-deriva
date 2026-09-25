@@ -277,6 +277,8 @@ $('data-import').addEventListener('click', () => dataAction(async () => {
  * reading the code, where no assistant can reach.
  */
 const mcpSay = (text) => { $('mcp-note').textContent = text; };
+// the rows last shown, by name: what the code's dialog says above it
+let mcpStrategies = {};
 
 async function showMcp(state) {
   state = state || await ask('api/mcp');
@@ -286,24 +288,74 @@ async function showMcp(state) {
   $('mcp-disconnect').disabled = !state.clients.length;
   const rows = $('mcp-rows');
   rows.textContent = '';
+  mcpStrategies = Object.fromEntries(state.strategies.map((s) => [s.name, s]));
   for (const s of state.strategies) {
     const tr = rows.insertRow();
-    for (const text of [s.name, s.state, s.submitted ? day(s.submitted) : '', s.description || '']) {
+    for (const text of [s.name, s.state, s.client || 'unknown', s.submitted ? day(s.submitted) : '',
+      s.description || '']) {
       tr.insertCell().textContent = text;
     }
+    // the server it was written on (its stamp), and where it is on its way
+    // to the public repository: proposed by the assistant, then its pull request
+    tr.cells[0].title = s.server ? `written on parity-deriva ${s.server}` : 'written before versions';
+    if (s.pull) {
+      const link = document.createElement('a');
+      link.href = s.pull.url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = `PR #${s.pull.number}`;
+      tr.cells[1].append(' \u00b7 ', link);
+    } else if (s.proposed) {
+      tr.cells[1].append(' \u00b7 proposed');
+      tr.cells[1].title = s.proposed.note;
+    }
     const cell = tr.insertCell();
-    for (const [action, icon] of s.state === 'draft'
-      ? [['view', 'view'], ['enable', 'yes'], ['delete', 'delete']] : [['view', 'view'], ['disable', 'stop']]) {
+    const actions = s.state === 'draft'
+      ? [['view', 'view'], ['enable', 'yes'], ['delete', 'delete']] : [['view', 'view'], ['disable', 'stop']];
+    if (s.state !== 'draft' && s.proposed && !s.pull) actions.push(['pull', 'upload', 'pull request']);
+    for (const [action, icon, label] of actions) {
       const button = document.createElement('button');
       button.type = 'button';
-      button.textContent = button.dataset.action = action;
+      button.textContent = label || action;
+      button.dataset.action = action;
       button.dataset.icon = icon;
       button.dataset.name = s.name;
       cell.appendChild(button);
     }
   }
   $('mcp-strategies').hidden = !state.strategies.length;
+  const asked = $('mcp-request-rows');
+  asked.textContent = '';
+  for (const r of state.requests || []) {
+    const tr = asked.insertRow();
+    tr.insertCell().textContent = r.id;
+    tr.insertCell().textContent = day(r.submitted);
+    tr.insertCell().textContent = r.strategy || '';
+    const what = tr.insertCell();
+    const title = document.createElement('strong');
+    title.textContent = r.title;
+    what.append(title, document.createElement('br'), r.description);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'done';
+    button.dataset.icon = 'yes';
+    button.dataset.id = r.id;
+    button.title = 'answered - made, or not to be made: it leaves the list';
+    tr.insertCell().appendChild(button);
+  }
+  $('mcp-requests').hidden = !(state.requests || []).length;
 }
+
+$('mcp-request-rows').addEventListener('click', async (event) => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  try {
+    await showMcp(await post('api/mcp/request', JSON.stringify({ id: button.dataset.id })));
+    mcpSay(`${button.dataset.id}: done`);
+  } catch (error) {
+    mcpSay(String(error.message || error));
+  }
+});
 
 $('mcp-rows').addEventListener('click', async (event) => {
   const button = event.target.closest('button');
@@ -312,10 +364,34 @@ $('mcp-rows').addEventListener('click', async (event) => {
   try {
     if (action === 'view') {
       const found = await ask('api/mcp/source?name=' + encodeURIComponent(name));
-      $('mcp-source').textContent = `# ${name}`
-        + (found.problems.length ? `\n# problems:\n# ${found.problems.join('\n# ')}` : '')
-        + '\n\n' + found.source;
-      $('mcp-source').hidden = false;
+      const s = mcpStrategies[name] || {};
+      $('source-title').textContent = name;
+      $('source-sub').textContent = [s.state, `by ${s.client || 'unknown'}`,
+        s.submitted ? day(s.submitted) : '',
+        found.problems.length ? `${found.problems.length} problems` : 'no problems found']
+        .filter(Boolean).join(' \u00b7 ');
+      $('mcp-source').textContent = (found.problems.length
+        ? `# problems:\n# ${found.problems.join('\n# ')}\n\n` : '') + found.source;
+      $('source-download').onclick = () => {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(new Blob([found.source], { type: 'text/x-python' }));
+        // as the file is on the server: NAME@N.py for the version NAME N
+        link.download = `${name.replace(' ', '@')}.py`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+      };
+      $('source-dialog').showModal();
+      return;
+    }
+    if (action === 'pull') {
+      const s = mcpStrategies[name] || {};
+      if (!confirm(`Open a pull request of ${name} on the public repository? Its code and its `
+        + `description go out, public. The assistant's note:\n\n${(s.proposed || {}).note || ''}`)) return;
+      mcpSay(`${name}: opening the pull request\u2026`);
+      const state = await post('api/mcp/pull', JSON.stringify({ name }));
+      await showMcp(state);
+      const made = state.strategies.find((x) => x.name === name);
+      mcpSay(made && made.pull ? `${name}: pull request ${made.pull.url}` : `${name}: done`);
       return;
     }
     const asked = {
@@ -331,6 +407,26 @@ $('mcp-rows').addEventListener('click', async (event) => {
   } catch (error) {
     mcpSay(String(error.message || error));
   }
+});
+
+// each file named as download named it, NAME@N.py: back as NAME, whose next
+// version it becomes (a browser's " (1)" for a second copy goes too)
+$('mcp-import').addEventListener('click', async () => {
+  const files = [...$('mcp-file').files];
+  if (!files.length) { mcpSay('choose the .py files to import'); return; }
+  const said = [];
+  for (const file of files) {
+    const name = file.name.replace(/\.py$/i, '').replace(/ \(\d+\)$/, '').replace(/[@ ]\d+$/, '');
+    try {
+      await post('api/mcp/import', JSON.stringify({ name, source: await file.text() }));
+      said.push(`${name}: imported`);
+    } catch (error) {
+      said.push(`${name}: ${error.message || error}`);
+    }
+  }
+  $('mcp-file').value = '';
+  mcpSay(said.join('\n'));
+  await showMcp();
 });
 
 $('mcp-secret').addEventListener('click', async () => {

@@ -4,13 +4,20 @@ and kept under DATA_DIR rather than in this tree.
 
 Two states, and the directory a file sits in is the state:
 
-	DATA_DIR/strategies/drafts/NAME.py   a draft. Backtested only in a child
+	DATA_DIR/strategies/drafts/NAME@N.py   a draft. Backtested only in a child
 		process with a ceiling on memory and time (web/sandbox.py); never
 		imported by the service, never offered to a live session.
-	DATA_DIR/strategies/NAME.py          enabled: somebody read it and pressed
+	DATA_DIR/strategies/NAME@N.py          enabled: somebody read it and pressed
 		enable on the settings page. From then on it is a strategy like the
 		ones beside this file - the page, the sweeps and scripts/live.py
 		import it.
+
+N is its version, and its code - the name the page, the runs and the ledger
+know it by - is "NAME N". A version is never replaced: submitting NAME again
+is N + 1, and the one somebody read and ran stays as it was. Each file ends
+with the line stamp() writes, which says which version it is and the server
+it was written on, so a copy of it carries both wherever it goes (the public
+repository, web/mcp.py pullRequest).
 
 check() is a seatbelt against mistakes, not a sandbox against malice. Whoever
 runs this runs it on their own machine, with an assistant of their own
@@ -33,6 +40,13 @@ from parity_deriva.trading.handler import ExecutionHandler
 #: upper case, digits and dashes, like the names beside this file. No
 #: underscore, so turning the dashes into one for the module name is one to one
 NAME = re.compile(r'[A-Z][A-Z0-9-]{1,39}')
+
+#: a version's file: NAME@N.py. Its code has a space for the @
+FILE = re.compile(r'(%s)@([1-9][0-9]{0,5})\.py' % NAME.pattern)
+
+#: the module-level constant stamp() writes, and the comment over it
+STAMP = 'PARITY_DERIVA'
+STAMP_NOTE = '# written by parity-deriva on submit, rewritten on every one: leave it as it is'
 
 #: the largest source accepted; the longest strategy here is 13 kB
 MAX_SOURCE = 200 * 1024
@@ -83,13 +97,74 @@ def enabled(dataDir):
 	return _listed(root(dataDir))
 
 
+def code(name, version):
+	"""The name a version is known by: "MY-EMA 3"."""
+	return '%s %d' % (name, version)
+
+
+def split(code):
+	"""(name, version) of a code, or (code, None) for one without a version."""
+	name, _, version = code.rpartition(' ')
+	return (name, int(version)) if NAME.fullmatch(name) and version.isdigit() else (code, None)
+
+
+def fileName(code):
+	name, version = split(code)
+	return '%s@%d.py' % (name, version)
+
+
 def _listed(where):
+	"""code -> path of every version in `where`, oldest version first."""
 	try:
 		names = os.listdir(where)
 	except OSError:
 		return {}
-	return dict((name[:-3], os.path.join(where, name)) for name in sorted(names)
-				if name.endswith('.py') and NAME.fullmatch(name[:-3]))
+	found = [(m.group(1), int(m.group(2)), name) for m, name in
+			 ((FILE.fullmatch(name), name) for name in names) if m]
+	# a file from before versions is version 1, renamed the first time it is seen
+	for name in names:
+		if name.endswith('.py') and NAME.fullmatch(name[:-3]) \
+				and not any(n == name[:-3] for n, _, _ in found):
+			for a, b in ((name, name[:-3] + '@1.py'), (name[:-3] + '.json', name[:-3] + '@1.json')):
+				if os.path.exists(os.path.join(where, a)):
+					os.replace(os.path.join(where, a), os.path.join(where, b))
+			found.append((name[:-3], 1, name[:-3] + '@1.py'))
+	return dict((code(n, v), os.path.join(where, f)) for n, v, f in sorted(found))
+
+
+def latest(dataDir, name):
+	"""The code of a name's newest version, draft or enabled, or None."""
+	versions = [split(c) for c in list(drafts(dataDir)) + list(enabled(dataDir))]
+	mine = [v for n, v in versions if n == name]
+	return code(name, max(mine)) if mine else None
+
+
+def nextVersion(dataDir, name):
+	found = latest(dataDir, name)
+	return split(found)[1] + 1 if found else 1
+
+
+def stamp(source, name, version, server):
+	"""
+	`source` with the line that says which version it is and the server it
+	was written on at its end, in place of any it had: an assistant that
+	edits the source it read back sends the old one along.
+	"""
+	try:
+		tree = ast.parse(source)
+	except SyntaxError:
+		tree = None
+	lines = source.splitlines()
+	drop = set()
+	for node in (tree.body if tree else ()):
+		if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == STAMP
+												for t in node.targets):
+			drop.update(range(node.lineno - 1, node.end_lineno))
+	kept = [l for i, l in enumerate(lines) if i not in drop and l.strip() != STAMP_NOTE]
+	while kept and not kept[-1].strip():
+		kept.pop()
+	return '\n'.join(kept + ['', '', STAMP_NOTE, '%s = %r' % (
+		STAMP, {'name': name, 'version': version, 'server': server})]) + '\n'
 
 
 def allowedModule(module):
@@ -139,15 +214,17 @@ def check(source):
 
 def moduleName(name):
 	# under parity_deriva.strategy, which is what web/service.handlerFields
-	# reads a strategy's parameters from
-	return 'parity_deriva.strategy.uploaded_' + name.replace('-', '_')
+	# reads a strategy's parameters from. A code's space is _v: a name has no
+	# lower case, so it stays one to one
+	return 'parity_deriva.strategy.uploaded_' + name.replace('-', '_').replace(' ', '_v')
 
 
 def load(name, path):
 	"""
 	Import the strategy in `path` as `name`: (module, class), the entry
 	backtest/ledger.STRATEGIES keeps. Its TAG becomes its name, so its
-	orders cannot pass for another strategy's.
+	orders cannot pass for another strategy's; its VERSION and SERVER_VERSION
+	are its stamp's (None where it has none).
 	"""
 	module = moduleName(name)
 	spec = importlib.util.spec_from_file_location(module, path)
@@ -165,7 +242,11 @@ def load(name, path):
 	except BaseException:
 		sys.modules.pop(module, None)
 		raise
+	stamped = vars(loaded).get(STAMP)
+	stamped = stamped if isinstance(stamped, dict) else {}
 	found[0].TAG = name
+	found[0].VERSION = stamped.get('version') or split(name)[1]
+	found[0].SERVER_VERSION = stamped.get('server')
 	return module, found[0].__name__
 
 

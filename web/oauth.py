@@ -138,6 +138,14 @@ class Authority(object):
 		token = self.read()['tokens'].get(digest(bearer))
 		return bool(token and token['kind'] == 'access' and token['expires'] > time.time())
 
+	def holder(self, bearer):
+		"""The name of the client `bearer` was given to; None for the secret."""
+		state = self.read()
+		token = state['tokens'].get(digest(bearer or ''))
+		if not token:
+			return None
+		return state['clients'].get(token['client'], {}).get('name') or 'unnamed client'
+
 	# --------------------------------------------------------- the metadata
 
 	@staticmethod

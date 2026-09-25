@@ -113,17 +113,48 @@
     <button type="button" id="mcp-secret" data-icon="add">new token</button>
     <button type="button" id="mcp-disconnect" data-icon="close">disconnect all</button>
   </div>
+  <!-- a strategy's file, saved with download in its code's dialog: back as a
+       draft, through the same checks as an assistant's -->
+  <div id="mcp-files">
+    <label>strategy files
+      <input type="file" id="mcp-file" accept=".py,text/x-python" multiple>
+    </label>
+    <button type="button" id="mcp-import" data-icon="upload">import as drafts</button>
+  </div>
   <div id="mcp-token" hidden>
     <code id="mcp-token-text"></code>
     <button type="button" id="mcp-copy" data-icon="copy">copy</button>
   </div>
   <p id="mcp-note" role="status"></p>
   <table id="mcp-strategies" hidden>
-    <thead><tr><th>strategy</th><th>state</th><th>submitted</th><th>description</th><th></th></tr></thead>
+    <thead><tr><th>strategy</th><th>state</th><th>client</th><th>submitted</th><th>description</th><th></th></tr></thead>
     <tbody id="mcp-rows"></tbody>
   </table>
-  <pre id="mcp-source" hidden></pre>
+  <!-- what an assistant asked for instead of writing it into a strategy: an
+       indicator or a function the helpers do not have (request_feature) -->
+  <table id="mcp-requests" hidden>
+    <thead><tr><th>request</th><th>asked</th><th>for</th><th>what it is</th><th></th></tr></thead>
+    <tbody id="mcp-request-rows"></tbody>
+  </table>
 </section>
+
+<!-- a strategy's code, read before enabling it -->
+<dialog id="source-dialog" class="sheet" aria-labelledby="source-title">
+  <form method="dialog" class="dialog-head">
+    <div class="dialog-heading">
+      <h2 class="dialog-title" id="source-title"></h2>
+      <p class="dialog-sub" id="source-sub"></p>
+    </div>
+    <div class="dialog-tools">
+      <button type="button" id="source-download" data-icon="import">download</button>
+      <span class="kbd" aria-hidden="true">esc</span>
+      <button type="submit" class="dialog-close" aria-label="close"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+  </form>
+  <div class="dialog-body">
+    <pre id="mcp-source"></pre>
+  </div>
+</dialog>
 
 <script src="static/menu.js"></script>
 <script src="static/settings.js"></script>

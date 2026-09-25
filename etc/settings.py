@@ -352,6 +352,13 @@ TWELVEDATA_SPREAD = None
 PUBLIC_URL = dotenv('PARITY_DERIVA_PUBLIC_URL')
 MCP_SANDBOX_MB = int(dotenv('PARITY_DERIVA_MCP_SANDBOX_MB', '1024'))
 MCP_SANDBOX_SECONDS = int(dotenv('PARITY_DERIVA_MCP_SANDBOX_SECONDS', '240'))
+# The public repository of strategies a pull request from the settings page
+# goes to (web/mcp.py pullRequest), as owner/name, and the GitHub token that
+# opens it: a fine-grained one with contents and pull requests, read and
+# write. A token that may not push to the repository forks it first. With
+# either missing, the page says so and nothing is sent.
+PUBLIC_REPO = dotenv('PARITY_DERIVA_PUBLIC_REPO')
+GITHUB_TOKEN = dotenv('PARITY_DERIVA_GITHUB_TOKEN')
 
 CANDLE_DB = dotenv('PARITY_DERIVA_CANDLE_DB', os.path.join(DATA_DIR, 'live', 'candles.db'))
 

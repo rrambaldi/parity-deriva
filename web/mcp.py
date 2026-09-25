@@ -29,12 +29,19 @@ each with `proxy_set_header X-Forwarded-Prefix /parity;` and the usual Host
 and X-Forwarded-Proto. The connector's address is then https://host/parity/mcp.
 """
 
+import ast
+import base64
 import datetime
+import functools
 import json
 import os
+import subprocess
 import sys
+import threading
 import time
+import urllib.error
 import urllib.parse
+import urllib.request
 
 from parity_deriva.backtest import ledger
 from parity_deriva.strategy import uploaded
@@ -72,11 +79,63 @@ is made of (the refusal lists them); files, network, processes, eval/exec,
 getattr/setattr and double-underscore attributes are refused. The TAG becomes
 the strategy's name.
 
-Work in this order: list_data and list_strategies to see what exists;
-submit_strategy to save or replace a draft (it is imported and built at once,
-and an error comes back with its traceback); run_backtest on a year or two
-first, then widen. Every backtest is saved, and its link opens it on the
-user's page."""
+Work in this order: list_data, list_strategies and list_helpers to see what
+exists; submit_strategy to save a version of a draft (it is imported and built
+at once, and an error comes back with its traceback); run_backtest on a year or
+two first, then widen. Every backtest is saved, and its link opens it on the
+user's page.
+
+Versions: submit_strategy never replaces anything. The first submit of a name
+is its version 1, "MY-EMA 1"; every submit of that name after it is the next
+version, and the ones before stay as they were. That code is the strategy's
+name everywhere - run_backtest, the page, the runs; a bare name means its
+newest version. The server ends the file with a PARITY_DERIVA line - the
+version, and the version of the server it was written on. Leave it: it is
+rewritten on every submit.
+
+The public repository of strategies: when the user wants a strategy of yours
+in it, call propose_public with its code and a note of what it does and how it
+tested. Nothing is sent from here - the user reads it and opens the pull
+request from the settings page, once that version is enabled.
+
+Rules:
+1. Build on what exists. Before writing an indicator, a candle pattern, a
+   level, a filter or any helper, call list_helpers: what is there you import
+   and use, and you do not copy its code into the strategy. Read one with
+   get_source when its line is not enough. A built-in strategy close to yours
+   is a base to subclass, not a file to copy.
+2. A missing indicator or function is a feature request, not your code. Call
+   request_feature with what it computes (the formula, or a reference), what
+   it takes and gives, and the strategy that needs it, and tell the user the
+   strategy waits for it; list_helpers shows the requests already open, so do
+   not file one twice. Write it inside the strategy only when the user asks for
+   that now - and then file the request all the same, and say so in a comment
+   where it is written.
+3. Test on years the rules were not tuned on: develop and tune on a first
+   stretch (up to the end of 2021, say), then one run on the years after with
+   the parameters unchanged. Give both, and say so when the later years are
+   worse.
+4. Report honestly: always the trades, the net, the max drawdown and the
+   profit factor. Under about 100 trades say it is too few to judge, and never
+   call a strategy profitable off one window.
+5. A grid belongs to the page, not to you: do not call run_backtest in a loop
+   over many combinations - the sandbox runs one backtest at a time on a small
+   server. Try a few by hand; for a grid, give the user the values to try on
+   the simulate page.
+6. Pips come from pipSize(instrument) in parity_deriva.lib.utils, never from
+   0.0001 written in: a JPY pair's pip is 0.01. A stop or a target is not
+   narrower than a few spreads.
+7. Every number that sets a rule is a parameter: read with self._set, explained
+   in PARAM_HELP, about five at most, and no bare numbers in signal().
+8. Talk with the user in the user's language; the code, the names, DESCRIPTION
+   and PARAM_HELP are in English."""
+
+#: the modules list_helpers lays out: what a strategy is built from
+HELPERS = ('parity_deriva.lib.streaming', 'parity_deriva.lib.indicators',
+		   'parity_deriva.lib.utils', 'parity_deriva.strategy.H4', 'parity_deriva.strategy.M15')
+
+#: a feature request's limits: an assistant is not a way to fill the disk
+REQUEST_TITLE, REQUEST_TEXT, REQUESTS_OPEN = 120, 4000, 100
 
 #: run_backtest's options: the page's form fields for the account's rules
 OPTIONS = {
@@ -118,13 +177,32 @@ TOOLS = [
 					"bars there are and the first and last day.",
 	 'inputSchema': {'type': 'object', 'properties': {}}},
 	{'name': 'submit_strategy',
-	 'description': "Save a strategy as a draft, or replace your draft of that name. It is "
-					"checked, imported and built in a sandbox first; nothing is saved if that "
-					"fails. " + GUIDE,
+	 'description': "Save a strategy as the next version of a draft: the first submit of a "
+					"name is version 1, each one after it the next, and none is ever replaced. "
+					"It is checked, imported and built in a sandbox first; nothing is saved if "
+					"that fails. " + GUIDE,
 	 'inputSchema': {'type': 'object', 'required': ['name', 'source'], 'properties': {
 		 'name': {'type': 'string', 'pattern': uploaded.NAME.pattern,
-				  'description': "upper case, digits and dashes, e.g. MY-EMA-CROSS"},
+				  'description': "upper case, digits and dashes, e.g. MY-EMA-CROSS - "
+								 "without a version: the server adds it"},
 		 'source': {'type': 'string', 'description': "the whole Python file"}}}},
+	{'name': 'list_helpers',
+	 'description': "What a strategy is built from, to use rather than write again: the "
+					"indicators, series, swings, candle patterns and level helpers of this "
+					"project, one line each with its arguments, by module - and the feature "
+					"requests already open.",
+	 'inputSchema': {'type': 'object', 'properties': {}}},
+	{'name': 'request_feature',
+	 'description': "Ask the user for an indicator or a function a strategy needs and "
+					"list_helpers does not have, instead of writing it into the strategy. "
+					"The user reads the requests on the settings page.",
+	 'inputSchema': {'type': 'object', 'required': ['title', 'description'], 'properties': {
+		 'title': {'type': 'string', 'maxLength': REQUEST_TITLE,
+				   'description': "what it is, e.g. Keltner channel on the streaming Series"},
+		 'description': {'type': 'string', 'maxLength': REQUEST_TEXT,
+						 'description': "what it computes (formula or reference), its inputs "
+										"and outputs, and how the strategy would call it"},
+		 'strategy': {'type': 'string', 'description': "the draft that needs it, if any"}}}},
 	{'name': 'run_backtest',
 	 'description': "Backtest a strategy on the stored candles and return its report and "
 					"trades. Runs in a sandbox with a time limit: start with a year or two.",
@@ -142,6 +220,16 @@ TOOLS = [
 					 'description': "the account's rules",
 					 'properties': dict((k, {'type': t, 'description': d})
 										for k, (t, d) in OPTIONS.items())}}}},
+	{'name': 'propose_public',
+	 'description': "Propose one version of a strategy of yours for the public repository of "
+					"strategies, when the user asks for it. Nothing is sent: the user reads it "
+					"on the settings page and opens the pull request from there, once that "
+					"version is enabled.",
+	 'inputSchema': {'type': 'object', 'required': ['strategy', 'note'], 'properties': {
+		 'strategy': {'type': 'string', 'description': "its code, e.g. MY-EMA 3"},
+		 'note': {'type': 'string', 'maxLength': REQUEST_TEXT,
+				  'description': "what it does and how it tested - windows, trades, net, max "
+								 "drawdown: the pull request's text"}}}},
 ]
 
 
@@ -166,11 +254,54 @@ def day(ms):
 
 
 def meta(path):
+	"""What is kept beside a strategy's file, and its name and version read off the file's."""
 	try:
 		with open(path[:-3] + '.json') as handle:
-			return json.load(handle)
+			found = json.load(handle)
 	except (OSError, ValueError):
-		return {}
+		found = {}
+	m = uploaded.FILE.fullmatch(os.path.basename(path))
+	if m:
+		found.update(family=m.group(1), version=int(m.group(2)))
+	return found
+
+
+def keepMeta(path, found):
+	with open(path[:-3] + '.json.tmp', 'w') as handle:
+		json.dump(dict((k, v) for k, v in found.items() if k not in ('family', 'version')), handle)
+	os.replace(path[:-3] + '.json.tmp', path[:-3] + '.json')
+
+
+@functools.lru_cache(maxsize=1)
+def serverVersion():
+	"""
+	What a strategy is written on: VERSION, raised by hand when what a
+	strategy builds on changes, and the commit the service runs - e.g.
+	1.0.0+4483392, and .dirty after it for a tree with changes not committed.
+	Once per process: a restart (scripts/web.py re-execs) reads it again.
+	"""
+	top = os.path.join(sandbox.TOP, 'parity_deriva')
+	try:
+		with open(os.path.join(top, 'VERSION')) as handle:
+			version = handle.read().strip()
+	except OSError:
+		version = '0.0.0'
+	try:
+		commit = subprocess.run(['git', '-C', top, 'rev-parse', '--short=7', 'HEAD'],
+								capture_output=True, text=True, timeout=10).stdout.strip()
+		dirty = subprocess.run(['git', '-C', top, 'diff', '--quiet', 'HEAD'],
+							   capture_output=True, timeout=10).returncode == 1
+	except (OSError, subprocess.SubprocessError):
+		commit, dirty = '', False
+	return version + ('+%s%s' % (commit, '.dirty' if dirty else '') if commit else '')
+
+
+def resolve(service, name):
+	"""A strategy's code: `name` itself, or the newest version of a name of yours."""
+	held = dict(uploaded.drafts(dataDir(service)), **uploaded.enabled(dataDir(service)))
+	if name in held or name in web().strategies():
+		return name
+	return uploaded.latest(dataDir(service), name) or name
 
 
 # ---------------------------------------------------------------- the tools
@@ -181,7 +312,8 @@ def listStrategies(service, args):
 	descriptions, defaults = w.descriptions(), w.defaults()
 	out = [dict({'name': name, 'state': 'enabled' if name in enabled else 'built in',
 				 'description': descriptions.get(name),
-				 'parameters': list(w.handlerFields(name))}, **defaults.get(name, {}))
+				 'parameters': list(w.handlerFields(name))}, **defaults.get(name, {}),
+				**(meta(enabled[name]) if name in enabled else {}))
 		   for name in w.strategies()]
 	for name, path in uploaded.drafts(dataDir(service)).items():
 		out.append(dict(meta(path), name=name, state='draft'))
@@ -189,7 +321,7 @@ def listStrategies(service, args):
 
 
 def getSource(service, args):
-	name = str(args.get('name') or '')
+	name = resolve(service, str(args.get('name') or ''))
 	for held in (uploaded.drafts(dataDir(service)), uploaded.enabled(dataDir(service))):
 		if name in held:
 			with open(held[name]) as handle:
@@ -211,15 +343,17 @@ def listData(service, args):
 		for row in service.instruments()]}
 
 
-def submitStrategy(service, args):
+# the next version is taken and written by one submit at a time
+_submitLock = threading.Lock()
+
+
+def submitStrategy(service, args, client):
 	name, source = str(args.get('name') or ''), args.get('source')
 	if not uploaded.NAME.fullmatch(name):
-		raise ToolError("name: upper case, digits and dashes, 2 to 40, e.g. MY-EMA-CROSS")
+		raise ToolError("name: upper case, digits and dashes, 2 to 40, e.g. MY-EMA-CROSS - "
+						"without a version: the server adds it")
 	if not isinstance(source, str) or not source.strip():
 		raise ToolError("source: the whole Python file")
-	if name in uploaded.enabled(dataDir(service)):
-		raise ToolError("%s is enabled: the user has to disable it on the settings page "
-						"before it can be replaced. Submit it under another name." % name)
 	if name in web().strategies():
 		raise ToolError("%s is a built-in strategy: choose another name" % name)
 	problems = uploaded.check(source)
@@ -227,25 +361,31 @@ def submitStrategy(service, args):
 		raise ToolError("not saved:\n" + "\n".join(problems))
 	where = os.path.join(uploaded.root(dataDir(service)), 'drafts')
 	os.makedirs(where, exist_ok=True)
-	trial = os.path.join(where, '_%s.py' % name)
-	with open(trial, 'w') as handle:
-		handle.write(source)
-	try:
-		answer = sandboxed(service, {'check': True, 'strategy': {'name': name, 'path': trial}},
-						   timeout=60)
-		os.replace(trial, os.path.join(where, name + '.py'))
-	finally:
-		if os.path.exists(trial):
-			os.remove(trial)
-	found = dict(answer['strategy'], submitted=int(time.time() * 1000))
-	with open(os.path.join(where, name + '.json'), 'w') as handle:
-		json.dump(found, handle)
-	return dict(found, name=name, state='draft',
-				next="run_backtest with strategy %s" % name)
+	# Was: a draft of the same name was replaced. Now: never - each submit is
+	# the name's next version, and the one run and read before stays
+	with _submitLock:
+		version, server = uploaded.nextVersion(dataDir(service), name), serverVersion()
+		code = uploaded.code(name, version)
+		path = os.path.join(where, uploaded.fileName(code))
+		trial = os.path.join(where, '_' + uploaded.fileName(code))
+		with open(trial, 'w') as handle:
+			handle.write(uploaded.stamp(source, name, version, server))
+		try:
+			answer = sandboxed(service, {'check': True, 'strategy': {'name': code, 'path': trial}},
+							   timeout=60)
+			os.replace(trial, path)
+		finally:
+			if os.path.exists(trial):
+				os.remove(trial)
+		found = dict(answer['strategy'], server=server, submitted=int(time.time() * 1000),
+					 client=client)
+		keepMeta(path, found)
+	return dict(found, name=code, family=name, version=version, state='draft',
+				next="run_backtest with strategy %s" % code)
 
 
 def runBacktest(service, args, base):
-	name = str(args.get('strategy') or '')
+	name = resolve(service, str(args.get('strategy') or ''))
 	draft = uploaded.drafts(dataDir(service)).get(name)
 	if draft:
 		known = [f['name'] for f in meta(draft).get('parameters', ())]
@@ -277,7 +417,7 @@ def runBacktest(service, args, base):
 	summary.update({'from': day(summary['from']), 'to': day(summary['to']),
 					'fine': payload.get('fine'), 'counts': payload.get('counts')})
 	trades = payload.get('trades') or []
-	return {'run': run, 'link': base + '/run?' + urllib.parse.urlencode(fields),
+	return {'strategy': name, 'run': run, 'link': base + '/run?' + urllib.parse.urlencode(fields),
 			'summary': summary,
 			'trades': [{'n': t['n'], 'direction': t['direction'], 'signal': day(t['signalTime']),
 						'entry': day(t['entryTime']), 'entryPrice': t['entryPrice'],
@@ -286,6 +426,205 @@ def runBacktest(service, args, base):
 						'outcome': t['outcome'], 'pl': t['pl'], 'balance': t['balance']}
 					   for t in trades[:TRADES_SHOWN]],
 			'tradesShown': '%d of %d' % (min(len(trades), TRADES_SHOWN), len(trades))}
+
+
+def helpers():
+	"""
+	HELPERS laid out from their source, not imported: every public function,
+	class and method, a line each - its arguments and the first paragraph of
+	its docstring. Read off the code, so a helper added is listed at once.
+	"""
+	def line(node, owner=''):
+		if isinstance(node, ast.ClassDef):
+			args = ', '.join(ast.unparse(b) for b in node.bases)
+		else:
+			args = ast.unparse(node.args)
+		doc = ' '.join((ast.get_docstring(node) or '').split('\n\n')[0].split())
+		if len(doc) > 200:
+			doc = doc[:197] + '...'
+		return '%s%s(%s)%s' % (owner, node.name, args, ' - ' + doc if doc else '')
+	out = []
+	for module in HELPERS:
+		with open(os.path.join(sandbox.TOP, *module.split('.')) + '.py') as handle:
+			tree = ast.parse(handle.read())
+		lines = []
+		for node in tree.body:
+			if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and not node.name.startswith('_'):
+				lines.append(line(node))
+				if isinstance(node, ast.ClassDef):
+					lines += [line(m, '    %s.' % node.name) for m in node.body
+							  if isinstance(m, ast.FunctionDef) and not m.name.startswith('_')]
+		out.append({'module': module, 'helpers': lines})
+	return out
+
+
+def listHelpers(service, args):
+	return {'modules': helpers(), 'requested': [
+		dict((k, r.get(k)) for k in ('id', 'title', 'strategy')) for r in requests(service)]}
+
+
+# the requests are one small file, written whole: one writer at a time
+_requestsLock = threading.Lock()
+
+
+def requestsPath(service):
+	return os.path.join(uploaded.root(dataDir(service)), 'requests.json')
+
+
+def requests(service):
+	"""The feature requests still open, oldest first."""
+	try:
+		with open(requestsPath(service)) as handle:
+			return json.load(handle)
+	except (OSError, ValueError):
+		return []
+
+
+def keepRequests(service, rows):
+	path = requestsPath(service)
+	os.makedirs(os.path.dirname(path), exist_ok=True)
+	with open(path + '.tmp', 'w') as handle:
+		json.dump(rows, handle, indent=1)
+	os.replace(path + '.tmp', path)
+
+
+def requestFeature(service, args):
+	title = ' '.join(str(args.get('title') or '').split())
+	text = str(args.get('description') or '').strip()
+	strategy = str(args.get('strategy') or '').strip()[:40] or None
+	if not title or len(title) > REQUEST_TITLE:
+		raise ToolError("title: what is asked for, 1 to %d characters" % REQUEST_TITLE)
+	if not text or len(text) > REQUEST_TEXT:
+		raise ToolError("description: what it computes, its inputs and outputs, 1 to %d "
+						"characters" % REQUEST_TEXT)
+	with _requestsLock:
+		rows = requests(service)
+		same = [r for r in rows if r['title'].lower() == title.lower()]
+		if same:
+			raise ToolError("already requested as %s: %s. Add to it by telling the user"
+							% (same[0]['id'], same[0]['title']))
+		if len(rows) >= REQUESTS_OPEN:
+			raise ToolError("%d requests are open already: the user has to answer some "
+							"on the settings page first" % len(rows))
+		row = {'id': 'R%d' % (max([int(r['id'][1:]) for r in rows] or [0]) + 1), 'title': title,
+			   'description': text, 'strategy': strategy, 'submitted': int(time.time() * 1000)}
+		keepRequests(service, rows + [row])
+	return dict(row, next="tell the user that %s waits for it: the request is on the "
+				"settings page" % (strategy or 'the strategy'))
+
+
+def dropRequest(service, id):
+	"""A request answered, from the settings page: it leaves the list."""
+	with _requestsLock:
+		rows = requests(service)
+		if not any(r['id'] == id for r in rows):
+			raise ToolError("no request %r" % id)
+		keepRequests(service, [r for r in rows if r['id'] != id])
+	return status(service)
+
+
+def proposePublic(service, args):
+	code = resolve(service, str(args.get('strategy') or ''))
+	note = str(args.get('note') or '').strip()
+	enabled = uploaded.enabled(dataDir(service))
+	path = uploaded.drafts(dataDir(service)).get(code) or enabled.get(code)
+	if not path:
+		raise ToolError("%s is not one of yours: only a strategy written here goes to the "
+						"public repository (list_strategies)" % code)
+	if not note or len(note) > REQUEST_TEXT:
+		raise ToolError("note: what it does and how it tested, 1 to %d characters" % REQUEST_TEXT)
+	found = meta(path)
+	if found.get('pull'):
+		raise ToolError("%s has its pull request already: %s" % (code, found['pull']['url']))
+	found['proposed'] = {'note': note, 'at': int(time.time() * 1000)}
+	keepMeta(path, found)
+	return {'strategy': code, 'proposed': True, 'next': "tell the user it waits on the settings "
+			"page: " + ("the pull request is opened there" if code in enabled else
+						"enable %s there, then open the pull request" % code)}
+
+
+def github(token, method, path, body=None):
+	"""One call to GitHub's REST API: its answer, or ToolError in GitHub's words."""
+	request = urllib.request.Request(
+		'https://api.github.com' + path, method=method,
+		data=None if body is None else json.dumps(body).encode(),
+		headers={'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
+				 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'parity-deriva'})
+	try:
+		with urllib.request.urlopen(request, timeout=30) as response:
+			raw = response.read()
+	except urllib.error.HTTPError as error:
+		try:
+			said = json.loads(error.read() or b'{}').get('message') or ''
+		except ValueError:
+			said = ''
+		raise ToolError("GitHub said %s to %s %s: %s" % (error.code, method, path, said))
+	except (urllib.error.URLError, OSError) as error:
+		raise ToolError("GitHub cannot be reached: %s" % error)
+	return json.loads(raw) if raw else {}
+
+
+def pullRequest(service, code):
+	"""
+	The pull request of a version the assistant proposed and the user enabled,
+	opened on PUBLIC_REPO with GITHUB_TOKEN from the settings page: its file as
+	it is, stamp included, and a card of what the page knows of it beside it,
+	under strategies/NAME/, on a branch of its own - of the repository when
+	the token may push to it, else of the token's fork of it.
+	"""
+	setup = service.setup
+	repo, token = getattr(setup, 'PUBLIC_REPO', None), getattr(setup, 'GITHUB_TOKEN', None)
+	if not repo or not token:
+		raise ToolError("no public repository: set PARITY_DERIVA_PUBLIC_REPO (owner/name) and "
+						"PARITY_DERIVA_GITHUB_TOKEN in parity_deriva/.env, then restart")
+	path = uploaded.enabled(dataDir(service)).get(code)
+	if not path:
+		raise ToolError("%s is not enabled: a pull request carries a version somebody read" % code)
+	found = meta(path)
+	if not found.get('proposed'):
+		raise ToolError("%s was not proposed: the assistant proposes it with a note "
+						"(propose_public)" % code)
+	if found.get('pull'):
+		raise ToolError("%s has its pull request already: %s" % (code, found['pull']['url']))
+	with open(path) as handle:
+		source = handle.read()
+	upstream = github(token, 'GET', '/repos/' + repo)
+	base, head = upstream['default_branch'], repo
+	if not (upstream.get('permissions') or {}).get('push'):
+		head = github(token, 'POST', '/repos/%s/forks' % repo, {'default_branch_only': True})['full_name']
+		# GitHub makes a fork in the background: wait for it, then bring it level
+		for _ in range(15):
+			try:
+				github(token, 'GET', '/repos/' + head)
+				break
+			except ToolError:
+				time.sleep(2)
+		github(token, 'POST', '/repos/%s/merge-upstream' % head, {'branch': base})
+	sha = github(token, 'GET', '/repos/%s/git/ref/heads/%s' % (repo, base))['object']['sha']
+	# the time in it: a try that failed half way leaves its branch, and the next is another
+	branch = 'strategy/%s-v%d-%d' % (found['family'], found['version'], time.time())
+	github(token, 'POST', '/repos/%s/git/refs' % head, {'ref': 'refs/heads/' + branch, 'sha': sha})
+	card = dict((k, found.get(k)) for k in ('family', 'version', 'server', 'description',
+											'instrument', 'granularity', 'parameters', 'submitted'))
+	card.update(code=code, note=found['proposed']['note'])
+	folder = 'strategies/%s/' % found['family']
+	for name, text in ((uploaded.fileName(code), source),
+					   (uploaded.fileName(code)[:-3] + '.json', json.dumps(card, indent=1) + '\n')):
+		github(token, 'PUT', '/repos/%s/contents/%s' % (head, urllib.parse.quote(folder + name)),
+			   {'message': 'Add %s' % code, 'branch': branch,
+				'content': base64.b64encode(text.encode()).decode()})
+	pull = github(token, 'POST', '/repos/%s/pulls' % repo, {
+		'title': 'Add %s' % code, 'base': base,
+		'head': branch if head == repo else '%s:%s' % (head.split('/')[0], branch),
+		'body': '**%s**: %s\n\n- written on parity-deriva %s\n- meant for %s %s\n'
+				'- parameters: %s\n\n%s\n' % (
+					code, found.get('description') or '', found.get('server') or 'a server before versions',
+					found.get('instrument') or 'any instrument', found.get('granularity') or '',
+					', '.join(p.get('name', '') for p in found.get('parameters') or ()) or 'none',
+					found['proposed']['note'])})
+	found['pull'] = {'url': pull['html_url'], 'number': pull['number'], 'at': int(time.time() * 1000)}
+	keepMeta(path, found)
+	return status(service)
 
 
 def sandboxed(service, job, timeout=None):
@@ -302,24 +641,31 @@ def sandboxed(service, job, timeout=None):
 	return answer
 
 
-def call(service, name, args, base):
+def call(service, name, args, base, client):
 	if name == 'list_strategies':
 		return listStrategies(service, args)
 	if name == 'get_source':
 		return getSource(service, args)
 	if name == 'list_data':
 		return listData(service, args)
+	if name == 'list_helpers':
+		return listHelpers(service, args)
+	if name == 'request_feature':
+		return requestFeature(service, args)
 	if name == 'submit_strategy':
-		return submitStrategy(service, args)
+		return submitStrategy(service, args, client)
 	if name == 'run_backtest':
 		return runBacktest(service, args, base)
+	if name == 'propose_public':
+		return proposePublic(service, args)
 	raise ToolError("no tool %r" % name)
 
 
 # ------------------------------------------------------------- the protocol
 
-def handle(service, message, base):
-	"""One JSON-RPC message: its answer, or None for a notification."""
+def handle(service, message, base, client):
+	"""One JSON-RPC message: its answer, or None for a notification. `client` is
+	who sent it, kept with the strategies it submits."""
 	# a notification, or an answer to a request this server never makes
 	if not isinstance(message, dict) or 'id' not in message or 'method' not in message:
 		return None
@@ -329,7 +675,7 @@ def handle(service, message, base):
 		asked = params.get('protocolVersion')
 		answer['result'] = {'protocolVersion': asked if asked in PROTOCOLS else PROTOCOLS[0],
 							'capabilities': {'tools': {}},
-							'serverInfo': {'name': 'parity-deriva', 'version': '1'},
+							'serverInfo': {'name': 'parity-deriva', 'version': serverVersion()},
 							'instructions': GUIDE}
 	elif method == 'ping':
 		answer['result'] = {}
@@ -337,7 +683,7 @@ def handle(service, message, base):
 		answer['result'] = {'tools': TOOLS}
 	elif method == 'tools/call':
 		try:
-			found = call(service, params.get('name'), params.get('arguments') or {}, base)
+			found = call(service, params.get('name'), params.get('arguments') or {}, base, client)
 			answer['result'] = {'content': [{'type': 'text', 'text': json.dumps(found, indent=1)}]}
 		except (ToolError, uploaded.UploadError, sandbox.SandboxError, ledger.LedgerError,
 				web().ServiceError, OSError) as exc:
@@ -357,7 +703,8 @@ def status(service):
 		for name, path in held.items():
 			rows.append(dict(meta(path), name=name, state=state))
 	return dict(service.oauth.status(), strategies=sorted(
-		rows, key=lambda r: r.get('submitted') or 0, reverse=True))
+		rows, key=lambda r: r.get('submitted') or 0, reverse=True),
+		requests=requests(service)[::-1])
 
 
 def source(service, name):
@@ -378,7 +725,7 @@ def act(service, name, action):
 			raise ToolError("no draft %r" % name)
 		if name in ledger.STRATEGIES:
 			raise ToolError("a strategy is already called %s" % name)
-		target = os.path.join(uploaded.root(dataDir(service)), name + '.py')
+		target = os.path.join(uploaded.root(dataDir(service)), uploaded.fileName(name))
 		moves = [(draft, target), (draft[:-3] + '.json', target[:-3] + '.json')]
 		for a, b in moves:
 			if os.path.exists(a):
@@ -459,7 +806,8 @@ def route(handler, method, path, query):
 			return reply(handler, 405, {'error': "POST only"}, headers=[('Allow', 'POST')])
 		base = publicBase(handler)
 		auth = handler.headers.get('Authorization') or ''
-		if not authority.allowed(auth[7:].strip() if auth[:7].lower() == 'bearer ' else None):
+		bearer = auth[7:].strip() if auth[:7].lower() == 'bearer ' else None
+		if not authority.allowed(bearer):
 			return reply(handler, 401, {'error': 'invalid_token'}, headers=[(
 				'WWW-Authenticate', 'Bearer resource_metadata="%s/.well-known/oauth-protected-resource"'
 				% base)])
@@ -468,10 +816,14 @@ def route(handler, method, path, query):
 		except ValueError:
 			return reply(handler, 400, {'jsonrpc': '2.0', 'id': None,
 										'error': {'code': -32700, 'message': "not JSON"}})
+		# the OAuth client's own name; with the secret in the header, the only
+		# name there is is the program's User-Agent
+		client = authority.holder(bearer) or 'token: %s' % (
+			handler.headers.get('User-Agent') or 'no user agent')[:60]
 		if isinstance(message, list):
-			answers = [a for a in (handle(handler.service, m, base) for m in message) if a]
+			answers = [a for a in (handle(handler.service, m, base, client) for m in message) if a]
 		else:
-			answers = handle(handler.service, message, base)
+			answers = handle(handler.service, message, base, client)
 		return reply(handler, 200, answers) if answers else reply(handler, 202, b'')
 	if path.startswith('/.well-known/oauth-protected-resource'):
 		return reply(handler, 200, authority.resourceMetadata(publicBase(handler)))
@@ -523,6 +875,27 @@ def route(handler, method, path, query):
 				asked = {}
 			return reply(handler, 200, act(handler.service, str(asked.get('name') or ''),
 										   asked.get('action')))
-	except ToolError as exc:
+		if path == '/api/mcp/import':
+			# a file saved from the code's dialog, back as a draft: the same
+			# checks as an assistant's submit_strategy
+			try:
+				asked = json.loads(body(handler) or b'{}')
+			except ValueError:
+				asked = {}
+			submitStrategy(handler.service, asked, 'imported from a file')
+			return reply(handler, 200, status(handler.service))
+		if path == '/api/mcp/request':
+			try:
+				asked = json.loads(body(handler) or b'{}')
+			except ValueError:
+				asked = {}
+			return reply(handler, 200, dropRequest(handler.service, str(asked.get('id') or '')))
+		if path == '/api/mcp/pull':
+			try:
+				asked = json.loads(body(handler) or b'{}')
+			except ValueError:
+				asked = {}
+			return reply(handler, 200, pullRequest(handler.service, str(asked.get('name') or '')))
+	except (ToolError, uploaded.UploadError, sandbox.SandboxError) as exc:
 		return reply(handler, 400, {'error': str(exc)})
 	return reply(handler, 404, {'error': "no route %s" % path})

@@ -13,8 +13,11 @@ import hashlib
 import json
 import os
 import secrets
+import shutil
+import tempfile
 import threading
 import unittest
+import unittest.mock
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -23,6 +26,7 @@ from http.server import ThreadingHTTPServer
 from parity_deriva.backtest import ledger
 from parity_deriva.strategy import uploaded
 from parity_deriva.tests.web_test import StoreCase
+from parity_deriva.web import mcp
 from parity_deriva.web import service as service_module
 
 GOOD = '''
@@ -66,6 +70,26 @@ class CheckTest(unittest.TestCase):
 			self.assertTrue(any(word in p for p in problems), (source, problems))
 
 
+class VersionTest(unittest.TestCase):
+
+	def test_a_file_from_before_versions_is_version_one(self):
+		where = tempfile.mkdtemp()
+		self.addCleanup(shutil.rmtree, where)
+		for name in ('OLD.py', 'OLD.json', 'NEW@2.py'):
+			open(os.path.join(where, name), 'w').close()
+		self.assertEqual(list(uploaded._listed(where)), ['NEW 2', 'OLD 1'])
+		self.assertEqual(sorted(os.listdir(where)), ['NEW@2.py', 'OLD@1.json', 'OLD@1.py'])
+
+	def test_the_stamp_is_one_line_however_often_it_is_written(self):
+		once = uploaded.stamp(GOOD, 'EVERY-THIRD', 1, '1.0.0+abc')
+		twice = uploaded.stamp(once.replace("'version': 1", "'version': 9"), 'EVERY-THIRD', 2, '1.0.1')
+		self.assertEqual(twice.count(uploaded.STAMP + ' ='), 1)
+		self.assertIn("'version': 2, 'server': '1.0.1'", twice)
+		self.assertEqual(uploaded.check(twice), [])
+		self.assertEqual(uploaded.split('EVERY-THIRD 2'), ('EVERY-THIRD', 2))
+		self.assertEqual(uploaded.split('H401-PULLBACK-EMA'), ('H401-PULLBACK-EMA', None))
+
+
 class MCPTest(StoreCase):
 
 	def setUp(self):
@@ -79,7 +103,7 @@ class MCPTest(StoreCase):
 		thread.start()
 		self.addCleanup(self.server.server_close)
 		self.addCleanup(self.server.shutdown)
-		self.addCleanup(lambda: [ledger.STRATEGIES.pop(n, None) for n in ('EVERY-THIRD',)])
+		self.addCleanup(lambda: [ledger.STRATEGIES.pop(n, None) for n in ('EVERY-THIRD 1',)])
 		self.bearer = None
 
 	def http(self, path, data=None, headers=None, kind='application/json'):
@@ -161,8 +185,11 @@ class MCPTest(StoreCase):
 		self.assertEqual(self.rpc('initialize', {'protocolVersion': '2025-06-18'})['protocolVersion'],
 						 '2025-06-18')
 		names = [t['name'] for t in self.rpc('tools/list')['tools']]
+		# Was: five tools. Now: list_helpers and request_feature too, which
+		# the rules in the instructions send an assistant to, and propose_public
 		self.assertEqual(names, ['list_strategies', 'get_source', 'list_data',
-								 'submit_strategy', 'run_backtest'])
+								 'submit_strategy', 'list_helpers', 'request_feature',
+								 'run_backtest', 'propose_public'])
 		data, _ = self.tool('list_data')
 		self.assertEqual(data['instruments'][0]['instrument'], 'EUR_USD')
 		source, failed = self.tool('get_source', name='parity_deriva.strategy.H4')
@@ -173,15 +200,24 @@ class MCPTest(StoreCase):
 		saved, failed = self.tool('submit_strategy', name='EVERY-THIRD', source=GOOD)
 		self.assertFalse(failed, saved)
 		self.assertIn('every', [p['name'] for p in saved['parameters']])
+		# its first version, stamped with the server it was written on
+		self.assertEqual((saved['name'], saved['version'], saved['server']),
+						 ('EVERY-THIRD 1', 1, mcp.serverVersion()))
+		self.assertIn("PARITY_DERIVA = {'name': 'EVERY-THIRD', 'version': 1",
+					  self.tool('get_source', name='EVERY-THIRD 1')[0]['source'])
+		# who wrote it: the name the OAuth client registered with
+		self.assertEqual(saved['client'], 'Test')
 		self.assertNotIn('EVERY-THIRD', ledger.STRATEGIES)  # a draft is never imported here
 		listed, _ = self.tool('list_strategies')
-		self.assertIn(('EVERY-THIRD', 'draft'),
+		self.assertIn(('EVERY-THIRD 1', 'draft'),
 					  [(s['name'], s['state']) for s in listed['strategies']])
 
+		# a bare name is its newest version
 		run, failed = self.tool('run_backtest', strategy='EVERY-THIRD', instrument='EUR_USD',
 								granularity='H1', parameters={'every': 4},
 								options={'risk': 1}, **{'from': '2017-02-01', 'to': '2017-02-09'})
 		self.assertFalse(failed, run)
+		self.assertEqual(run['strategy'], 'EVERY-THIRD 1')
 		self.assertGreater(run['summary']['trades'], 0)
 		self.assertIn('every=4', run['link'])
 		# saved: the page reopens it, though the service does not import it
@@ -193,19 +229,104 @@ class MCPTest(StoreCase):
 								  granularity='H1', parameters={'nope': 1},
 								  **{'from': '2017-02-01', 'to': '2017-02-09'})[1])
 
-		# enabled from the settings page: a strategy like the others from then on
-		status, raw, _ = self.http('/api/mcp/strategy', {'name': 'EVERY-THIRD', 'action': 'enable'},
+		# the code downloaded from the settings page comes back as a draft
+		self.assertEqual(self.http('/api/mcp/import', {'name': 'COPY', 'source': GOOD})[0], 403)
+		status, raw, _ = self.http('/api/mcp/import', {'name': 'EVERY-THIRD-COPY', 'source': GOOD},
 								   {'X-Parity-Deriva': '1'})
 		self.assertEqual(status, 200, raw)
-		self.assertIn('EVERY-THIRD', ledger.STRATEGIES)
-		refused, failed = self.tool('submit_strategy', name='EVERY-THIRD', source=GOOD)
-		self.assertTrue(failed)
-		self.assertIn('enabled', refused)
+		self.assertIn(('EVERY-THIRD-COPY', 'draft', 'imported from a file'),
+					  [(s['name'].split(' ')[0], s['state'], s.get('client'))
+					   for s in json.loads(raw)['strategies']])
+		status, raw, _ = self.http('/api/mcp/import', {'name': 'bad name', 'source': GOOD},
+								   {'X-Parity-Deriva': '1'})
+		self.assertEqual(status, 400, raw)
+
+		# enabled from the settings page: a strategy like the others from then on
+		status, raw, _ = self.http('/api/mcp/strategy', {'name': 'EVERY-THIRD 1', 'action': 'enable'},
+								   {'X-Parity-Deriva': '1'})
+		self.assertEqual(status, 200, raw)
+		klass = ledger.load_strategy('EVERY-THIRD 1')
+		self.assertEqual((klass.TAG, klass.VERSION, klass.SERVER_VERSION),
+						 ('EVERY-THIRD 1', 1, mcp.serverVersion()))
+		# Was: a name enabled was refused until disabled. Now: the next version,
+		# a draft, and the one enabled stays as the user read it
+		again, failed = self.tool('submit_strategy', name='EVERY-THIRD', source=GOOD)
+		self.assertFalse(failed, again)
+		self.assertEqual(again['name'], 'EVERY-THIRD 2')
+		self.assertIn("'version': 2", self.tool('get_source', name='EVERY-THIRD')[0]['source'])
+		self.assertIn('EVERY-THIRD 1', ledger.STRATEGIES)
+
+		# proposed for the public repository by the assistant; the pull request
+		# is the user's, from the settings page, on an enabled version only
+		self.assertTrue(self.tool('propose_public', strategy='EVERY-THIRD 1', note='')[1])
+		proposed, failed = self.tool('propose_public', strategy='EVERY-THIRD 1',
+									 note='every third bullish bar; 2017, 40 trades')
+		self.assertFalse(failed, proposed)
+		pull = lambda name: self.http('/api/mcp/pull', {'name': name}, {'X-Parity-Deriva': '1'})
+		status, raw, _ = pull('EVERY-THIRD 1')
+		self.assertEqual(status, 400)
+		self.assertIn(b'no public repository', raw)
+		self.settings.PUBLIC_REPO, self.settings.GITHUB_TOKEN = 'pub/strats', 'secret'
+		self.assertEqual(pull('EVERY-THIRD 2')[0], 400)  # a draft: nobody read it yet
+		calls = []
+
+		def github(token, method, path, body=None):
+			calls.append((method, path, body))
+			return {('GET', '/repos/pub/strats'): {'default_branch': 'main', 'permissions': {'push': False}},
+					('POST', '/repos/pub/strats/forks'): {'full_name': 'me/strats'},
+					('GET', '/repos/pub/strats/git/ref/heads/main'): {'object': {'sha': 'abc'}},
+					('POST', '/repos/pub/strats/pulls'): {'html_url': 'https://github.com/pub/strats/pull/7',
+														  'number': 7}}.get((method, path), {})
+		with unittest.mock.patch.object(mcp, 'github', github):
+			status, raw, _ = pull('EVERY-THIRD 1')
+		self.assertEqual(status, 200, raw)
+		row = [s for s in json.loads(raw)['strategies'] if s['name'] == 'EVERY-THIRD 1'][0]
+		self.assertEqual(row['pull']['number'], 7)
+		files = dict((path, base64.b64decode(body['content']).decode())
+					 for method, path, body in calls if method == 'PUT')
+		self.assertIn("'version': 1", files['/repos/me/strats/contents/strategies/EVERY-THIRD/EVERY-THIRD%401.py'])
+		card = json.loads(files['/repos/me/strats/contents/strategies/EVERY-THIRD/EVERY-THIRD%401.json'])
+		self.assertEqual((card['code'], card['server']), ('EVERY-THIRD 1', mcp.serverVersion()))
+		opened = [body for method, path, body in calls if path == '/repos/pub/strats/pulls'][0]
+		self.assertTrue(opened['head'].startswith('me:strategy/EVERY-THIRD-v1-'), opened)
+		self.assertEqual(pull('EVERY-THIRD 1')[0], 400)  # one pull request a version
 
 		# a new secret throws every token away
 		self.service.oauth.newSecret()
 		self.assertEqual(self.http('/mcp', {'jsonrpc': '2.0', 'id': 1, 'method': 'ping'},
 								   {'Authorization': 'Bearer %s' % self.bearer})[0], 401)
+
+	def test_an_assistant_is_sent_to_the_helpers_and_asks_for_what_is_missing(self):
+		self.bearer = self.service.oauth.newSecret()
+		rules = self.rpc('initialize', {'protocolVersion': '2025-06-18'})['instructions']
+		self.assertIn('list_helpers', rules)
+		self.assertIn('request_feature', rules)
+		# what exists, read off the code: a helper added is listed at once
+		found, failed = self.tool('list_helpers')
+		self.assertFalse(failed, found)
+		lines = dict((m['module'], m['helpers']) for m in found['modules'])
+		self.assertTrue(any(l.startswith('bullish(candle)') for l in lines['parity_deriva.strategy.H4']))
+		self.assertTrue(any('Series.ema(self, period) - The EMA' in l
+							for l in lines['parity_deriva.lib.streaming']))
+		self.assertEqual(found['requested'], [])
+		# what does not, asked for rather than written
+		asked, failed = self.tool('request_feature', title='Keltner channel',
+								  description='EMA(20) +- 2 ATR(10), on the streaming Series',
+								  strategy='MY-KELTNER')
+		self.assertFalse(failed, asked)
+		self.assertEqual(asked['id'], 'R1')
+		again, failed = self.tool('request_feature', title='keltner  CHANNEL', description='again')
+		self.assertTrue(failed)
+		self.assertIn('R1', again)
+		self.assertTrue(self.tool('request_feature', title='', description='x')[1])
+		self.assertEqual([r['id'] for r in self.tool('list_helpers')[0]['requested']], ['R1'])
+		# the settings page lists it, and answering it takes it off
+		status, raw, _ = self.http('/api/mcp')
+		self.assertEqual([r['title'] for r in json.loads(raw)['requests']], ['Keltner channel'])
+		status, raw, _ = self.http('/api/mcp/request', {'id': 'R1'}, {'X-Parity-Deriva': '1'})
+		self.assertEqual(status, 200, raw)
+		self.assertEqual(json.loads(raw)['requests'], [])
+		self.assertEqual(self.http('/api/mcp/request', {'id': 'R1'}, {'X-Parity-Deriva': '1'})[0], 400)
 
 	def test_a_loop_and_a_memory_eater_are_stopped_in_the_sandbox(self):
 		self.bearer = self.service.oauth.newSecret()
@@ -215,6 +336,8 @@ class MCPTest(StoreCase):
 			source = GOOD.replace("atr = state.atr()", body).replace('EveryThird', 'Bad')
 			saved, failed = self.tool('submit_strategy', name=name, source=source)
 			self.assertFalse(failed, saved)
+			# the secret names no client: the program's User-Agent does
+			self.assertTrue(saved['client'].startswith('token: Python-urllib'), saved['client'])
 			answer, failed = self.tool('run_backtest', strategy=name, instrument='EUR_USD',
 									   granularity='H1', **{'from': '2017-02-01', 'to': '2017-02-09'})
 			self.assertTrue(failed)
