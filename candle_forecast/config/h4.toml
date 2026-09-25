@@ -8,7 +8,7 @@
 # (tabella completa nel README). DA-CONFERMARE = scelta tecnica non coperta dal
 # prompt, messa per poter partire: la decide Roberto.
 
-results_dir = "results"
+results_dir = "results/h4"     # tutto H4 in una cartella: run_h4.cmd la copia sul server con un solo scp
 parity_deriva_root = "../.."   # cartella che contiene il pacchetto parity_deriva (store, indicatori)
 
 [split]                        # DEC-6, L0-P1

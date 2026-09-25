@@ -8,6 +8,7 @@ rem    4. run: baseline, LightGBM, GRU su tutti i sistemi del config
 rem    5. commit e push dei risultati (modelli, summary, report), se lo chiedi
 rem  Si lancia con doppio clic o da "Anaconda Prompt":  run.cmd [config]
 rem  Senza argomenti usa config\systems.toml (EURUSD M5); run_h4.cmd passa config\h4.toml.
+rem  Con NOPAUSE definita non si ferma alla fine: la pausa la fa chi lo chiama.
 rem  Prima volta: circa 5 minuti di installazione. Il training: ore.
 rem ============================================================================
 setlocal
@@ -86,14 +87,14 @@ if errorlevel 1 goto :fail
 
 :done
 echo.
-echo FATTO. Riepilogo: %CD%\results\summary.csv   Modelli: %CD%\results\^<sistema^>\models\
-pause
+echo FATTO. Riepilogo: summary.csv in %CD%\results   Modelli: ^<sistema^>\models\
+if not defined NOPAUSE pause
 exit /b 0
 
 :fail
 echo.
 echo ERRORE: il passo qui sopra e' fallito. Copia l'output e mandalo.
-pause
+if not defined NOPAUSE pause
 exit /b 1
 
 :find_conda

@@ -115,6 +115,10 @@ dall'export. Sul PC basta un doppio clic su `run_h4.cmd`: scarica i `.tbz` in `s
 (server, porta e cartella sono in cima allo script), poi fa quello che fa `run.cmd` con
 `config\h4.toml`. `prepare` legge il `.tbz` così com'è, senza ricampionare.
 
+Tutti i risultati H4 stanno in `results/h4/`, con il loro `summary.csv`. Alla fine `run_h4.cmd`
+copia la cartella intera sul server, in `/home/rrambaldi/candle_forecast-results/h4/`, anche le previsioni
+e i campioni che git non tiene. Così le analisi si possono fare anche lì.
+
 ```bash
 $PY -m candle_forecast.cli --config config/h4.toml prepare --instrument EURUSD
 $PY -m candle_forecast.cli --config config/h4.toml run --instrument EURUSD
