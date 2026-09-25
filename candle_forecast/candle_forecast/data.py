@@ -8,6 +8,7 @@ import pandas as pd
 
 OHLC = ["open", "high", "low", "close"]
 BAR = pd.Timedelta(minutes=5)
+BARS = {"M5": BAR, "H1": pd.Timedelta(hours=1), "H4": pd.Timedelta(hours=4)}   # passo fisso: sorgenti CSV
 NY = "America/New_York"
 
 
@@ -25,6 +26,23 @@ def read_store(path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     (L0-P5). Il mid dello store non si usa: si ricalcola da BID e ASK (L0-P2)."""
     frame = pd.read_hdf(path, "/M5")
     frame.index = pd.DatetimeIndex(frame.index).tz_localize("UTC")
+    return _sides(frame)
+
+
+def read_csv(path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, int]]:
+    """Il CSV di `pack-csv`: timestamp in ms UTC (inizio barra, L0-P5), bid_o ... ask_c.
+    Si tolgono, e si contano nel report (H4-1), le candele piatte su BID e ASK (high = low: il mercato
+    chiuso che alcuni export riempiono, weekend e Natale) e quelle con un prezzo ASK sotto il BID
+    (poche aperture della domenica 2006-2009): per il resto sono candele mancanti (APERTO-3)."""
+    frame = pd.read_csv(path)
+    frame.index = pd.to_datetime(frame.pop("timestamp"), unit="ms", utc=True)
+    flat = (frame["bid_h"] == frame["bid_l"]) & (frame["ask_h"] == frame["ask_l"])
+    crossed = pd.concat([frame[f"ask_{c}"] < frame[f"bid_{c}"] for c in "ohlc"], axis=1).any(axis=1) & ~flat
+    dropped = {"piatte su BID e ASK (mercato chiuso)": int(flat.sum()), "con ASK sotto BID": int(crossed.sum())}
+    return *_sides(frame[~flat & ~crossed]), dropped
+
+
+def _sides(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     frame.index.name = "timestamp"
     sides = []
     for side in ("bid", "ask"):

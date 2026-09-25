@@ -103,6 +103,27 @@ Il confronto si fa sul server, dove c'è lo store che legge LightGBM:
 python -m parity_deriva.scripts.excursion_lgbm EUR_USD --compare <repo>/candle_forecast/results/kronos/scratch-mini/predictions.csv
 ```
 
+## H4 dal 2003: `config/h4.toml`
+
+Lo store M5 parte dal 2015, cioè circa 18.600 candele H4. Per averne il doppio, H4 viene da CSV
+esportati a parte (BID e ASK, dal 2003; le coppie con NZD dal 2006), non dal ricampionamento dell'M5.
+Dieci coppie, ognuna un sistema a sé: niente miscuglio fra mercati.
+
+```bash
+# una volta per coppia, dove ci sono i CSV: BID e ASK in un CSV solo, zippato in stores/ (in git)
+$PY -m candle_forecast.cli --config config/h4.toml pack-csv EURUSD H4 eurusd_h4-BID.csv eurusd_h4-ASK.csv
+$PY -m candle_forecast.cli --config config/h4.toml prepare --instrument EURUSD
+$PY -m candle_forecast.cli --config config/h4.toml run --instrument EURUSD
+```
+
+- Le candele H4 dei CSV sono allineate a UTC (00, 04 ... 20), non all'ancora 17:00 New York di L0-P3.
+- `prepare` toglie, e conta in `data_report.txt`, le candele piatte su BID e ASK (high = low: alcuni
+  export riempiono così weekend e festivi) e quelle con un prezzo ASK sotto il BID (GBPUSD 4, USDJPY 9,
+  GBPJPY 1, NZDJPY 2, quasi tutte aperture della domenica 2006-2009). Tutto il resto passa dalla
+  stessa validazione dell'M5, e se c'è una violazione si ferma.
+- `num_threads = 1`: sul server a 2 core, condiviso con il servizio web, LightGBM con 2 thread è
+  4 volte più lento che con 1. Su un PC libero si può rimettere 0.
+
 ## Decisioni
 
 | Codice | Voce | Valore | Stato | Dove |
@@ -128,6 +149,7 @@ python -m parity_deriva.scripts.excursion_lgbm EUR_USD --compare <repo>/candle_f
 | APERTO-3 | Candele mancanti | la candela mancante non esiste: la sequenza continua per indice, nessuna finestra esclusa; i buchi restano nel report. Nei timeframe ricampionati le incomplete si tengono come sono | deciso | `config` `exclude_gap_windows = false` |
 | APERTO-4 | Primo sistema | EURUSD M5, mid, tutti gli N e M | deciso | `config` |
 | APERTO-5 | Indicatori | SMA100 sul close, ATR14 (Wilder), EMA21 sul close; riscaldamento: via le prime 99 candele, finché SMA100 non c'è | deciso | `indicators.py`, `config` |
+| H4-1 | Sorgente H4 | CSV BID e ASK dal 2003 (`pack-csv`), candele allineate a UTC; tolte e contate le piatte su BID e ASK e quelle con ASK sotto BID | deciso | `config/h4.toml`, `data.read_csv` |
 
 ### Scelte tecniche non coperte dal prompt (DA-CONFERMARE)
 

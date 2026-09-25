@@ -27,7 +27,10 @@ def load(path: str | Path) -> dict[str, Any]:
     if pd_root not in sys.path:
         sys.path.insert(0, pd_root)
     for inst in cfg["instruments"].values():
-        inst["store_zip"] = root / "stores" / f"{inst['store']}.zip"   # in git; `prepare` lo scompatta
+        if "store" in inst:
+            inst["store_zip"] = root / "stores" / f"{inst['store']}.zip"   # in git; `prepare` lo scompatta
+        # candele già nel timeframe, BID e ASK in un CSV (`pack-csv`): `prepare` le usa senza ricampionare
+        inst["csv_zip"] = {tf: root / "stores" / f"{name}.zip" for tf, name in inst.get("csv", {}).items()}
     validate(cfg)
     return cfg
 
@@ -44,6 +47,8 @@ def validate(cfg: dict[str, Any]) -> None:
             raise ConfigError(f"strumento {name} senza sezione [instruments.{name}]")
         if not cfg["instruments"][name]["tick"] > 0:                    # DEC-3
             raise ConfigError(f"tick di {name} deve essere > 0")
+        if bad := set(cfg["instruments"][name].get("csv", {})) - {"M5", "H1", "H4"}:
+            raise ConfigError(f"{name}: CSV solo per timeframe a passo fisso (M5, H1, H4), non {bad}")
     if bad := set(g["timeframes"]) - set(TIMEFRAMES):
         raise ConfigError(f"timeframe non supportati: {bad}")
     if g["price_series"] not in PRICE_SERIES:

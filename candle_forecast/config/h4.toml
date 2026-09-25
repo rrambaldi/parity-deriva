@@ -1,0 +1,90 @@
+# H4 dal 2003 (NZD dal 2006) da CSV esportati, non ricampionato dallo store M5 (che parte dal 2015).
+# Candele allineate a UTC (00, 04 ... 20), non all'ancora 17:00 New York di L0-P3.
+# Stessa griglia, modelli e iperparametri del livello 0 M5 (systems.toml). Si lancia con
+#   python -m candle_forecast.cli --config config/h4.toml prepare | run
+
+# Livello 0. Ogni voce porta il codice della decisione da cui viene
+# (tabella completa nel README). DA-CONFERMARE = scelta tecnica non coperta dal
+# prompt, messa per poter partire: la decide Roberto.
+
+results_dir = "results"
+parity_deriva_root = "../.."   # cartella che contiene il pacchetto parity_deriva (store, indicatori)
+
+[split]                        # DEC-6, L0-P1
+train = 0.75
+val = 0.125
+test = 0.125                   # bloccato: si apre solo con --open-test
+early_stop_tail = 0.10         # L0-P9: ultimo 10% del training
+
+[instruments.EURUSD]
+tick = 0.00001
+csv = { H4 = "EURUSD_H4.csv" }
+
+[instruments.GBPUSD]
+tick = 0.00001
+csv = { H4 = "GBPUSD_H4.csv" }
+
+[instruments.USDJPY]
+tick = 0.001
+csv = { H4 = "USDJPY_H4.csv" }
+
+[instruments.NZDUSD]
+tick = 0.00001
+csv = { H4 = "NZDUSD_H4.csv" }
+
+[instruments.EURGBP]
+tick = 0.00001
+csv = { H4 = "EURGBP_H4.csv" }
+
+[instruments.EURJPY]
+tick = 0.001
+csv = { H4 = "EURJPY_H4.csv" }
+
+[instruments.GBPJPY]
+tick = 0.001
+csv = { H4 = "GBPJPY_H4.csv" }
+
+[instruments.EURNZD]
+tick = 0.00001
+csv = { H4 = "EURNZD_H4.csv" }
+
+[instruments.GBPNZD]
+tick = 0.00001
+csv = { H4 = "GBPNZD_H4.csv" }
+
+[instruments.NZDJPY]
+tick = 0.001
+csv = { H4 = "NZDJPY_H4.csv" }
+
+[grid]
+instruments = ["EURUSD", "GBPUSD", "USDJPY", "NZDUSD", "EURGBP", "EURJPY", "GBPJPY", "EURNZD", "GBPNZD", "NZDJPY"]   # una coppia per volta, niente miscuglio
+timeframes = ["H4"]
+N = [21, 37, 42, 108]          # DEC-4
+M = [1, 2]                     # DEC-5
+models = ["lgbm", "gru"]       # Parte 5
+price_series = "mid"           # L0-P2: mid | bid | ask
+# APERTO-3: la candela mancante non esiste, la sequenza continua per indice.
+# true = torna a L0-P6 (finestre che attraversano un buco escluse e contate)
+exclude_gap_windows = false
+# APERTO-5: canali oltre alle candele, calcolati sulla serie di prezzo (close; ATR su h/l/c).
+# sma/ema: delta dal close di riferimento; atr: ampiezza, in unità minime senza togliere ref.
+# Riscaldamento: si scartano le candele finché l'indicatore più lungo (SMA100) non è pronto.
+indicators = ["sma100", "atr14", "ema21"]
+
+[lgbm]                         # L0-P8
+n_estimators = 1000
+learning_rate = 0.05
+num_leaves = 31
+seed = 42
+early_stopping_rounds = 50     # DA-CONFERMARE
+num_threads = 1                # server a 2 core condiviso: con 0 (tutti) i thread si contendono la CPU
+
+[gru]                          # L0-P8
+hidden = 32
+layers = 1
+lr = 0.001
+batch = 256
+seeds = [0, 1, 2]
+max_epochs = 30                # DA-CONFERMARE
+patience = 3                   # DA-CONFERMARE
+num_threads = 1                # server a 2 core condiviso: con 0 (tutti) i thread si contendono la CPU
