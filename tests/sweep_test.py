@@ -287,11 +287,11 @@ class TestSavedSweeps(TempDirCase):
             self.service.sweepExcursions(sweep, '2')
 
     def test_the_bars_asked_are_a_few_whole_numbers(self):
-        self.assertIsNone(service.parseBars(''))
-        self.assertEqual(service.parseBars('4, 16'), [4, 16])
+        self.assertIsNone(service.parseExcursionBars(''))
+        self.assertEqual(service.parseExcursionBars('4, 16'), [4, 16])
         for bad in ('4.5', '0', '1,2,3,4,5,6,7,8,9', 'x'):
             with self.assertRaises(ServiceError):
-                service.parseBars(bad)
+                service.parseExcursionBars(bad)
 
     def test_renamed_and_deleted(self):
         self.service.saveSweep(self.job())

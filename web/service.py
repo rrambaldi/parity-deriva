@@ -2398,7 +2398,7 @@ def backtestArgs(get):
 		leverage=parseLeverage(get('leverage')))
 
 
-def parseBars(text):
+def parseExcursionBars(text):
 	"""The N of an excursion analysis, comma separated; empty is the timeframe's own."""
 	if not (text or '').strip():
 		return None
@@ -2693,7 +2693,7 @@ class Handler(BaseHTTPRequestHandler):
 						raise ServiceError("no such run")
 					if what:
 						return self.sendJSON(self.service.sweepExcursions(
-							sweep, n, parseBars(self.one(query, 'bars'))))
+							sweep, n, parseExcursionBars(self.one(query, 'bars'))))
 					return self.sendJSON(self.service.sweepRun(sweep, n))
 				return self.sendJSON(self.service.savedSweep(sweep))
 			if route == '/api/stores':
