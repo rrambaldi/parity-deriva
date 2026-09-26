@@ -1414,7 +1414,7 @@ async function openSets() {
   // how many, in the title: empty until the list is in
   $('sets-count').textContent = '';
   if (!$('sets-dialog').open) $('sets-dialog').showModal();
-  const { sweeps } = await ask('api/sweeps');
+  const { sweeps, bucket } = await ask('api/sweeps');
   $('sets-count').textContent = sweeps.length;
   const stopped = sweeps.filter((set) => set.stopped).length;
   $('sets-drop-stopped').hidden = !stopped;
@@ -1428,7 +1428,8 @@ async function openSets() {
   for (const set of sweeps) {
     const row = body.insertRow();
     row.dataset.id = set.id;
-    const cells = [set.id + (set.origin ? ` (from ${set.origin})` : ''), fullStamp(set.saved), null, set.strategy, set.instrument,
+    const cells = [set.id + (set.origin ? ` (from ${set.origin})` : '') + (set.cold ? ' · in the bucket' : ''),
+      fullStamp(set.saved), null, set.strategy, set.instrument,
       set.granularity, set.from, set.to, (set.varied || []).join(', '),
       `${set.runs}${set.runs < set.total ? ' of ' + set.total : ''}${set.stopped ? ' (stopped)' : ''}`,
       set.best === null || set.best === undefined ? '' : amount(set.best),
@@ -1460,7 +1461,22 @@ async function openSets() {
     drop.className = 'set-delete';
     drop.dataset.icon = 'delete';
     drop.textContent = 'delete';
-    row.insertCell().append(rerun, ' ', drop);
+    const actions = row.insertCell();
+    actions.append(rerun, ' ');
+    // its runs' files to the S3 bucket and off this disk, or all back
+    // (web/service.py freeze): a run opened comes back by itself anyway
+    if (bucket) {
+      const cold = document.createElement('button');
+      cold.type = 'button';
+      cold.className = set.cold ? 'set-warm' : 'set-cold';
+      cold.dataset.icon = set.cold ? 'import' : 'upload';
+      cold.textContent = set.cold ? 'bring back' : 'to the bucket';
+      cold.title = set.cold
+        ? `its runs back from the bucket to this disk, ${(set.cold.bytes / 1e6).toFixed(1)} MB`
+        : 'its runs to the S3 bucket, off this disk: one opened comes back by itself';
+      actions.append(cold, ' ');
+    }
+    actions.append(drop);
   }
 }
 
@@ -1491,6 +1507,15 @@ $('sets-rows').addEventListener('click', async (event) => {
     if (event.target.classList.contains('set-delete')) {
       if (!await askUser('Delete this set of simulations? It cannot be undone.', 'delete')) return;
       await post('api/sweeps/' + row.dataset.id, { delete: true });
+      await openSets();
+      return;
+    }
+    if (event.target.classList.contains('set-cold') || event.target.classList.contains('set-warm')) {
+      const cold = event.target.classList.contains('set-cold');
+      event.target.disabled = true;
+      const told = await post('api/sweeps/' + row.dataset.id, cold ? { cold: true } : { warm: true });
+      message(cold ? `${told.files} runs in the bucket, ${(told.freed / 1e6).toFixed(1)} MB freed here`
+        : `${told.files} runs back on this disk`, 'info');
       await openSets();
       return;
     }

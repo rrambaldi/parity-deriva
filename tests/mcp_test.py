@@ -317,7 +317,8 @@ class MCPTest(StoreCase):
 		self.assertEqual(names, ['get_news', 'list_strategies', 'get_source', 'list_data',
 								 'submit_strategy', 'submit_indicator', 'list_helpers', 'request_feature',
 								 'run_backtest', 'propose_public', 'push_calendar', 'push_candles',
-								 'market_status', 'pull_candles', 'pull_calendar', 'push_sweep', 'push_record', 'push_mix'])
+								 'market_status', 'pull_candles', 'pull_calendar', 'push_sweep', 'push_record', 'push_mix',
+								 'list_runs', 'get_run', 'pull_code', 'live_status'])
 		data, _ = self.tool('list_data')
 		self.assertEqual(data['instruments'][0]['instrument'], 'EUR_USD')
 		source, failed = self.tool('get_source', name='parity_deriva.strategy.H4')

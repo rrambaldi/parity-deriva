@@ -2078,8 +2078,10 @@ class HTTPTest(HTTPCase):
         status, payload = self.json('/api/busy')
         self.assertEqual(status, 200)
         server = payload.pop('server')
-        # and what the server trades, for the badge of every page
-        self.assertEqual(payload, {'simulate': False, 'live': 0, 'accounts': 'demo'})
+        # and what the server trades, for the badge of every page, and its
+        # roles, for the menu (web/servers.py): all three with no server.json
+        self.assertEqual(payload, {'simulate': False, 'live': 0, 'accounts': 'demo',
+                                   'roles': ['archive', 'test', 'trade']})
         # and how loaded the machine is, for the chip in the header
         self.assertTrue(0 <= server['cpu'] <= 100)
         self.assertTrue(0 < server['memUsed'] <= server['memTotal'])

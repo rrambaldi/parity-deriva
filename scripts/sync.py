@@ -1,18 +1,23 @@
 """
-Push this server's mixes to another one - the PC's to the cloud - so what
-trades there is what was simulated here, and is checked again on its code
-and candles (verify, on the cloud's mix page).
+A Test server and its archive - the PC and the cloud: push this server's
+mixes there, so what trades is what was simulated here, and is checked again
+on the archive's code and candles (verify, on its mix page); pull from there
+the strategies and indicators enabled on it, to simulate them here.
 
     python scripts/sync.py push --to https://host/parity/mcp --token <a pc token>
     python scripts/sync.py push --to ... --mix 0123456789abcdef --dry-run
+    python scripts/sync.py pull --from https://host/parity/mcp --token <a pc token>
+    python scripts/sync.py pull     # PARITY_DERIVA_ARCHIVE_URL and PARITY_DERIVA_SYNC_TOKEN
 
-A mix goes with what it needs: the uploaded strategies its sets trade
-(submit_strategy: a draft there, enabled by hand), its sets and the runs in
-it. What was sent is kept in DATA_DIR/sync.json, and a file that has not
-changed since is not sent again. The token is a "pc" one, made on the other
-server's settings page; it may also be in PARITY_DERIVA_SYNC_TOKEN. The
-market data comes the other way, as that server's upstream: never from here.
-Run it by hand, or from the Windows Task Scheduler.
+A mix goes with what it needs: the uploaded strategies its sets trade and the
+indicators those take (submit_strategy, submit_indicator: drafts there,
+enabled by hand), its sets and the runs in it. What was sent is kept in
+DATA_DIR/sync.json, and a file that has not changed since is not sent again.
+A pull brings each enabled version this server does not hold as a draft here,
+enabled on this server's settings page like any other. The token is a "pc"
+one, made on the archive's settings page; it may also be in
+PARITY_DERIVA_SYNC_TOKEN. The market data comes as this server's upstream,
+never from here. Run it by hand, or from the Windows Task Scheduler.
 """
 
 import argparse
@@ -24,6 +29,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 from parity_deriva.data.sources import SourceError, rpc
 from parity_deriva.etc import settings
@@ -50,16 +56,29 @@ def pushFile(upstream, blob, args):
     return got
 
 
-def submitted(upstream, code, dataDir, report):
-    """The other server's code for an uploaded strategy of this one, submitting it if need be."""
-    path = dict(uploaded.drafts(dataDir), **uploaded.enabled(dataDir)).get(code)
+def retake(source, code, there):
+    """`source` taking the indicator `there` where it took `code`: the other server's version of it."""
+    return re.sub(r"""(['"])%s\1""" % re.escape(code), lambda m: m.group(1) + there + m.group(1), source)
+
+
+def submitted(upstream, code, dataDir, report, kind='strategies'):
+    """
+    The other server's code for an uploaded strategy or indicator of this
+    one, submitting it if need be - a strategy after the indicators it takes,
+    under the codes the other server gave them.
+    """
+    path = dict(uploaded.drafts(dataDir, kind), **uploaded.enabled(dataDir, kind)).get(code)
     if path is None:
         return code    # a built-in one: the same code there, through git
     family, _ = uploaded.split(code)
     with open(path) as handle:
         source = handle.read()
+    if kind == 'strategies':
+        for taken in uploaded.used(source):
+            source = retake(source, taken, submitted(upstream, taken, dataDir, report, 'indicators'))
     try:
-        there = rpc(upstream, 'submit_strategy', {'name': family, 'source': source})['name']
+        there = rpc(upstream, 'submit_strategy' if kind == 'strategies' else 'submit_indicator',
+                    {'name': family, 'source': source})['name']
         report("%s: submitted, a draft there as %s - enable it on its settings page" % (code, there))
     except SourceError as exc:
         same = re.search(r'the same code as (\S+ \d+)', str(exc))
@@ -92,7 +111,8 @@ def pushRuns(upstream, service, items, codes, sent, report, dry_run=False, here=
         files.append((path, blob, {'sweep': sweep, 'commit': here}))
         for item in items:
             if item['sweep'] == sweep:
-                run = service.sweepRunPath(sweep, item['n'])
+                run = service.warmFile(sweep, '%d.json.gz' % int(item['n'])) \
+                    or service.sweepRunPath(sweep, item['n'])
                 with open(run, 'rb') as handle:
                     files.append((run, handle.read(), {'sweep': sweep, 'n': item['n']}))
     for path, blob, what in files:
@@ -108,22 +128,76 @@ def pushRuns(upstream, service, items, codes, sent, report, dry_run=False, here=
                                        len(blob) >> 10))
 
 
+def pull(upstream, dataDir, report):
+    """
+    The strategies and indicators enabled on the archive, each version this
+    server does not hold written here as a draft, with what the archive
+    keeps beside it. One this server holds is left as it is, and said when
+    its source is not the archive's; one the checks refuse is not written.
+    """
+    got = rpc(upstream, 'pull_code', {})
+    taken = 0
+    for kind in ('indicators', 'strategies'):
+        other = [k for k in uploaded.KINDS if k != kind][0]
+        held = dict(uploaded.drafts(dataDir, kind), **uploaded.enabled(dataDir, kind))
+        for item in got.get(kind) or []:
+            code, source = str(item.get('code') or ''), item.get('source')
+            name, version = uploaded.split(code)
+            if not version or not isinstance(source, str):
+                report("%s: not a version's code, left out" % code)
+                continue
+            if code in held:
+                with open(held[code]) as handle:
+                    if handle.read() != source:
+                        report("%s: this server has another %s already, left as it is" % (code, code))
+                continue
+            if uploaded.latest(dataDir, name, other):
+                report("%s: %s is one of the %s here, left out" % (code, name, other))
+                continue
+            problems = uploaded.check(source)
+            if problems:
+                report("%s: refused by the checks - %s" % (code, '; '.join(problems)))
+                continue
+            where = os.path.join(uploaded.root(dataDir, kind), 'drafts')
+            os.makedirs(where, exist_ok=True)
+            path = os.path.join(where, uploaded.fileName(code))
+            kept = dict((k, v) for k, v in (item.get('meta') or {}).items() if k not in ('family', 'version'))
+            kept['pulled'] = {'from': upstream['url'], 'at': int(time.time() * 1000)}
+            for target, body in ((path, source), (path[:-3] + '.json', json.dumps(kept))):
+                with open(target + '.part', 'w') as handle:
+                    handle.write(body)
+                os.replace(target + '.part', target)
+            report("%s: pulled, a draft here - enable it on the settings page" % code)
+            taken += 1
+    report("%d pulled" % taken)
+    return taken
+
+
 def main(argv=None, report=print):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[1],
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('action', choices=['push'])
-    parser.add_argument('--to', required=True, help="the other server's MCP address, https://.../mcp")
+    parser.add_argument('action', choices=['push', 'pull'])
+    parser.add_argument('--to', '--from', dest='to', default=os.environ.get('PARITY_DERIVA_ARCHIVE_URL', ''),
+                        help="the archive's MCP address, https://.../mcp (default: PARITY_DERIVA_ARCHIVE_URL)")
     parser.add_argument('--token', default=os.environ.get('PARITY_DERIVA_SYNC_TOKEN', ''),
                         help='a pc token of that server (default: PARITY_DERIVA_SYNC_TOKEN)')
     parser.add_argument('--mix', action='append', help='only this mix (its id); again for more')
     parser.add_argument('--dry-run', action='store_true', help='say what would go, send nothing')
     args = parser.parse_args(argv)
-    if not args.token:
-        report("no token: --token, or PARITY_DERIVA_SYNC_TOKEN")
+    if not args.token or not args.to:
+        report("no %s: %s" % (('token', '--token, or PARITY_DERIVA_SYNC_TOKEN') if not args.token else
+                              ('address', '--to, or PARITY_DERIVA_ARCHIVE_URL')))
         return 2
+    upstream = {'url': args.to, 'token': args.token}
+    if args.action == 'pull':
+        try:
+            pull(upstream, settings.DATA_DIR, report)
+        except SourceError as exc:
+            report(str(exc))
+            return 1
+        return 0
     from parity_deriva.web.service import Service
     service = Service(setup=settings)
-    upstream = {'url': args.to, 'token': args.token}
     kept = os.path.join(settings.DATA_DIR, 'sync.json')
     try:
         with open(kept) as handle:

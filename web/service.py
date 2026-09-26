@@ -79,10 +79,11 @@ from parity_deriva.data import store
 from parity_deriva.data.candledb import CandleDB
 from parity_deriva.etc import settings
 from parity_deriva.lib import indicators
+from parity_deriva.lib import s3
 from parity_deriva.lib import news as news_module
 from parity_deriva.performance import report as report_module
 from parity_deriva.strategy import plugins, uploaded
-from parity_deriva.web import i18n, livesessions, mcp, oauth
+from parity_deriva.web import i18n, livesessions, mcp, oauth, servers
 from parity_deriva.web import logs as logs_page
 
 
@@ -659,77 +660,58 @@ class Service(object):
 		del self._order[:]
 		return self.marketData()
 
-	# ------------------------------------------------ demo, real, promotion
+	# ------------------------------------------ roles, demo, real, promotion
 
-	def promoteTargetPath(self):
-		return os.path.join(getattr(self.setup, 'DATA_DIR', '') or '.', 'promote.json')
-
-	def promoteTarget(self):
-		"""{url, token} of the real money server this demo one promotes to."""
-		try:
-			with open(self.promoteTargetPath()) as handle:
-				kept = json.load(handle)
-		except (OSError, ValueError):
-			kept = {}
-		return {'url': str(kept.get('url') or ''), 'token': str(kept.get('token') or '')}
+	def need(self, *roles):
+		"""Refuse what none of `roles` does, when this server has none of them (web/servers.py)."""
+		refused = servers.missing(self.setup, *roles)
+		if refused:
+			raise ServiceError(refused)
 
 	def serverData(self):
 		"""
-		What this server trades, from .env and not from a page, with what
-		goes with it: a real one's minimums for a promotion, its loss limit
-		and today's halt; a demo one's real server to promote to.
+		What this server is: its roles (web/servers.py) and what it trades,
+		from .env and not from a page, with what goes with that: a real one's
+		minimums for a promotion, its loss limit and today's halt.
 		"""
-		target = self.promoteTarget()
-		return {'accounts': livesessions.serverAccounts(),
+		return {'accounts': livesessions.serverAccounts(), 'roles': servers.roles(self.setup),
 				'promoteDays': getattr(self.setup, 'PROMOTE_DAYS', settings.PROMOTE_DAYS),
 				'promoteTrades': getattr(self.setup, 'PROMOTE_TRADES', settings.PROMOTE_TRADES),
 				'dailyLossPct': getattr(self.setup, 'DAILY_LOSS_PCT', settings.DAILY_LOSS_PCT),
-				'halted': self.live.halted(),
-				'promoteTo': {'url': target['url'], 'token': bool(target['token'])}}
+				'halted': self.live.halted(), 'bucket': s3.fromSettings(self.setup) is not None}
 
-	def setPromoteTarget(self, body):
-		url = str(body.get('url') or '').strip()
-		if not url.startswith(('https://', 'http://')):
-			raise ServiceError("the real server's MCP address, https://.../mcp")
-		token = str(body.get('token') or '') or self.promoteTarget()['token']
-		path = self.promoteTargetPath()
-		with open(os.open(path + '.part', os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as handle:
-			json.dump({'url': url, 'token': token}, handle)
-		os.replace(path + '.part', path)
+	def setRoles(self, body):
+		try:
+			servers.saveRoles(body.get('roles'), self.setup)
+		except ValueError as exc:
+			raise ServiceError(str(exc))
 		return self.serverData()
 
-	def promote(self, session):
-		"""
-		Send the real money server what a session's form did here: the
-		uploaded strategy it trades, the run of a set it was starred from and
-		its live record (livesessions.record). The real server judges it by
-		its own minimums; its verdict is the answer.
-		"""
-		from parity_deriva.scripts import sync
-		if livesessions.serverAccounts() == 'real':
-			raise ServiceError("this is the real money server: promote from a demo one")
-		target = self.promoteTarget()
-		if not target['url'] or not target['token']:
-			raise ServiceError("no real server to promote to: set it on the settings page")
-		fields = dict(self.live.meta(session)['fields'])
-		lines, codes = [], {}
-		code = fields.get('strategy')
+	def tradeServers(self):
+		"""An archive's trade servers, each with what it said last of its sessions."""
+		self.need('archive')
+		return {'servers': servers.tradeServers(self.setup)}
+
+	def saveTradeServer(self, body):
+		self.need('archive')
 		try:
-			if code:
-				codes[code] = sync.submitted(target, code, self.setup.DATA_DIR, lines.append)
-				fields['strategy'] = codes[code]
-			key = livesessions.groupKey(self.live.meta(session)['fields'])
-			starred = next((f for f in self.favourites()
-							if (f.get('source') or {}).get('kind') == 'sweep'
-							and livesessions.groupKey(f.get('fields')) == key), None)
-			if starred:
-				sync.pushRuns(target, self, [{'sweep': starred['source']['id'], 'n': starred['source']['n']}],
-							  codes, {}, lines.append)
-			record = dict(self.live.record(self.live.meta(session)['fields']), fields=fields)
-			verdict = sources.rpc(target, 'push_record', {'record': record})
-		except sources.SourceError as exc:
+			servers.saveTradeServer(body, self.setup)
+		except ValueError as exc:
 			raise ServiceError(str(exc))
-		return dict(verdict, lines=lines)
+		return self.tradeServers()
+
+	def pollTradeServers(self):
+		self.need('archive')
+		servers.poll(self)
+		return self.tradeServers()
+
+	def pushForm(self, body):
+		"""A form to a trade server (servers.push): what went, and a real one's verdict."""
+		self.need('archive')
+		try:
+			return servers.push(self, str(body.get('server') or ''), body.get('fields'))
+		except (ValueError, sources.SourceError) as exc:
+			raise ServiceError(str(exc))
 
 	def mergeBars(self, instrument, granularity, frame, keep=False):
 		"""
@@ -1180,10 +1162,10 @@ class Service(object):
 		The trades of a saved sweep run, only what report.margin and
 		report.together read; None when the run has no file.
 		"""
-		path = self.sweepRunPath(sweep, n)
+		path = self.warmFile(sweep, '%d.json.gz' % int(n))
 		try:
 			stamp = os.path.getmtime(path)
-		except OSError:
+		except (OSError, TypeError):
 			return None
 		return _slimTrades(path, stamp)
 
@@ -1220,6 +1202,7 @@ class Service(object):
 		saved, else in the background, running the runs that have none
 		first (as the run page does) - togetherStatus() follows it.
 		"""
+		self.need('test')
 		drawn = self.mix(mix)
 		if not drawn['missing']:
 			return {'running': False, 'mix': mix, 'result': self.mixTogether(mix)}
@@ -1310,6 +1293,7 @@ class Service(object):
 
 	def startVerify(self, mix):
 		"""Check every run of a mix again in the background; verifyStatus() follows it."""
+		self.need('archive', 'test')
 		saved = next((m for m in self.mixes() if m.get('id') == mix), None)
 		if saved is None:
 			raise ServiceError("no such mix")
@@ -1919,6 +1903,8 @@ class Service(object):
 				'live': self.live.running(),
 				# demo accounts or real money: the badge of every page
 				'accounts': livesessions.serverAccounts(),
+				# what the menu offers (web/servers.py)
+				'roles': servers.roles(self.setup),
 				'server': self.machine()}
 
 	def machine(self):
@@ -1983,6 +1969,7 @@ class Service(object):
 		progress line and the same stop - which is what lets the page draw
 		the capital curve of the one running now.
 		"""
+		self.need('test')
 		combos = expandGrid(grid)
 		runs = []
 		for combo in combos:
@@ -2127,6 +2114,10 @@ class Service(object):
 								json.dumps(meta).encode())
 				except (ServiceError, OSError, ValueError, KeyError):
 					self.logger.exception("cannot score the set %s" % name)
+			# its runs in the bucket (freeze): said by the list, not kept in the summary
+			cold = self.cold(meta['id'])
+			if cold:
+				meta['cold'] = {'at': cold.get('at'), 'bytes': sum(cold['files'].values())}
 			out.append(meta)
 		return sorted(out, key=lambda row: row.get('saved', 0), reverse=True)
 
@@ -2183,13 +2174,116 @@ class Service(object):
 			if live.get('running'):
 				raise ServiceError("the set is still running: stop it first")
 			self._sweep = None
-		for suffix in ('.json.gz', '.meta.json'):
+		# its runs in the bucket go first: a bucket that does not answer keeps
+		# the set here, rather than leave files there nothing points to
+		cold = self.cold(sweep)
+		if cold:
+			bucket = self.bucket()
+			for name in cold['files']:
+				try:
+					bucket.delete(self.coldKey(sweep, name))
+				except s3.S3Error as exc:
+					raise ServiceError("the set's runs in the bucket: %s - it is kept, try again" % exc)
+		for suffix in ('.json.gz', '.meta.json', '.cold.json'):
 			try:
 				os.remove(self.sweepPath(sweep, suffix))
 			except FileNotFoundError:
 				pass
 		shutil.rmtree(self.sweepPath(sweep, ''), ignore_errors=True)
 		return {'deleted': sweep}
+
+	# ----------------------------------------------------- cold storage
+
+	def bucket(self):
+		"""The S3 bucket the sets' runs go to (lib/s3.py), or a refusal when .env names none."""
+		found = s3.fromSettings(self.setup)
+		if found is None:
+			raise ServiceError("no bucket: set PARITY_DERIVA_S3_ENDPOINT, _BUCKET, _ACCESS_KEY and "
+							   "_SECRET_KEY in parity_deriva/.env, then restart")
+		return found
+
+	@staticmethod
+	def coldKey(sweep, name):
+		return 'sweeps/%s/%s' % (sweep, name)
+
+	def cold(self, sweep):
+		"""What of a set is in the bucket, {at, files: {name: bytes}}, or None."""
+		try:
+			with open(self.sweepPath(sweep, '.cold.json')) as handle:
+				found = json.load(handle)
+		except (OSError, ValueError):
+			return None
+		return found if isinstance(found.get('files'), dict) else None
+
+	def freeze(self, sweep):
+		"""
+		A set's runs into the bucket and off this disk: the file of each run
+		the run page draws, which is what weighs - the set's own file, its
+		table, stays, and the lists, the mixes and the favourites read that.
+		A file goes from here once the bucket has it (its ETag is its MD5); a
+		run opened later comes back by itself (warmFile), and thaw() brings
+		them all back.
+		"""
+		live = getattr(self, '_sweep', None)
+		if live and live.get('id') == sweep and live.get('running'):
+			raise ServiceError("the set is still running: stop it first")
+		if not os.path.exists(self.sweepPath(sweep, '.json.gz')):
+			raise ServiceError("no such sweep")
+		bucket = self.bucket()
+		folder = self.sweepPath(sweep, '')
+		held = self.cold(sweep) or {'files': {}}
+		freed = 0
+		for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else ():
+			path = os.path.join(folder, name)
+			if name.endswith('.part') or not os.path.isfile(path):
+				continue
+			with open(path, 'rb') as handle:
+				data = handle.read()
+			try:
+				bucket.put(self.coldKey(sweep, name), data)
+			except s3.S3Error as exc:
+				raise ServiceError("%s of set %s: %s" % (name, sweep, exc))
+			# said before it goes from here: a stop in between leaves it on both
+			held['files'][name] = len(data)
+			held['at'] = int(time.time() * 1000)
+			self._write(self.sweepPath(sweep, '.cold.json'), json.dumps(held).encode())
+			os.remove(path)
+			freed += len(data)
+		try:
+			os.rmdir(folder)
+		except OSError:
+			pass
+		return {'sweep': sweep, 'files': len(held['files']), 'freed': freed,
+				'bytes': sum(held['files'].values())}
+
+	def thaw(self, sweep):
+		"""Every run of a set back from the bucket, which keeps its copies until the set is deleted."""
+		held = self.cold(sweep)
+		if not held:
+			raise ServiceError("set %s has nothing in the bucket" % sweep)
+		for name in held['files']:
+			self.warmFile(sweep, name)
+		os.remove(self.sweepPath(sweep, '.cold.json'))
+		return {'sweep': sweep, 'files': len(held['files'])}
+
+	def warmFile(self, sweep, name):
+		"""
+		The path of a file of a set's folder, fetched from the bucket when it
+		went there and is not here; None when it is in neither.
+		"""
+		path = os.path.join(self.sweepPath(sweep, ''), name)
+		if os.path.exists(path):
+			return path
+		held = self.cold(sweep)
+		if not held or name not in held['files']:
+			return None
+		try:
+			data = self.bucket().get(self.coldKey(sweep, name))
+		except s3.S3Error as exc:
+			raise ServiceError("%s of set %s is in the bucket, which said: %s" % (name, sweep, exc))
+		os.makedirs(os.path.dirname(path), exist_ok=True)
+		self._write(path, data)
+		return path
 
 	# ponytail: every run's whole payload, a few MB each on years of H1;
 	# share the candles between runs if the disk ever minds
@@ -2230,7 +2324,7 @@ class Service(object):
 		kept = os.path.join(self.sweepPath(sweep, ''), '%d.excursions%s.json' % (
 			int(n), '-' + '-'.join(map(str, bars)) if bars else ''))
 		try:
-			with open(kept) as handle:
+			with open(self.warmFile(sweep, os.path.basename(kept)) or kept) as handle:
 				return json.load(handle)
 		except (OSError, ValueError):
 			pass
@@ -2247,12 +2341,12 @@ class Service(object):
 		return out
 
 	def sweepPayload(self, sweep, n):
-		"""A run saved by saveSweepRun as it was saved, or None."""
-		try:
-			with gzip.open(self.sweepRunPath(sweep, n), 'rb') as handle:
-				return json.loads(handle.read())
-		except FileNotFoundError:
+		"""A run saved by saveSweepRun as it was saved - back from the bucket if it went there - or None."""
+		path = self.warmFile(sweep, '%d.json.gz' % int(n))
+		if path is None:
 			return None
+		with gzip.open(path, 'rb') as handle:
+			return json.loads(handle.read())
 
 	def sweepStatus(self, since=0):
 		"""
@@ -3114,7 +3208,9 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendJSON(self.service.sweepStatus(
 					parseInt(self.one(query, 'since'), 'since', 0)))
 			if route == '/api/sweeps':
-				return self.sendJSON({'sweeps': self.service.sweeps()})
+				# and whether their runs have a bucket to go to (freeze)
+				return self.sendJSON({'sweeps': self.service.sweeps(),
+									  'bucket': s3.fromSettings(self.service.setup) is not None})
 			if route.startswith('/api/sweeps/'):
 				# <id> is the set, <id>/<n> one run of it, whole, and
 				# <id>/<n>/excursions where price went after its entries
@@ -3193,6 +3289,8 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendJSON(self.service.marketData())
 			if route == '/api/server':
 				return self.sendJSON(self.service.serverData())
+			if route == '/api/trade-servers':
+				return self.sendJSON(self.service.tradeServers())
 			if route == '/api/imports/status':
 				return self.sendJSON(self.service.importStatus())
 			if route == '/api/runs':
@@ -3256,6 +3354,8 @@ class Handler(BaseHTTPRequestHandler):
 				if not isinstance(fields, dict):
 					raise ServiceError("the body is a JSON object of form fields")
 				cachedOnly = bool(fields.get('cachedOnly'))
+				if not cachedOnly:
+					self.service.need('test')
 				# a run of a simulation set run again because the set was
 				# saved without it: it is kept with the set, once
 				sweep, sweepRun = fields.pop('sweep', None), fields.pop('sweepRun', None)
@@ -3312,6 +3412,11 @@ class Handler(BaseHTTPRequestHandler):
 					raise ServiceError('the body is {"name": ...} or {"delete": true}')
 				if body.get('delete'):
 					return self.sendJSON(self.service.deleteSweep(sweep))
+				# {"cold": true} its runs into the bucket, {"warm": true} back
+				if body.get('cold'):
+					return self.sendJSON(self.service.freeze(sweep))
+				if body.get('warm'):
+					return self.sendJSON(self.service.thaw(sweep))
 				return self.sendJSON(self.service.renameSweep(sweep, body.get('name')))
 			if route == '/api/sweep/stop':
 				return self.sendJSON(self.service.stopSweep())
@@ -3351,20 +3456,31 @@ class Handler(BaseHTTPRequestHandler):
 					raise ServiceError('the body is {"fields": {...}, "targets": [...]}')
 				if not isinstance(body, dict) or not isinstance(body.get('fields'), dict):
 					raise ServiceError('the body is {"fields": {...}, "targets": [...]}')
+				self.service.need('trade')
 				return self.sendJSON({'started': self.service.live.start(
 					body['fields'], body.get('targets') or [], body.get('confirm'))})
 			if route == '/api/live/stop-all':
 				# the kill switch: every session running, stopped and closed
 				return self.sendJSON(self.service.live.stopAll())
-			if route == '/api/server/promote-to':
+			if route in ('/api/server/roles', '/api/trade-servers', '/api/trade-servers/poll',
+						 '/api/trade-servers/push'):
+				# {"roles": [...]} this server's; {"name", "url", "token"} or {"name",
+				# "drop": true} a trade server; poll reads them now; {"server",
+				# "fields"} pushes a form to one (web/servers.py)
 				length = int(self.headers.get('Content-Length') or 0)
 				try:
 					body = json.loads(self.rfile.read(length) or b'{}')
 				except ValueError:
 					body = None
 				if not isinstance(body, dict):
-					raise ServiceError('the body is {"url", "token"}')
-				return self.sendJSON(self.service.setPromoteTarget(body))
+					raise ServiceError('the body is a JSON object')
+				if route == '/api/server/roles':
+					return self.sendJSON(self.service.setRoles(body))
+				if route == '/api/trade-servers':
+					return self.sendJSON(self.service.saveTradeServer(body))
+				if route.endswith('/poll'):
+					return self.sendJSON(self.service.pollTradeServers())
+				return self.sendJSON(self.service.pushForm(body))
 			if route == '/api/favourites' or route.startswith('/api/favourites/'):
 				# star a simulated form, or unstar / annotate one by its id
 				length = int(self.headers.get('Content-Length') or 0)
@@ -3397,8 +3513,6 @@ class Handler(BaseHTTPRequestHandler):
 					return self.sendJSON(self.service.live.stop(session))
 				if action == 'delete':
 					return self.sendJSON(self.service.live.delete(session))
-				if action == 'promote':
-					return self.sendJSON(self.service.promote(session))
 				return self.sendError("no route %s" % route, 404)
 			if route == '/api/calendar':
 				length = int(self.headers.get('Content-Length') or 0)

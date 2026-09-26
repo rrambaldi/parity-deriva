@@ -50,7 +50,7 @@ import pandas as pd
 from parity_deriva.backtest import ledger
 from parity_deriva.data import calendar, market
 from parity_deriva.strategy import uploaded
-from parity_deriva.web import livesessions, oauth, sandbox
+from parity_deriva.web import livesessions, oauth, sandbox, servers
 
 PROTOCOLS = ('2025-11-25', '2025-06-18', '2025-03-26')
 
@@ -113,7 +113,8 @@ and asks you to do about it, which comes before anything else you were asked;
 list_data, list_strategies and list_helpers to see what exists; submit_indicator for an indicator that is missing; submit_strategy to save a version of a draft (it is imported and built
 at once, and an error comes back with its traceback); run_backtest on a year or
 two first, then widen. Every backtest is saved, and its link opens it on the
-user's page.
+user's page; list_runs and get_run read the saved ones back, the user's sets
+of runs too.
 
 Versions: submit_strategy never replaces anything. The first submit of a name
 is its version 1, "MY-EMA 1"; every submit of that name after it is the next
@@ -336,10 +337,10 @@ TOOLS = [
 		 'part': {'type': 'integer'}, 'parts': {'type': 'integer'},
 		 'data': {'type': 'string'}, 'commit': {'type': 'string'}}}},
 	{'name': 'push_record',
-	 'description': "For a demo server promoting a form to this real money one, not for an "
-					"assistant: the form's live record there (web/livesessions.py record). "
-					"Judged here by this server's minimums and kept: a session of the form "
-					"starts here only once it is ok.",
+	 'description': "For the archive promoting a form to this real money server, not for an "
+					"assistant: the form's record on demo (web/servers.py record). Judged here "
+					"by this server's minimums and kept: a session of the form starts here "
+					"only once it is ok.",
 	 'inputSchema': {'type': 'object', 'required': ['record'], 'properties': {
 		 'record': {'type': 'object'}}}},
 	{'name': 'push_mix',
@@ -347,6 +348,30 @@ TOOLS = [
 					"runs are pushed. The runs are then checked again here (verify on the mix page).",
 	 'inputSchema': {'type': 'object', 'required': ['mix'], 'properties': {
 		 'mix': {'type': 'object'}}}},
+	{'name': 'list_runs',
+	 'description': "The simulations saved here, newest first: the sets (every combination of a "
+					"strategy's parameters, with the best of them), the single backtests and the "
+					"mixes. Open one with get_run.",
+	 'inputSchema': {'type': 'object', 'properties': {
+		 'limit': {'type': 'integer', 'description': "how many of each, 20 when absent"}}}},
+	{'name': 'get_run',
+	 'description': "One saved simulation, with a link that opens it on the user's page: a "
+					"backtest by its run id; a set by its sweep id - each run's parameters and "
+					"figures; or one run of a set, sweep and n, with its figures and its trades.",
+	 'inputSchema': {'type': 'object', 'properties': {
+		 'run': {'type': 'string', 'description': "a backtest's id, from list_runs"},
+		 'sweep': {'type': 'string', 'description': "a set's id, from list_runs"},
+		 'n': {'type': 'integer', 'description': "one run of that set"}}}},
+	{'name': 'pull_code',
+	 'description': "For a Test server's sync (scripts/sync.py pull), not for an assistant: "
+					"every strategy and indicator enabled here - the ones somebody read - with "
+					"its source and what is kept beside it.",
+	 'inputSchema': {'type': 'object', 'properties': {}}},
+	{'name': 'live_status',
+	 'description': "For the archive, not for an assistant: this trade server's sessions - the "
+					"form, the account, the trades open and closed with their P&L, the parity "
+					"monitor's findings - and whether it trades demo accounts or real money.",
+	 'inputSchema': {'type': 'object', 'properties': {}}},
 ]
 
 
@@ -658,7 +683,7 @@ PUSH_FILE = 256 << 20
 
 
 def pcPusher(client):
-	"""The PC's sync (scripts/sync.py) holds a pc token, a demo server a promote one."""
+	"""The PC's sync (scripts/sync.py) holds a pc token, the archive a promote one."""
 	if role(client) not in ('token', 'pc', 'promote'):
 		raise ToolError("pushing a set or a mix is for the PC's token, not for an assistant")
 
@@ -764,11 +789,12 @@ def pushMix(service, args, client):
 
 def pushRecord(service, args, client):
 	"""
-	A demo server's record of a form - its sessions, trades and parity - for
-	this real money server to judge by its own minimums and keep as proof.
+	A form's record on demo - its sessions, trades and parity, on the archive
+	and its demo servers - for this real money server to judge by its own
+	minimums and keep as proof.
 	"""
 	if role(client) != 'promote':
-		raise ToolError("a promotion comes from a demo server, with a promote token")
+		raise ToolError("a promotion comes from the archive, with a promote token")
 	if livesessions.serverAccounts() != 'real':
 		raise ToolError("this server trades demo accounts: a promotion goes to a real money one")
 	try:
@@ -895,16 +921,96 @@ def runBacktest(service, args, base):
 	_, summary, _ = service.simulated({'kind': 'run', 'id': run})
 	summary.update({'from': day(summary['from']), 'to': day(summary['to']),
 					'fine': payload.get('fine'), 'counts': payload.get('counts')})
-	trades = payload.get('trades') or []
-	return {'strategy': name, 'run': run, 'link': base + '/run?' + urllib.parse.urlencode(fields),
-			'summary': summary,
-			'trades': [{'n': t['n'], 'direction': t['direction'], 'signal': day(t['signalTime']),
+	return dict({'strategy': name, 'run': run, 'link': base + '/run?' + urllib.parse.urlencode(fields),
+				 'summary': summary}, **tradeRows(payload.get('trades') or []))
+
+
+def tradeRows(trades):
+	"""The first TRADES_SHOWN of a run's trades, as an answer carries them."""
+	return {'trades': [{'n': t['n'], 'direction': t['direction'], 'signal': day(t['signalTime']),
 						'entry': day(t['entryTime']), 'entryPrice': t['entryPrice'],
 						'stopLoss': t['stopLoss'], 'takeProfit': t['takeProfit'],
 						'exit': day(t['exitTime']), 'exitPrice': t['exitPrice'],
 						'outcome': t['outcome'], 'pl': t['pl'], 'balance': t['balance']}
 					   for t in trades[:TRADES_SHOWN]],
 			'tradesShown': '%d of %d' % (min(len(trades), TRADES_SHOWN), len(trades))}
+
+
+def summed(summary):
+	"""A simulation's summary with its window as days, not epoch ms."""
+	return dict(summary, **{'from': day(summary.get('from')), 'to': day(summary.get('to'))})
+
+
+def listRuns(service, args):
+	try:
+		limit = max(1, min(int(args.get('limit') or 20), 200))
+	except (TypeError, ValueError):
+		raise ToolError("limit: a number of each, 1 to 200")
+	return {'sets': [dict((k, s.get(k)) for k in ('id', 'name', 'saved', 'strategy', 'instrument',
+												   'granularity', 'from', 'to', 'runs', 'total', 'varied',
+												   'best', 'bestParams', 'bestScore', 'origin', 'cold'))
+					 for s in service.sweeps()[:limit]],
+			'runs': [dict([(k, r.get(k)) for k in ('id', 'saved', 'strategy', 'instrument', 'granularity',
+												   'trades', 'balance')], **{'from': day(r.get('from')),
+																			 'to': day(r.get('to'))})
+					 for r in service.runs()[:limit]],
+			'mixes': [{'id': m['id'], 'name': m.get('name'), 'items': m.get('items'),
+					   'origin': (m.get('origin') or {}).get('client')} for m in service.mixes()[:limit]]}
+
+
+def getRun(service, args, base):
+	run, sweep, n = str(args.get('run') or ''), str(args.get('sweep') or ''), args.get('n')
+	if run:
+		fields, summary, _ = service.simulated({'kind': 'run', 'id': run})
+		return dict({'run': run, 'link': base + '/run?' + urllib.parse.urlencode(fields),
+					 'fields': fields, 'summary': summed(summary)},
+					**tradeRows(((service.savedRun(run) or {}).get('payload') or {}).get('trades') or []))
+	if not sweep:
+		raise ToolError("run, or sweep (and n for one of its runs): list_runs names them")
+	job = service.savedSweep(sweep)
+	if n in (None, ''):
+		return {'sweep': sweep, 'name': job.get('name'), 'link': base + '/?' + urllib.parse.urlencode({'set': sweep}),
+				'fields': job.get('fields'), 'varied': job.get('varied'), 'total': job.get('total'),
+				'runs': [dict([('n', r['n']), ('params', r.get('params')), ('error', r.get('error')),
+							   ('final', r.get('final'))]
+							  + [(k, (r.get('report') or {}).get(k)) for k in (
+								  'closedTrades', 'net', 'winRate', 'profitFactor', 'maxDrawdown')]
+							  + [(k, (r.get('kpi') or {}).get(k)) for k in (
+								  'roi', 'car', 'maxDrawdownPct', 'sharpe', 'score')])
+						 for r in job['done']]}
+	try:
+		n = int(n)
+	except (TypeError, ValueError):
+		raise ToolError("n: the number of one run of the set")
+	fields, summary, name = service.simulated({'kind': 'sweep', 'id': sweep, 'n': n}, job)
+	payload = service.sweepPayload(sweep, n)
+	out = {'sweep': sweep, 'n': n, 'name': name, 'fields': fields, 'summary': summed(summary),
+		   'link': base + '/run?' + urllib.parse.urlencode(dict({'sweep': sweep, 'run': n}, **fields))}
+	if payload is None:
+		return dict(out, trades=None, tradesShown="its trades are not saved: the link runs it again")
+	return dict(out, **tradeRows(payload.get('trades') or []))
+
+
+def pullCode(service, args, client):
+	"""The enabled strategies and indicators, for a Test's sync to take as drafts."""
+	if role(client) not in ('token', 'pc'):
+		raise ToolError("pulling the code is for a Test's sync with a pc token, not for an assistant")
+	out = {}
+	for kind in uploaded.KINDS:
+		out[kind] = []
+		for code, path in uploaded.enabled(dataDir(service), kind).items():
+			with open(path) as handle:
+				out[kind].append({'code': code, 'source': handle.read(), 'meta': meta(path)})
+	return out
+
+
+def liveStatus(service, args, client):
+	"""This trade server's sessions, for the archive that reads them (web/servers.py poll)."""
+	if role(client) not in ('token', 'promote'):
+		raise ToolError("a trade server's sessions are read by the archive, with a promote token")
+	return {'server': {'accounts': livesessions.serverAccounts(), 'roles': servers.roles(service.setup),
+					   'version': serverVersion()},
+			'halted': service.live.halted(), 'sessions': service.live.snapshot()}
 
 
 def reference():
@@ -1339,19 +1445,46 @@ PUSHES = ('push_calendar', 'push_candles')
 #: on a real money server, what only a promotion does, and no assistant
 WRITES = ('submit_strategy', 'submit_indicator', 'run_backtest', 'propose_public',
 		  'request_feature', 'push_sweep', 'push_mix', 'push_record')
-PROMOTES = ('submit_strategy', 'push_sweep', 'push_record')
+#: what the archive does on a trade server with its promote token: push a
+#: form's code and set, a record to a real money one, and read the sessions
+PROMOTES = ('submit_strategy', 'submit_indicator', 'push_sweep', 'push_record')
 ROLES = {'mirror': lambda name: name in PULLS,
 		 'market': lambda name: name in PUSHES + ('market_status',),
 		 'pc': lambda name: name not in PUSHES,
-		 'promote': lambda name: name in PROMOTES + ('list_strategies', 'market_status')}
+		 'promote': lambda name: name in PROMOTES + ('list_strategies', 'market_status', 'live_status')}
+
+#: the server roles (web/servers.py) a tool is served on; one not here, the
+#: market data's, is served wherever the market folder says (data/market.py)
+SERVED = {'get_news': ('test',), 'list_helpers': ('test',), 'request_feature': ('test',),
+		  'run_backtest': ('test',), 'propose_public': ('test',),
+		  'list_strategies': servers.ROLES, 'submit_strategy': servers.ROLES,
+		  'submit_indicator': servers.ROLES,
+		  'get_source': ('test', 'archive'), 'list_data': ('test', 'archive'),
+		  'list_runs': ('test', 'archive'), 'get_run': ('test', 'archive'),
+		  'pull_code': ('archive',), 'push_mix': ('archive',), 'push_sweep': ('archive', 'trade'),
+		  'push_record': ('trade',), 'live_status': ('trade',)}
+
+
+def served(service, name):
+	"""None when this server serves the tool `name`, else why not."""
+	return servers.missing(service.setup, *SERVED.get(name, servers.ROLES))
 
 
 def call(service, name, args, base, client):
 	held = role(client)
 	if held in ROLES and not ROLES[held](name):
 		raise ToolError("a %s token may not call %s" % (held, name))
+	refused = served(service, name)
+	if refused:
+		raise ToolError("no %s here: %s" % (name, refused))
+	# a server that does not test takes code and results only from another
+	# server's push: the Test's (pc) on an archive, the archive's (promote) on
+	# a trade server - no assistant writes a draft on it
+	if name in WRITES and held not in ('pc', 'promote') and servers.missing(service.setup, 'test'):
+		raise ToolError("this server has no test role: it takes %s only from another server's "
+						"push" % name)
 	if livesessions.serverAccounts() == 'real' and name in WRITES and held != 'promote':
-		raise ToolError("a real money server takes only what a demo server promotes: no %s here"
+		raise ToolError("a real money server takes only what the archive promotes to it: no %s here"
 						% name)
 	if name == 'get_news':
 		return getNews(service, args, client)
@@ -1389,6 +1522,14 @@ def call(service, name, args, base, client):
 		return pushMix(service, args, client)
 	if name == 'push_record':
 		return pushRecord(service, args, client)
+	if name == 'list_runs':
+		return listRuns(service, args)
+	if name == 'get_run':
+		return getRun(service, args, base)
+	if name == 'pull_code':
+		return pullCode(service, args, client)
+	if name == 'live_status':
+		return liveStatus(service, args, client)
 	raise ToolError("no tool %r" % name)
 
 
@@ -1411,7 +1552,8 @@ def handle(service, message, base, client):
 	elif method == 'ping':
 		answer['result'] = {}
 	elif method == 'tools/list':
-		answer['result'] = {'tools': TOOLS}
+		# what this server's roles serve: a trade server's assistant sees no backtest
+		answer['result'] = {'tools': [t for t in TOOLS if not served(service, t['name'])]}
 	elif method == 'tools/call':
 		try:
 			found = call(service, params.get('name'), params.get('arguments') or {}, base, client)
@@ -1708,7 +1850,11 @@ def route(handler, method, path, query):
 										   asked.get('action')))
 		if path == '/api/mcp/import':
 			# a file saved from the code's dialog, back as a draft: the same
-			# checks as an assistant's submit_strategy
+			# checks as an assistant's submit_strategy. A trade server takes
+			# code only from the archive's push
+			refused = servers.missing(handler.service.setup, 'test', 'archive')
+			if refused:
+				raise ToolError(refused)
 			try:
 				asked = json.loads(body(handler) or b'{}')
 			except ValueError:

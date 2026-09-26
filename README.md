@@ -1306,30 +1306,69 @@ as the English), kept in `DATA_DIR/i18n/<code>.json` over the built-in one of
 its code. The switch in the header keeps the choice in the browser; English
 until one is made.
 
-## Programs' tokens, and the PC's mixes on the cloud
+## Server roles: archive, test, trade
+
+One application, set up differently on each server. Its roles are in
+`DATA_DIR/server.json` (`{"roles": [...]}`), set on the settings page ("this
+server"); with no file a server is all three, as it always was:
+
+| role | does | serves over MCP |
+|---|---|---|
+| archive | keeps strategies, indicators, simulations, market data; takes a Test's pushes; pushes forms to the trade servers and reads their trades | `pull_code`, `push_mix`, `push_sweep`, `list_runs`, `get_run`, `get_source`, `list_data` |
+| test | simulates (backtests, sets, mixes) and takes the AI assistants' drafts | the assistants' tools: `run_backtest`, `list_helpers`, `get_news`, ... |
+| trade | trades on the accounts | `live_status`, and the archive's pushes |
+
+Whether a trade server trades demo accounts or real money is not a role: it
+is `PARITY_DERIVA_ACCOUNTS` in `.env` (below), so a demo server and a real
+money one are never the same. A server without the test role takes code and
+results only from another server's push - no assistant writes a draft on it
+- and runs no backtest; one without trade starts no session. The market data
+is not a role either: one server writes the market folder, the others read
+it or take it from an upstream (above). Some ways to lay it out:
+
+- simple: archive + test + trade (demo) on one server, trade (real) on another;
+- medium: archive + test | trade (demo) | trade (real);
+- mixed: archive + trade (demo) on the cloud, test on the PC at home, trade
+  (real) on the cloud.
+
+## Programs' tokens, the Test and the archive
 
 Besides the assistants' token, the settings page (AI assistants) makes a
 token for each program, with a role that says what it may call over MCP:
 
 | role | for | may call |
 |---|---|---|
-| pc | the PC's `scripts/sync.py` | everything but pushing candles and calendar |
+| pc | a Test's `scripts/sync.py`, on the archive | everything but pushing candles and calendar |
 | mirror | another server copying the market data | `market_status`, `pull_candles`, `pull_calendar` |
 | market | the scraper | `push_candles`, `push_calendar`, `market_status` |
+| promote | the archive, on a trade server | `submit_strategy`, `submit_indicator`, `push_sweep`, `push_record`, `live_status`, `list_strategies`, `market_status` |
 
-The PC simulates, and pushes what is to trade to the cloud:
+A Test (the PC) simulates, pushes what is to trade to the archive (the
+cloud), and takes from it what was enabled there:
 
 ```
 python scripts/sync.py push --to https://host/parity/mcp --token <a pc token>
+python scripts/sync.py pull --from https://host/parity/mcp --token <a pc token>
+python scripts/sync.py pull      # PARITY_DERIVA_ARCHIVE_URL, PARITY_DERIVA_SYNC_TOKEN
 ```
 
-Each mix goes with the uploaded strategies its sets trade (a draft on the
-cloud, to enable by hand), its sets and its runs, a chunk a call under
-nginx's 4 MB, marked "from" the PC; `DATA_DIR/sync.json` keeps what was sent,
-so a file that did not change is not sent again. On the cloud, verify on the
-mix page runs each run again on the cloud's code and candles and compares
-the trades: "the same here", or where they part. Candles and calendar go
-the other way only: the PC takes them with the cloud as its upstream.
+A push sends each mix with the uploaded strategies its sets trade and the
+indicators those take (drafts on the archive, to enable by hand; a strategy
+goes under the codes the archive gave its indicators), its sets and its
+runs, a chunk a call under nginx's 4 MB, marked "from" the PC;
+`DATA_DIR/sync.json` keeps what was sent, so a file that did not change is
+not sent again. On the archive, verify on the mix page runs each run again
+on its code and candles and compares the trades: "the same here", or where
+they part. A pull writes each strategy and indicator enabled on the archive
+that this server does not hold as a draft here, to enable on this server's
+settings page; one it holds under the same code with another source is left
+as it is, and said. Candles and calendar come with the archive as the
+Test's upstream, never the other way.
+
+An assistant reads the simulations saved on an archive or a Test with
+`list_runs` (the sets, the backtests, the mixes) and `get_run` (a backtest,
+a set's table, or one run of a set with its trades), each with the link that
+opens it on the page.
 
 ## A server for demo accounts, another for real money
 
@@ -1348,22 +1387,59 @@ and every page's header says it: "demo server" or, in red, "real money
 server". A demo server refuses a real money account and a real one a demo
 account (the paper account is both). A real money server also:
 
-- starts a session of a form only once a demo server promoted it with a
+- starts a session of a form only once the archive promoted it with a
   record this server finds enough: the days, the closed trades, no parity
   alarm, demo accounts only. It judges the record itself and keeps it;
 - asks for the capital at risk to be confirmed before it starts one;
 - stops every session at the day's loss limit, and starts none again
   before the next UTC day; "stop all" on the live page stops them by hand;
-- over MCP takes only what a demo server promotes: no assistant writes
+- over MCP takes only what the archive promotes: no assistant writes
   strategies there or runs backtests.
 
-A promotion: make a token of the promote role on the real server, give it
-to the demo one (settings, this server), then press promote on a session of
-the form on the demo server's live page. It sends the uploaded strategy the
-form trades, the run of a set it was starred from and every session of the
-form there (`push_record`); the answer is the real server's verdict. The
-real server takes its market data from the demo one like the PC does: a
-mirror token there, and the demo server as its upstream.
+The archive's trade servers: each makes a token of the promote role on its
+own settings page, and the archive keeps it with the server's MCP address
+(settings, this server, "trade servers"; `DATA_DIR/trade-servers.json`,
+readable by its owner only). With it the archive reads each one's sessions
+every 5 minutes (`live_status`: the form, the account, the trades open and
+closed, the parity monitor's findings) and shows them on its live page; it
+reads them, rather than they push, because a real money server has to be
+reachable from the archive anyway, for the promotions. From that page it
+pushes a form - a favourite, or what a session trades - to one of them: the
+uploaded strategy and its indicators (drafts there, enabled by hand), the
+run of a set it was starred from, which a session there starts from, and,
+to a real money server, its record on demo - the sessions of it on the
+archive and on every demo server - which that server judges (`push_record`);
+its verdict is the answer. A trade server takes its market data from the
+archive like the PC does: a mirror token there, the archive as upstream.
+
+## Simulations in an S3 bucket
+
+The runs of a set - the trades the run page draws, a few MB each - are what
+fills the disk; the set's own file, its table, is small. With a bucket in
+`parity_deriva/.env`, any S3 one (AWS, Hetzner, Backblaze, MinIO, Garage):
+
+```
+export PARITY_DERIVA_S3_ENDPOINT=https://fsn1.your-objectstorage.com
+export PARITY_DERIVA_S3_BUCKET=my-bucket
+export PARITY_DERIVA_S3_ACCESS_KEY=...
+export PARITY_DERIVA_S3_SECRET_KEY=...
+export PARITY_DERIVA_S3_REGION=us-east-1          # the default
+export PARITY_DERIVA_S3_PREFIX=parity-deriva      # the default: two servers may share a bucket
+```
+
+the simulate page's list of sets has "to the bucket" on each: its runs go
+there (`<prefix>/sweeps/<set>/<n>.json.gz`), each removed from here once the
+bucket has it, and the list says "in the bucket". The set stays in every
+list, mix and favourite; a run opened comes back by itself, and "bring back"
+brings them all. Deleting a set deletes its runs in the bucket too - a
+bucket that does not answer keeps the set. For cron, the old sets nobody
+uses (not in a mix, no run starred):
+
+```
+python scripts/cold.py --older-than 30 [--dry-run]
+```
+
+`lib/s3.py` speaks S3 itself (Signature Version 4 over urllib), no boto3.
 
 # Tests
 

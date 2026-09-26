@@ -497,6 +497,20 @@ class LiveSessions(object):
                 continue
         return out
 
+    def snapshot(self):
+        """
+        Every session as a trade server tells the archive (web/mcp.py
+        live_status): the form, the account, the trades open and closed with
+        their P&L and the parity monitor's findings - not the events nor the
+        console, which stay on this server's own page.
+        """
+        keep = ('id', 'fields', 'provider', 'account', 'accountName', 'currency', 'demo',
+                'balance', 'started', 'stopped', 'running', 'exited', 'lastBar', 'signals',
+                'orders', 'errors', 'open', 'closed', 'net', 'won', 'lost')
+        return [dict([(k, s.get(k)) for k in keep], parity={
+            'divergences': s['parity']['divergences'], 'alarms': s['parity']['alarms']})
+            for s in self.sessions()]
+
     def running(self):
         """How many sessions have their process up: the menu's light."""
         count = 0

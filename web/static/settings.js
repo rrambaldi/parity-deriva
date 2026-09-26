@@ -313,26 +313,72 @@ $('lang-upload').addEventListener('click', async () => {
 function showServer(s) {
   $('server-state').textContent = s.accounts === 'real'
     ? `REAL MONEY accounts only (PARITY_DERIVA_ACCOUNTS=real in .env: no page changes it) \u00b7 a form `
-      + `trades here once promoted from a demo server with ${s.promoteDays} days, ${s.promoteTrades} `
+      + `trades here once promoted by the archive with ${s.promoteDays} days on demo, ${s.promoteTrades} `
       + `closed trades and no parity alarm \u00b7 every session stops at a day's loss of `
       + `${s.dailyLossPct}% of the capital traded` + (s.halted ? ' \u00b7 STOPPED today by that limit' : '')
-    : 'demo accounts only (PARITY_DERIVA_ACCOUNTS=demo in .env: no page changes it) \u00b7 what '
-      + 'worked here is promoted to a real money server from the live page';
+    : 'demo accounts only (PARITY_DERIVA_ACCOUNTS=demo in .env: no page changes it)';
   $('server-state').className = s.accounts === 'real' ? 'bad' : '';
-  $('promote-box').hidden = s.accounts === 'real';
-  $('promote-url').value = s.promoteTo.url;
-  $('promote-token').value = '';
-  $('promote-token').placeholder = s.promoteTo.token ? 'kept: type a new one to change it' : '';
+  for (const box of document.querySelectorAll('#roles-box input[name="role"]')) {
+    box.checked = s.roles.includes(box.value);
+  }
+  $('trade-box').hidden = !s.roles.includes('archive');
+  if (s.roles.includes('archive')) ask('api/trade-servers').then(showTradeServers).catch(serverSay);
 }
 
-$('promote-save').addEventListener('click', async () => {
-  try {
-    showServer(await post('api/server/promote-to', JSON.stringify(
-      { url: $('promote-url').value, token: $('promote-token').value })));
-    $('server-note').textContent = 'saved: the live page offers promote on every session';
-  } catch (error) {
-    $('server-note').textContent = String(error.message || error);
+const serverSay = (error) => { $('server-note').textContent = String(error.message || error); };
+
+function showTradeServers({ servers }) {
+  const rows = $('trade-rows');
+  rows.textContent = '';
+  for (const t of servers) {
+    const tr = rows.insertRow();
+    const status = t.status || {};
+    tr.insertCell().textContent = t.name;
+    tr.insertCell().textContent = t.url;
+    const accounts = (status.server || {}).accounts;
+    const kind = tr.insertCell();
+    kind.textContent = accounts === 'real' ? 'REAL MONEY' : accounts === 'demo' ? 'demo' : '?';
+    if (accounts === 'real') kind.className = 'bad';
+    const read = tr.insertCell();
+    read.textContent = !status.at ? 'not yet'
+      : `${new Date(status.at).toISOString().slice(0, 16).replace('T', ' ')} UTC`
+        + (status.ok ? ` \u00b7 ${(status.sessions || []).length} sessions` : ` \u00b7 ${status.error}`);
+    if (status.at && !status.ok) read.className = 'bad';
+    const drop = document.createElement('button');
+    drop.type = 'button';
+    drop.dataset.icon = 'delete';
+    drop.dataset.name = t.name;
+    drop.textContent = 'remove';
+    tr.insertCell().appendChild(drop);
   }
+  $('trade-table').hidden = !servers.length;
+}
+
+$('roles-save').addEventListener('click', async () => {
+  const roles = [...document.querySelectorAll('#roles-box input[name="role"]:checked')].map((b) => b.value);
+  try {
+    showServer(await post('api/server/roles', JSON.stringify({ roles })));
+    $('server-note').textContent = 'saved: the menu and the pages follow at once';
+  } catch (error) { serverSay(error); }
+});
+
+$('trade-save').addEventListener('click', async () => {
+  try {
+    showTradeServers(await post('api/trade-servers', JSON.stringify(
+      { name: $('trade-name').value, url: $('trade-url').value, token: $('trade-token').value })));
+    $('trade-token').value = '';
+    $('server-note').textContent = 'saved: the live page pushes forms to it, and shows its sessions once read';
+  } catch (error) { serverSay(error); }
+});
+
+$('trade-rows').addEventListener('click', async (event) => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  if (!await askUser(`Remove the trade server ${button.dataset.name}? Its sessions go on there; this archive stops reading them.`,
+    'remove', 'delete')) return;
+  try {
+    showTradeServers(await post('api/trade-servers', JSON.stringify({ name: button.dataset.name, drop: true })));
+  } catch (error) { serverSay(error); }
 });
 
 /* --------------------------------------------------------- the calendar */
@@ -971,7 +1017,7 @@ window.addEventListener('hashchange', follow);
 follow();
 
 showLanguages().catch((error) => { $('lang-note').textContent = String(error.message || error); });
-ask('api/server').then(showServer).catch((error) => { $('server-note').textContent = String(error.message || error); });
+ask('api/server').then(showServer).catch(serverSay);
 ask('api/market').then((state) => { showMarket(state); showQuality(state); if (marketRunning) followMarket(); })
   .catch((error) => dataLog([String(error.message || error)]));
 showCalendar();

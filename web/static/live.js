@@ -15,7 +15,8 @@ const state = {
   group: null,                  // the group key the chart draws
   candles: { key: null, reference: null, feeds: {} },   // feed -> {provider, account, candles}
   pendingZoom: null,            // a trade clicked in a group the chart had not loaded yet
-  server: { accounts: 'demo' },  // api/server: demo accounts or real money, from .env
+  server: { accounts: 'demo', roles: [] },  // api/server: demo or real money, from .env; roles
+  remote: [],                   // an archive's trade servers and what each said last
   note: '',                     // a verdict the poll does not wipe
 };
 
@@ -152,17 +153,6 @@ function renderTable() {
     button.textContent = s.running ? 'stop & close' : 'delete';
     button.disabled = !!(s.running && s.stopped);
     actions.appendChild(button);
-    // on a demo server, what this form did goes to the real money one, which
-    // judges it by its own minimums (api/live/<id>/promote)
-    if (state.server.accounts === 'demo' && state.server.promoteTo && state.server.promoteTo.url) {
-      const promote = document.createElement('button');
-      promote.type = 'button';
-      promote.dataset.action = 'promote';
-      promote.dataset.icon = 'upload';
-      promote.textContent = 'promote';
-      promote.title = `send this form's record to the real money server, ${state.server.promoteTo.url}`;
-      actions.append(' ', promote);
-    }
     if (s.running) running += 1;
   }
   const total = cell(foot.insertRow(), `${running} running of ${state.sessions.length}`);
@@ -199,14 +189,6 @@ $('live-rows').addEventListener('click', async (event) => {
       if (!await askUser(`Stop session ${id} and close everything? Its resting orders are cancelled and its open trades closed at market. Other sessions on the same account keep theirs.`)) return;
       await post(`api/live/${id}/stop`);
       return refresh();
-    }
-    if (action === 'promote') {
-      if (!await askUser(`Send what the form of session ${id} did here - every session of it - to the real money server? It trades there only once that server finds the record enough.`)) return;
-      note('promoting…');
-      const v = await post(`api/live/${id}/promote`);
-      note(v.ok ? `promoted: ${v.days} days, ${v.trades} trades, no parity alarm - it can start on the real money server`
-        : `not promoted yet: it needs ${v.need.join(', ')}`);
-      return;
     }
     if (action === 'delete') {
       if (!await askUser(`Delete session ${id} and its log?`)) return;
@@ -1016,10 +998,127 @@ $('new-form').addEventListener('submit', async (event) => {
   $('new-start').disabled = false;
 });
 
-setupNew();
-// demo or real money, and on a real server the day's halt by the loss limit
+/* --------------------------------------------------------- trade servers */
+
+// the form fields that make two sessions the same run (web/livesessions.py groupKey)
+const GROUP_SKIP = ['from', 'to', 'balance', 'capital', 'confirmed'];
+function formKey(fields) {
+  return JSON.stringify(Object.entries(fields || {})
+    .filter(([k, v]) => !GROUP_SKIP.includes(k) && v !== '' && v !== null && v !== undefined)
+    .map(([k, v]) => [k, String(v)]).sort());
+}
+
+// every form this archive can push: the favourites, then what the sessions
+// here and on the trade servers trade, one of each
+function pushForms() {
+  const out = [], seen = new Set();
+  const add = (fields, label) => {
+    const key = formKey(fields);
+    if (!fields || !fields.strategy || seen.has(key)) return;
+    seen.add(key);
+    out.push({ fields, label });
+  };
+  for (const f of pick.favourites || []) add(f.fields, favLabel(f));
+  for (const s of state.sessions) add(s.fields, `${s.fields.strategy} · ${s.fields.instrument} ${s.fields.granularity} · session ${s.id}`);
+  for (const t of state.remote) {
+    for (const s of (t.status || {}).sessions || []) {
+      add(s.fields, `${s.fields.strategy} · ${s.fields.instrument} ${s.fields.granularity} · on ${t.name}`);
+    }
+  }
+  return out;
+}
+
+function renderRemote() {
+  const box = $('trade-servers');
+  box.hidden = !state.server.roles.includes('archive') || !state.remote.length;
+  if (box.hidden) return;
+  const body = $('remote-rows');
+  body.textContent = '';
+  for (const t of state.remote) {
+    const said = t.status || {};
+    const accounts = (said.server || {}).accounts;
+    const sessions = said.sessions || [];
+    if (!sessions.length) {
+      const row = body.insertRow();
+      cell(row, `${t.name}${accounts === 'real' ? ' · REAL' : accounts ? ' · demo' : ''}`);
+      const td = cell(row, !said.at ? 'not read yet' : said.ok ? 'no session' : said.error, said.at && !said.ok ? 'bad' : '');
+      td.colSpan = 9;
+      continue;
+    }
+    for (const s of sessions) {
+      const row = body.insertRow();
+      const f = s.fields || {};
+      const [word, cls] = said.ok ? status(s) : ['as last read: ' + said.error, 'bad'];
+      cell(row, `${t.name}${accounts === 'real' ? ' · REAL' : ' · demo'}`);
+      cell(row, s.id);
+      cell(row, `${s.provider} ${s.account}${s.demo ? ' · demo' : ' · REAL'}`);
+      cell(row, f.strategy).title = paramsText(f);
+      cell(row, `${f.instrument} ${f.granularity}`);
+      cell(row, stamp(s.started));
+      cell(row, (s.running ? '● ' : '') + word, cls);
+      cell(row, String((s.open || []).length), 'num');
+      cell(row, `${(s.closed || []).length} (${s.won || 0}/${s.lost || 0})`, 'num');
+      cell(row, money(s.net), 'num' + (s.net > 0 ? ' good' : s.net < 0 ? ' bad' : ''));
+    }
+  }
+  const what = $('push-what'), to = $('push-to');
+  const [keepWhat, keepTo] = [what.value, to.value];
+  what.textContent = '';
+  pushForms().forEach((form, i) => { const o = new Option(form.label, i); o.title = paramsText(form.fields); what.add(o); });
+  to.textContent = '';
+  for (const t of state.remote) {
+    const accounts = ((t.status || {}).server || {}).accounts;
+    to.add(new Option(`${t.name}${accounts === 'real' ? ' (REAL MONEY)' : accounts ? ' (demo)' : ''}`, t.name));
+  }
+  if ([...what.options].some((o) => o.value === keepWhat)) what.value = keepWhat;
+  if ([...to.options].some((o) => o.value === keepTo)) to.value = keepTo;
+}
+
+async function refreshRemote() {
+  if (!state.server.roles.includes('archive')) return;
+  try { ({ servers: state.remote } = await ask('api/trade-servers')); }
+  catch (error) { $('push-note').textContent = String(error.message || error); }
+  renderRemote();
+}
+
+$('remote-read').addEventListener('click', async () => {
+  $('push-note').textContent = 'reading the trade servers…';
+  try {
+    ({ servers: state.remote } = await post('api/trade-servers/poll'));
+    $('push-note').textContent = '';
+  } catch (error) { $('push-note').textContent = String(error.message || error); }
+  renderRemote();
+});
+
+$('push-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = pushForms()[Number($('push-what').value)];
+  const target = state.remote.find((t) => t.name === $('push-to').value);
+  if (!form || !target) return;
+  const real = ((target.status || {}).server || {}).accounts === 'real';
+  if (!await askUser(real
+    ? `Promote ${form.label} to ${target.name}, a REAL MONEY server? Its code, its starred run and its record on demo go; it trades there only once that server finds the record enough, and a session is started there by hand.`
+    : `Push ${form.label} to ${target.name}? Its code goes as a draft to enable there, with its starred run to start a session from.`)) return;
+  $('push-go').disabled = true;
+  $('push-note').textContent = 'pushing…';
+  try {
+    const told = await post('api/trade-servers/push', { server: target.name, fields: form.fields });
+    const v = told.verdict;
+    $('push-note').textContent = [...told.lines, !v ? `pushed to ${target.name}`
+      : v.ok ? `promoted: ${v.days} days, ${v.trades} trades, no parity alarm - it can start on ${target.name}`
+        : `not promoted yet: it needs ${v.need.join(', ')}`].join(' · ');
+  } catch (error) { $('push-note').textContent = String(error.message || error); }
+  $('push-go').disabled = false;
+});
+
+setupNew().then(renderRemote);
+// demo or real money, and on a real server the day's halt by the loss limit;
+// the roles: no new session where nothing trades, the trade servers on an archive
 ask('api/server').then((server) => {
   state.server = server;
+  $('new-live').hidden = !server.roles.includes('trade');
+  refreshRemote();
+  setInterval(refreshRemote, 60000);
   if (server.halted) {
     note(`the day's loss limit (${server.dailyLossPct}% of the capital traded) stopped every session: `
       + 'none starts again before tomorrow, UTC');

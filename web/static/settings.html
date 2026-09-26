@@ -52,18 +52,40 @@
   the service, so its report here is what it prints on the command line.
 -->
 <!--
-  What this server trades - demo accounts or real money - from .env and never
-  from here (etc/settings.py ACCOUNTS), and what goes with it: a real one's
-  minimums for a promotion and its loss limit, a demo one's real server.
+  What this server is: its roles (web/servers.py, DATA_DIR/server.json) and
+  what it trades - demo accounts or real money - from .env and never from
+  here (etc/settings.py ACCOUNTS), with what goes with it: a real one's
+  minimums for a promotion and its loss limit. An archive's trade servers:
+  where it pushes forms, and whose sessions it reads.
 -->
 <section id="server-panel" role="tabpanel" aria-labelledby="tab-server">
   <h2 class="panel-title">this server</h2>
   <div id="server-state"></div>
-  <div id="promote-box" class="market-row" hidden>
-    <label>promote to: the real server's MCP address
-      <input type="url" id="promote-url" spellcheck="false" placeholder="https://host/parity/mcp"></label>
-    <label>its promote token <input type="password" id="promote-token" autocomplete="off"></label>
-    <button type="button" id="promote-save" data-icon="yes">save</button>
+  <fieldset id="roles-box">
+    <legend>roles</legend>
+    <label><input type="checkbox" name="role" value="archive"> archive: keeps the strategies, the indicators,
+      the simulations and the market data; pushes forms to the trade servers and reads their trades</label>
+    <label><input type="checkbox" name="role" value="test"> test: simulates, and takes the AI assistants'
+      drafts</label>
+    <label><input type="checkbox" name="role" value="trade"> trade: trades on the accounts, demo or real money
+      as .env says; takes code only from the archive's push</label>
+    <button type="button" id="roles-save" data-icon="yes">save the roles</button>
+  </fieldset>
+  <div id="trade-box" hidden>
+    <h3 class="panel-title">trade servers</h3>
+    <p class="dim">Each one makes a promote token on its own settings page (AI assistants tab); with
+      it this archive pushes forms there - from the live page - and reads its sessions every few minutes.</p>
+    <table id="trade-table" hidden>
+      <thead><tr><th>server</th><th>MCP address</th><th>trades</th><th>last read</th><th></th></tr></thead>
+      <tbody id="trade-rows"></tbody>
+    </table>
+    <div class="market-row">
+      <label>name <input type="text" id="trade-name" maxlength="40" placeholder="real"></label>
+      <label>its MCP address
+        <input type="url" id="trade-url" spellcheck="false" placeholder="https://host/parity/mcp"></label>
+      <label>its promote token <input type="password" id="trade-token" autocomplete="off"></label>
+      <button type="button" id="trade-save" data-icon="add">save</button>
+    </div>
   </div>
   <p id="server-note" role="status"></p>
 </section>
@@ -285,7 +307,7 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
           <option value="pc">pc: pushes strategies, sets, mixes; copies the market data</option>
           <option value="mirror">mirror: copies the market data, nothing else</option>
           <option value="market">market: pushes candles and calendar, nothing else</option>
-          <option value="promote">promote: a demo server promoting to this real money one</option>
+          <option value="promote">promote: the archive pushing forms here and reading the trades</option>
         </select></label>
       <button type="button" id="mcp-key-add" data-icon="add">new program token</button>
     </div>

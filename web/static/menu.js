@@ -400,13 +400,19 @@ function marginText(m) {
           el.title = titles[name] + (on ? ' - ' + what : '');
         }
         if (busy.server) serverAnswer(busy.server);
+        // no live page where nothing trades and no trade server is read (web/servers.py)
+        if (busy.roles) {
+          nav.querySelector('[data-page="live"]').hidden = !busy.roles.includes('trade')
+            && !busy.roles.includes('archive');
+        }
         if (busy.accounts) {
           const real = busy.accounts === 'real';
           accounts.hidden = false;
           accounts.className = 'badge ' + (real ? 'live' : 'practice');
           accounts.textContent = real ? 'real money' : 'demo';
           accounts.title = (real ? 'this server trades real money accounts only'
-            : 'this server trades demo accounts only') + ' (PARITY_DERIVA_ACCOUNTS in .env)';
+            : 'this server trades demo accounts only') + ' (PARITY_DERIVA_ACCOUNTS in .env)'
+            + (busy.roles ? ` · roles: ${busy.roles.join(', ')}` : '');
           document.documentElement.dataset.accounts = busy.accounts;
         }
       } catch (error) { /* no answer, no light: the page itself is unaffected */ }

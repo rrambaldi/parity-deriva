@@ -373,6 +373,18 @@ MCP_SANDBOX_SECONDS = int(dotenv('PARITY_DERIVA_MCP_SANDBOX_SECONDS', '240'))
 # either missing, the page says so and nothing is sent.
 PUBLIC_REPO = dotenv('PARITY_DERIVA_PUBLIC_REPO')
 GITHUB_TOKEN = dotenv('PARITY_DERIVA_GITHUB_TOKEN')
+# The bucket a set's runs go to off this disk, to come back when one is opened
+# (web/service.py freeze, scripts/cold.py): any S3 one - AWS, Hetzner,
+# Backblaze, MinIO - by its endpoint, e.g. https://fsn1.your-objectstorage.com,
+# the bucket's name and a key that may read, write and delete in it. PREFIX
+# goes before every key: two servers may share one bucket. With any missing,
+# nothing goes and the page says so.
+S3_ENDPOINT = dotenv('PARITY_DERIVA_S3_ENDPOINT')
+S3_BUCKET = dotenv('PARITY_DERIVA_S3_BUCKET')
+S3_ACCESS_KEY = dotenv('PARITY_DERIVA_S3_ACCESS_KEY')
+S3_SECRET_KEY = dotenv('PARITY_DERIVA_S3_SECRET_KEY')
+S3_REGION = dotenv('PARITY_DERIVA_S3_REGION', 'us-east-1')
+S3_PREFIX = dotenv('PARITY_DERIVA_S3_PREFIX', 'parity-deriva')
 
 CANDLE_DB = dotenv('PARITY_DERIVA_CANDLE_DB', os.path.join(DATA_DIR, 'live', 'candles.db'))
 

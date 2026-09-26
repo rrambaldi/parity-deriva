@@ -137,7 +137,7 @@ class RealMcpTest(unittest.TestCase):
         for client in ('token: cli', 'claude.ai', 'pc: my PC'):
             with self.assertRaises(mcp.ToolError) as caught:
                 self.call('submit_strategy', {'name': 'X', 'source': 'x'}, client)
-            self.assertIn('takes only what a demo server promotes', str(caught.exception))
+            self.assertIn('takes only what the archive promotes', str(caught.exception))
         with self.assertRaises(mcp.ToolError):
             self.call('push_record', {'record': record(30, 50)}, 'pc: my PC')
         told = self.call('push_record', {'record': record(30, 50)}, 'promote: demo')
@@ -149,12 +149,18 @@ class RealMcpTest(unittest.TestCase):
         with mock.patch.object(settings, 'ACCOUNTS', 'demo'), self.assertRaises(mcp.ToolError) as caught:
             self.call('push_record', {'record': record(30, 50)}, 'promote: demo')
         self.assertIn('goes to a real money one', str(caught.exception))
+        # the archive reads the trades with the same token, an assistant does not
+        self.assertEqual(self.call('live_status', {}, 'promote: archive')['server']['accounts'], 'real')
+        with self.assertRaises(mcp.ToolError):
+            self.call('live_status', {}, 'claude.ai')
 
 
-class DemoPromoteTest(unittest.TestCase):
+class ArchivePromoteTest(unittest.TestCase):
 
-    def test_a_demo_server_sends_a_forms_record_to_the_real_one(self):
+    def test_the_archive_sends_a_forms_record_on_demo_to_the_real_server(self):
         from parity_deriva.data import sources
+        from parity_deriva.web import servers
+        from parity_deriva.web.service import ServiceError
         folder = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, folder, True)
         service = Service(setup=types.SimpleNamespace(DATA_DIR=folder))
@@ -163,27 +169,33 @@ class DemoPromoteTest(unittest.TestCase):
                                          'account': 'DEMO1', 'demo': True, 'balance': 1000.0,
                                          'pid': None, 'started': int(time.time() * 1000) - DAY,
                                          'stopped': None})
-        from parity_deriva.web.service import ServiceError
         with self.assertRaises(ServiceError) as caught:
-            service.promote(session)
-        self.assertIn('set it on the settings page', str(caught.exception))
-        service.setPromoteTarget({'url': 'https://real/mcp', 'token': 'the promote token'})
-        self.assertEqual(service.serverData()['promoteTo'], {'url': 'https://real/mcp', 'token': True})
+            service.pushForm({'server': 'real', 'fields': FORM})
+        self.assertIn("no trade server 'real'", str(caught.exception))
+        service.saveTradeServer({'name': 'real', 'url': 'https://real/mcp', 'token': 'the promote token'})
+        self.assertEqual(service.tradeServers()['servers'][0]['token'], True)
         sent = []
 
         def rpc(upstream, name, args, timeout=180):
             sent.append((upstream['token'], name, args))
+            if name == 'live_status':
+                return {'server': {'accounts': 'real'}, 'sessions': []}
             return {'ok': False, 'need': ['20 days on demo, it has 1.0'], 'days': 1.0, 'trades': 0,
                     'alarms': 0, 'net': 0}
         with mock.patch.object(sources, 'rpc', rpc):
-            told = service.promote(session)
-        self.assertEqual(told['need'], ['20 days on demo, it has 1.0'])
-        # a built-in strategy goes through git: only the record is sent
-        self.assertEqual([(token, name) for token, name, _ in sent], [('the promote token', 'push_record')])
-        shipped = sent[0][2]['record']
+            told = service.pushForm({'server': 'real', 'fields': FORM})
+        self.assertEqual(told['verdict']['need'], ['20 days on demo, it has 1.0'])
+        # the server is asked what it trades first; a built-in strategy goes
+        # through git, and no set run was starred: only the record is sent
+        self.assertEqual([(token, name) for token, name, _ in sent],
+                         [('the promote token', 'live_status'), ('the promote token', 'push_record')])
+        shipped = sent[1][2]['record']
         self.assertEqual((shipped['fields'], [x['id'] for x in shipped['sessions']]), (FORM, [session]))
-        with mock.patch.object(settings, 'ACCOUNTS', 'real'), self.assertRaises(ServiceError):
-            service.promote(session)
+        # an archive without the role does none of it
+        servers.saveRoles(['test'], service.setup)
+        with self.assertRaises(ServiceError) as caught:
+            service.pushForm({'server': 'real', 'fields': FORM})
+        self.assertIn('no archive role', str(caught.exception))
 
 
 if __name__ == '__main__':

@@ -181,6 +181,7 @@ h1 img { height: 28px; width: auto; }
   border: 1px solid transparent;
   border-radius: var(--radius-s);
 }
+#menu a[hidden] { display: none; }
 #menu a:hover { color: var(--text); border-color: var(--line); }
 #menu [aria-current="page"] { color: var(--text); border-color: var(--border); background: var(--raised); }
 /* something going on in the service - a sweep, a live session - lights its
@@ -459,13 +460,20 @@ section {
 #archive-state, #q-note { color: var(--text-3); font-size: var(--fs-small); overflow-wrap: anywhere; }
 #q-numbers { margin: 10px 0 0; padding: 8px; font-family: var(--font-mono); font-size: var(--fs-small); background: var(--raised); border-radius: var(--radius-s); white-space: pre-wrap; }
 #q-days { display: block; width: 100%; height: 140px; margin-top: 8px; }
-#server-note:empty, #promote-box[hidden] { display: none; }
-#promote-url { width: min(36em, 80vw); }
+#server-note:empty, #trade-box[hidden], #trade-table[hidden] { display: none; }
+#trade-url { width: min(30em, 80vw); }
+#roles-box { display: flex; flex-direction: column; gap: 6px; margin: 12px 0;
+  border: 1px solid var(--line); border-radius: var(--radius-s); padding: 6px 12px 12px; }
+#roles-box legend { color: var(--text-3); padding: 0 4px; }
+#roles-box label { flex-direction: row; align-items: baseline; gap: 8px; text-transform: none;
+  letter-spacing: normal; font-size: inherit; cursor: pointer; }
+#roles-box button { align-self: flex-start; }
+#trade-table td:last-child { white-space: nowrap; }
 #market-box { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 #market-box .market-row { margin-top: 10px; }
 #market-box [hidden] { display: none; }
 #market-state { margin-bottom: 6px; overflow-wrap: anywhere; }
-#market-box p.dim { margin: 10px 0 0; color: var(--text-3); font-size: var(--fs-small); }
+#market-box p.dim, #trade-box p.dim { margin: 10px 0 0; color: var(--text-3); font-size: var(--fs-small); }
 #market-writer-box { flex-direction: row; align-items: center; gap: 6px; }
 #market-dir, #market-upstream { width: min(36em, 80vw); }
 #market-candles-every, #market-calendar-every { width: 6em; }
@@ -948,7 +956,10 @@ dialog.sheet::backdrop { background: var(--backdrop); } /* token in tokens.css: 
 
 #live-clock { margin-left: 12px; font-size: var(--fs-small); }
 #live-back { margin-left: auto; }
-#live-panel, #live-detail { overflow-x: auto; }
+#live-panel, #live-detail, #trade-servers { overflow-x: auto; }
+#trade-servers[hidden], #new-live[hidden] { display: none; }
+#push-form { margin-top: 10px; }
+#push-note:empty { display: none; }
 /* a session started from the live page itself */
 #new-live h3 { margin: 0 0 8px; }
 #new-accounts { border: 1px solid var(--line); border-radius: var(--radius-s); margin: 0; padding: 4px 10px 8px;
