@@ -99,9 +99,9 @@ def logs(service):
 							   'about': "%s  %s" % (schedule, command)}, **stat(path))
 			out.append(seen[path])
 	path = servicePath(service.setup)
-	out.append(dict({'group': 'service', 'name': 'web.log', 'path': path,
-					 'about': "this service: requests, live sessions started and stopped, "
-							  "the market data's timers"}, **stat(path)))
+	# what it is, the page says (static/logs.js SERVICE), in the page's language
+	out.append(dict({'group': 'service', 'name': 'web.log', 'path': path, 'about': ''},
+					**stat(path)))
 	live = service.live
 	for session in live.ids():
 		try:

@@ -6,10 +6,12 @@
 
 const $ = (id) => document.getElementById(id);
 const GROUPS = { cron: 'cron jobs', service: 'this service', live: 'live sessions' };
+// what web.log is: said here and not by the service, so the page puts it in its language
+const SERVICE = "this service: requests, live sessions started and stopped, the market data's timers";
 let known = [];
 let timer = null;
 
-const size = (n) => n === null ? 'not written yet'
+const size = (n) => n === null ? t('not written yet')
   : n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} kB` : `${(n / 1048576).toFixed(1)} MB`;
 const when = (ms) => ms === null ? '' : new Date(ms).toLocaleString();
 
@@ -23,12 +25,12 @@ async function list() {
     const rows = known.filter((l) => l.group === group);
     if (!rows.length) continue;
     const box = document.createElement('optgroup');
-    box.label = label;
+    box.label = t(label);
     for (const log of rows) {
       const option = document.createElement('option');
       option.value = log.path || '';
       option.disabled = !log.path;
-      option.textContent = `${log.name}${log.path ? '' : ' (no log file)'}`
+      option.textContent = `${log.name}${log.path ? '' : ' ' + t('(no log file)')}`
         + (log.modified ? ` · ${when(log.modified)}` : '');
       box.appendChild(option);
     }
@@ -41,19 +43,20 @@ async function list() {
 async function read() {
   const pick = $('log-pick');
   if (!pick.value) {
-    $('log-about').textContent = 'no log to show';
+    $('log-about').textContent = t('no log to show');
     return;
   }
   history.replaceState(null, '', '#' + encodeURIComponent(pick.value));
   const reply = await fetch(`api/logs/tail?path=${encodeURIComponent(pick.value)}&lines=${$('log-lines').value}`);
   const got = await reply.json();
   if (!reply.ok) {
-    $('log-about').textContent = got.error || `error ${reply.status}`;
+    $('log-about').textContent = got.error || t('error {status}', { status: reply.status });
     $('log-text').textContent = '';
     return;
   }
   $('log-about').textContent = `${got.path} · ${size(got.size)}`
-    + (got.modified ? ` · last written ${when(got.modified)}` : '') + `\n${got.about}`;
+    + (got.modified ? ' · ' + t('last written {when}', { when: when(got.modified) }) : '')
+    + '\n' + (got.group === 'service' ? t(SERVICE) : got.about);
   show(got.lines);
 }
 
@@ -64,7 +67,7 @@ function show(lines) {
   const bottom = text.scrollTop + text.clientHeight >= text.scrollHeight - 4;
   const wanted = $('log-filter').value.toLowerCase();
   const rows = wanted ? shown.filter((l) => l.toLowerCase().includes(wanted)) : shown;
-  text.textContent = rows.length ? rows.join('\n') : (wanted ? 'no line has that text' : 'the file is empty');
+  text.textContent = rows.length ? rows.join('\n') : t(wanted ? 'no line has that text' : 'the file is empty');
   // a log is read from the end: stay there, unless the reader scrolled up
   if (bottom || lines === undefined || $('log-follow').checked) text.scrollTop = text.scrollHeight;
 }
@@ -84,4 +87,6 @@ window.addEventListener('hashchange', () => {
   if (path && path !== $('log-pick').value) { $('log-pick').value = path; read(); }
 });
 
-list().then(read).catch((error) => { $('log-about').textContent = `the service did not answer: ${error}`; });
+list().then(read).catch((error) => {
+  $('log-about').textContent = t('the service did not answer: {error}', { error: String(error) });
+});
