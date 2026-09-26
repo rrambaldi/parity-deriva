@@ -368,7 +368,7 @@ TOOLS = [
 		 'n': {'type': 'integer', 'description': "one run of that set"}}}},
 	{'name': 'get_entry_analysis',
 	 'description': "Which entries a saved run should not have taken: its trades by what the market "
-					"looked like on the signal's bar (rsi14, atrpct14, dist_sma100_atr, range_atr14, "
+					"looked like on the signal's bar (rsi14, adx14, atrpct14, dist_sma100_atr, range_atr14, "
 					"slope100, hour, weekday), five bands a feature, each band's expectancy in R with its "
 					"95% interval, and the bands better than the run beyond chance as filters to try in a "
 					"set (the form's filters field, e.g. rsi14<55&hour>=7). Mind the count: with N bands "

@@ -406,8 +406,8 @@ Senza questo pezzo un candidato non ha dove andare.
   `weekday`.
 - **Com'è stato fatto.** Le caratteristiche stanno in `portfolio/features.py`,
   lette una barra chiusa alla volta da `lib/streaming.Series` (che ha già RSI,
-  ATR e medie): le usano il filtro e l'analisi, stesso codice. ADX non c'è
-  ancora: si aggiunge a `Series` quando una caratteristica lo usa.
+  ATR e medie, e dal 2026-09-26 l'ADX di Wilder): le usano il filtro e
+  l'analisi, stesso codice.
 - **Poi (C4b2).** Gli indicatori AI abilitati, calcolati nella sandbox sulle
   candele del run, come già si fa per disegnarli sul grafico.
 - **Test.** Valori noti su serie piccole scritte a mano.

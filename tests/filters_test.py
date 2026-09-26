@@ -35,7 +35,7 @@ class ConditionsTest(unittest.TestCase):
         self.assertEqual(filters.parse(''), [])
         with self.assertRaises(filters.FilterError) as caught:
             filters.parse('rsi<55')
-        self.assertIn('no feature rsi - there are rsi14, atrpct14', str(caught.exception))
+        self.assertIn('no feature rsi - there are rsi14, adx14, atrpct14', str(caught.exception))
         with self.assertRaises(filters.FilterError) as caught:
             filters.parse('rsi14=55')
         self.assertIn('a condition is a feature', str(caught.exception))
@@ -62,6 +62,42 @@ class ConditionsTest(unittest.TestCase):
         passing = filters.EntryFilter('rsi14>55&hour>=23')
         passing.features = features
         self.assertIsNone(passing.blocked())
+
+
+class AdxTest(unittest.TestCase):
+    """Wilder's ADX in lib/streaming.Series, worked out by hand on five bars of period 2."""
+
+    def feed(self, rows, period):
+        from parity_deriva.lib.streaming import Series
+        series, out = Series(adx=period), []
+        for high, low, close in rows:
+            series.add(types.SimpleNamespace(mid={'o': close, 'h': high, 'l': low, 'c': close}))
+            out.append((series.adx(), series.di()))
+        return out
+
+    def test_the_values_worked_out_by_hand(self):
+        # +DM 1, 1, 0, 1.5 and -DM 0, 0, 1, 0; true ranges 2, 2, 2.5, 3.5
+        seen = self.feed([(10, 8, 9), (11, 9, 10.5), (12, 10, 11.5), (11.5, 9, 9.5), (13, 10, 12.5)], 2)
+        self.assertEqual([adx for adx, _ in seen[:3]], [None, None, None])
+        # the sums over two bars: +DI 2/4, -DI 0 - a DX of 100
+        self.assertEqual(seen[2][1], (50.0, 0.0))
+        # carried: TR 4.5, +DM 1, -DM 1 - a DX of 0, the ADX the mean of the two
+        self.assertAlmostEqual(seen[3][0], 50.0)
+        # TR 5.75, +DM 2, -DM 0.5: +DI 34.78, -DI 8.70, a DX of 60, the ADX (50 + 60) / 2
+        self.assertAlmostEqual(seen[4][1][0], 200 / 5.75)
+        self.assertAlmostEqual(seen[4][0], 55.0)
+
+    def test_a_clean_trend_is_strong_a_range_is_not(self):
+        trend = self.feed([(1.0 + 0.001 * i + 0.0005, 1.0 + 0.001 * i - 0.0005, 1.0 + 0.001 * i)
+                           for i in range(80)], 14)
+        chop = self.feed([(1.0 + 0.001 * (i % 2) + 0.0005, 1.0 + 0.001 * (i % 2) - 0.0005, 1.0 + 0.001 * (i % 2))
+                          for i in range(80)], 14)
+        self.assertGreater(trend[-1][0], 50)
+        self.assertGreater(trend[-1][1][0], trend[-1][1][1])
+        self.assertLess(chop[-1][0], 20)
+        # 14 bars for the DI, 14 more for the ADX
+        self.assertIsNone(trend[26][0])
+        self.assertIsNotNone(trend[28][0])
 
 
 class BacktestTest(unittest.TestCase):

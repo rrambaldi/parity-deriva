@@ -419,7 +419,7 @@
   "compare the two code versions ticked": "confronta le due versioni del codice spuntate",
   "compare this code": "confronta questo codice",
   "comparing…": "confronto…",
-  "conditions on the bar a signal comes on, joined by &: rsi14<55&hour>=7 - features rsi14, atrpct14, dist_sma100_atr, range_atr14, slope100, hour, weekday": "condizioni sulla barra del segnale, unite da &: rsi14<55&hour>=7 - caratteristiche rsi14, atrpct14, dist_sma100_atr, range_atr14, slope100, hour, weekday",
+  "conditions on the bar a signal comes on, joined by &: rsi14<55&hour>=7 - features rsi14, adx14, atrpct14, dist_sma100_atr, range_atr14, slope100, hour, weekday": "condizioni sulla barra del segnale, unite da &: rsi14<55&hour>=7 - caratteristiche rsi14, adx14, atrpct14, dist_sma100_atr, range_atr14, slope100, hour, weekday",
   "connect": "collega",
   "connector address": "indirizzo del connettore",
   "consistency": "coerenza",

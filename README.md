@@ -1648,8 +1648,9 @@ export PARITY_DERIVA_FINANCING=EUR_USD:-2.5/0.8,GBP_USD:-3.1/1.2
 An account option like the hours and the news: `filters`, conditions on the
 bar a signal came on that any strategy's signals must meet
 (`portfolio/filters.py`) - `rsi14<55`, `atrpct14>0.3&hour>=7`. The features are
-`rsi14`, `atrpct14`, `dist_sma100_atr`, `range_atr14`, `slope100`, `hour`,
-`weekday` (`portfolio/features.py`), read a closed bar at a time: the same
+`rsi14`, `adx14` (the trend's strength, either way: under 20 a range, over
+25 a trend), `atrpct14`, `dist_sma100_atr`, `range_atr14`, `slope100`,
+`hour`, `weekday` (`portfolio/features.py`), read a closed bar at a time: the same
 object in the backtest, live and in the shadow. On the simulate page it is a
 grid field like the others: `none, rsi14<50, rsi14<55` is three runs.
 

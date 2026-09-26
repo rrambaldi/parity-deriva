@@ -45,12 +45,13 @@ class Series(object):
 	"""
 
 	def __init__(self, ema=(), sma=(), stdev=(), atr=None, rsi=None,
-				 volume=None, keep=600):
+				 volume=None, keep=600, adx=None):
 		self.emaPeriods = tuple(ema)
 		self.smaPeriods = tuple(sma)
 		self.stdevPeriods = tuple(stdev)
 		self.atrPeriod = atr
 		self.rsiPeriod = rsi
+		self.adxPeriod = adx
 		self.volumePeriod = volume
 		#: enough window for every windowed reading asked for, and for the
 		#: seeds of the running ones
@@ -67,6 +68,15 @@ class Series(object):
 		self._gain = None
 		self._loss = None
 		self._moves = []
+		# Wilder's directional movement: the true range and the +DM and -DM
+		# summed over the period, their seeds, the DX values that seed the
+		# ADX, and the ADX
+		self._dm = None
+		self._dmSeed = []
+		self._dxSeed = []
+		self._dx = None
+		self._di = None
+		self._adx = None
 
 	# ------------------------------------------------------------- feeding
 
@@ -84,6 +94,46 @@ class Series(object):
 			self._advanceAtr(candle, previous)
 		if self.rsiPeriod:
 			self._advanceRsi(close, previous)
+		if self.adxPeriod:
+			self._advanceAdx(candle, previous)
+
+	def _advanceAdx(self, candle, previous):
+		"""
+		Wilder's ADX: +DM the high's rise over the high before and -DM the
+		low's fall under the low before, the larger only and only if above
+		zero; each and the true range summed over the period, then carried
+		as sum - sum / period + new; +DI and -DI those sums over the true
+		range's; DX their difference over their total; the ADX the mean of
+		the first `period` DX values, then carried as Wilder's average.
+		"""
+		if previous is None:
+			return
+		period = self.adxPeriod
+		high, low = candle.mid['h'], candle.mid['l']
+		up, down = high - previous.mid['h'], previous.mid['l'] - low
+		plus = up if up > down and up > 0 else 0.0
+		minus = down if down > up and down > 0 else 0.0
+		before = previous.mid['c']
+		true = max(high - low, abs(high - before), abs(low - before))
+		if self._dm is None:
+			self._dmSeed.append((true, plus, minus))
+			if len(self._dmSeed) < period:
+				return
+			self._dm = [sum(v[i] for v in self._dmSeed) for i in range(3)]
+		else:
+			self._dm = [s - s / period + v for s, v in zip(self._dm, (true, plus, minus))]
+		sumTrue, sumPlus, sumMinus = self._dm
+		plusDI = 100.0 * sumPlus / sumTrue if sumTrue else 0.0
+		minusDI = 100.0 * sumMinus / sumTrue if sumTrue else 0.0
+		self._di = (plusDI, minusDI)
+		total = plusDI + minusDI
+		self._dx = 100.0 * abs(plusDI - minusDI) / total if total else 0.0
+		if self._adx is None:
+			self._dxSeed.append(self._dx)
+			if len(self._dxSeed) == period:
+				self._adx = sum(self._dxSeed) / float(period)
+			return
+		self._adx = (self._adx * (period - 1) + self._dx) / period
 
 	def _advanceEma(self, period, close):
 		if self._ema[period] is None:
@@ -135,6 +185,17 @@ class Series(object):
 
 	def atr(self):
 		return self._atr
+
+	def adx(self):
+		"""
+		Wilder's ADX, how strong the trend is whichever way it goes: under 20
+		a range, over 25 a trend. None for twice its period while it warms.
+		"""
+		return self._adx
+
+	def di(self):
+		"""(+DI, -DI), the push up and the push down, or None while warming."""
+		return self._di if self._dm is not None else None
 
 	def rsi(self):
 		"""
