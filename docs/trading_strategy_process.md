@@ -1,5 +1,8 @@
 # Processo sviluppo strategie: SIM → DEMO → LIVE
 
+Versione corta della fase 1, una strategia alla volta. Quella completa è
+[PROCESSO.md](PROCESSO.md); il mix e il resto sono in [ROADMAP.md](ROADMAP.md).
+
 ## In una riga
 
 Una strategia è **codice + parametri**. Si cerca una buona combinazione in
@@ -186,9 +189,7 @@ Per strategia (da fare):
 | curva sotto il 5° percentile della banda | `SUSPENDED` |
 | serie di perdite > 1.5 × la peggiore della scheda | `SUSPENDED` |
 
-Portafoglio (da fare): tetto al rischio totale e controllo della
-correlazione tra strategie live (la pagina `/mix` ha già la matrice di
-correlazione).
+Più strategie insieme (mix) e portafoglio: fase 2 e 3, in [ROADMAP.md](ROADMAP.md).
 
 ### Monitoraggio
 

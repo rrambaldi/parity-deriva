@@ -1,8 +1,14 @@
-# parity-deriva – Da un'idea a un trade live
+# parity-deriva – Da un'idea a un trade live · fase 1: singola strategia
 
-Come una strategia nasce, viene simulata, messa in un mix, provata in demo e
-alla fine va a soldi veri. Con il dettaglio di tutto quello che succede
-**prima di andare live**.
+Come **una** strategia nasce, viene simulata, provata in demo e alla fine va a
+soldi veri. Con il dettaglio di tutto quello che succede **prima di andare
+live**.
+
+Il piano ha due fasi:
+
+1. **singola strategia**: questo documento, ed è quella su cui si lavora ora;
+2. **mix**, più strategie sullo stesso strumento: in [ROADMAP.md](ROADMAP.md),
+   con quello che viene dopo.
 
 Legenda usata in tutto il documento:
 
@@ -20,7 +26,6 @@ tempo, stanno in un posto solo (`etc/settings.py`).
 IDEA → STRATEGIA (codice + parametri)
      → SIM   : sweep ↔ correlazioni, in loop, sul periodo di sviluppo
      → GATE  : holdout, aperto una volta
-     → MIX   : più strategie sullo stesso strumento, controllate insieme
      → DEMO  : stesso broker del live, parametri congelati
      → GATE  : promozione, giudicata dal server reale
      → LIVE  : prima 25% della size, poi 100%
@@ -49,7 +54,7 @@ in poi cambiare codice o parametri crea una nuova versione, che riparte da
 
 | Ruolo | Dove di solito | Nel processo |
 |---|---|---|
-| **Test** | PC di casa o cloud | SIM, sweep, correlazioni, mix |
+| **Test** | PC di casa o cloud | SIM, sweep, correlazioni |
 | **Archivio** | cloud | tiene strategie, simulazioni, dati; rifà i run (verify); manda i form ai server di trade; legge i loro trade ogni 5 minuti |
 | **Trade demo** | cloud | DEMO |
 | **Trade real** | cloud, server separato | LIVE |
@@ -200,50 +205,24 @@ Un JSON per versione in `DATA_DIR`, scritto dalla piattaforma.
 
 ---
 
-## 4. Il mix – più strategie sullo stesso strumento
+## 4. Dal PC all'archivio ✅
 
-Per ora un mix lavora **su un solo strumento**. Le correlazioni tra
-strumenti diversi sono in roadmap, più avanti.
-
-### Cosa fa oggi ✅
-
-- Mette insieme run di set diversi: strategie, timeframe, parametri.
-- Due viste:
-  - **summed**: ogni run gira sul suo capitale, i profitti si sommano
-  - **together**: un solo conto condiviso, con la leva del mix; un trade
-    che il margine non copre viene rifiutato, come farebbe il broker
-- Analisi: quanto rende ogni run e che quota del totale fa, il suo DD da
-  solo, la correlazione con gli altri, la matrice di correlazione, quanto DD
-  si risparmia tenendoli insieme (diversificazione).
-
-### Controlli da aggiungere 🔧
-
-| Controllo | Perché | Proposta di soglia |
-|---|---|---|
-| **long e short aperti insieme** | alcuni broker compensano le due posizioni (netting), altri le tengono separate e paghi lo spread due volte; oggi il codice non lo gestisce | mostrare quanto tempo succede; simulare il netting se il broker lo fa |
-| **posizioni che si sommano** | tre strategie long insieme sono una sola scommessa grande | rischio totale aperto sullo strumento ≤ 3% del capitale |
-| **strategie doppione** | se A e B entrano negli stessi momenti nella stessa direzione, il mix non diversifica | trade sovrapposti < 50% |
-| **senza questo run** | ogni run deve migliorare il mix | togliendolo, rendimento/DD non migliora |
-| **pesi** | oggi ogni run pesa uguale | proposte automatiche: "stesso rischio", "miglior rendimento/DD" |
-| **banda Monte Carlo del mix** | serve un riferimento per il mix in demo e live | rimescolando giorni interi, così la correlazione resta |
-| **holdout del mix** | anche scegliere i run è una selezione | il mix si sceglie sul periodo di sviluppo, holdout guardato una volta |
-
----
-
-## 5. Dal PC all'archivio ✅
-
-1. Il Test (PC) manda set, run e mix all'archivio:
-   `python scripts/sync.py push` (`push_sweep`, `push_mix`).
+1. Il Test (PC) manda all'archivio il run scelto, con il suo set, la
+   strategia e gli indicatori: `python scripts/sync.py push`.
 2. Le strategie e gli indicatori arrivano come bozze: si abilitano a mano.
-3. **Verify**: sull'archivio, dalla pagina del mix, ogni run viene rifatto
-   con il codice e le candele dell'archivio. Si confrontano i trade:
-   "uguali" oppure il primo trade in cui divergono.
+3. **Verify**: sull'archivio il run viene rifatto con il codice e le candele
+   dell'archivio. Si confrontano i trade: "uguali" oppure il primo trade in
+   cui divergono.
 
 Quello che va a tradare è esattamente quello che è stato simulato.
 
+Oggi push e verify passano dal mix: `sync.py push` manda i mix, e verify sta
+nella pagina del mix. Per una strategia sola si fa un **mix con un solo run**,
+e funziona. ✅ Push e verify di un run senza mix: piccolo cantiere. 🔧
+
 ---
 
-## 6. DEMO
+## 5. DEMO
 
 1. Dalla pagina live dell'archivio si manda un **form** (un preferito) al
    server demo: codice della strategia, indicatori, run del set da cui
@@ -260,30 +239,27 @@ Quello che va a tradare è esattamente quello che è stato simulato.
 
 Parametri congelati: se cambiano è una nuova versione, e si torna a SIM.
 
-Il mix intero in demo, con tutti i form insieme e il capitale diviso come
-nel mix, è da fare. 🔧 Oggi si manda un form alla volta.
-
 ---
 
-## 7. Prima di andare live – il dettaglio
+## 6. Prima di andare live – il dettaglio
 
 Questa è la parte che protegge i soldi. La promozione **la giudica il server
 reale**, non chi la chiede.
 
-### 7.1 La sequenza
+### 6.1 La sequenza
 
 | # | Chi | Cosa succede | Stato |
 |---|---|---|---|
 | 1 | Server demo | la sessione accumula giorni e trade chiusi | ✅ |
 | 2 | Archivio | raccoglie il **record demo**: le sessioni del form sull'archivio e su tutti i server demo | ✅ |
 | 3 | Archivio | dalla pagina live, push del form al server reale, con il record (`push_record`), usando il token `promote` di quel server | ✅ |
-| 4 | Server reale | giudica il record da solo, con le sue soglie (`promote()`) | ✅ in parte, vedi 7.2 |
+| 4 | Server reale | giudica il record da solo, con le sue soglie (`promote()`) | ✅ in parte, vedi 6.2 |
 | 5 | Server reale | salva il giudizio come prova (`promotions/*.json`), con la lista di cosa manca se è bocciato | ✅ |
 | 6 | Server reale | il codice della strategia arriva come bozza: si abilita a mano | ✅ |
 | 7 | Server reale | avvio: rifiuta un form non promosso e chiede di confermare il capitale a rischio | ✅ |
 | 8 | Server reale | propone il 25% del capitale target (ramp) | 🔧 |
 
-### 7.2 La checklist del gate DEMO → LIVE
+### 6.2 La checklist del gate DEMO → LIVE
 
 | Controllo | Soglia | Stato | Se non passa |
 |---|---|---|---|
@@ -294,13 +270,12 @@ reale**, non chi la chiede.
 | net in demo | ≥ 0 | 🔧 | torna a SIM (nuova versione) o DEAD |
 | curva demo dentro la banda Monte Carlo | mai sotto il 5° percentile | 🔧 | torna a SIM o DEAD |
 | serie di perdite | ≤ la peggiore della scheda | 🔧 | torna a SIM o DEAD |
-| per un mix: controlli del capitolo 4 superati | – | 🔧 | si rifà il mix |
 
 **Il buco più importante oggi:** `promote()` controlla giorni, trade e
 allarmi, ma non il risultato. Il net viene calcolato e nessuno lo guarda.
 Una strategia in perdita in demo può passare. Primo cantiere.
 
-### 7.3 Le protezioni già accese sul server reale ✅
+### 6.3 Le protezioni già accese sul server reale ✅
 
 - Il server reale accetta via MCP solo quello che l'archivio promuove:
   nessun assistente ci scrive strategie o lancia backtest.
@@ -314,14 +289,14 @@ Una strategia in perdita in demo può passare. Primo cantiere.
 
 ---
 
-## 8. LIVE
+## 7. LIVE
 
-### 8.1 Ramp 🔧
+### 7.1 Ramp 🔧
 
 - I primi 30 trade al **25% del capitale target**.
 - Poi 100%, se la curva è rimasta dentro la banda.
 
-### 8.2 Protezioni
+### 7.2 Protezioni
 
 | Livello | Evento | Azione | Stato |
 |---|---|---|---|
@@ -331,28 +306,26 @@ Una strategia in perdita in demo può passare. Primo cantiere.
 | strategia | DD > 1.5 × max DD della scheda | `DEAD` | 🔧 |
 | strategia | curva sotto il 5° percentile della banda | `SUSPENDED` | 🔧 |
 | strategia | serie di perdite > 1.5 × la peggiore della scheda | `SUSPENDED` | 🔧 |
-| mix | rischio totale aperto sullo strumento oltre il tetto | nuovo trade rifiutato | 🔧 |
 
-### 8.3 Monitoraggio
+### 7.3 Monitoraggio
 
 - Curva del capitale per sessione sulla pagina live. ✅
 - Ogni settimana: ultimi 50 trade contro la scheda. 🔧
 - Avviso a ogni cambio di stato. 🔧 Oggi non c'è nessun canale di notifica.
 
-### 8.4 SUSPENDED
+### 7.4 SUSPENDED
 
 La sessione si ferma e la strategia torna in DEMO per riverificare. Alla
 seconda sospensione è `DEAD`.
 
 ---
 
-## 9. Tutti i gate in una tabella
+## 8. Tutti i gate in una tabella
 
 | Passaggio | Controlli | Chi decide |
 |---|---|---|
 | idea → SIM | regole scritte in modo che il codice le esegua senza dubbi; ipotesi; "non opera quando" | chi scrive la strategia |
 | SIM → DEMO | ≥ 100 trade; PF bootstrap basso > 1; altopiano; PF senza i 3 migliori > 1; batte la baseline casuale; holdout: net > 0, PF ≥ 0.7×, DD ≤ 1.5× | la piattaforma 🔧 (oggi a occhio) |
-| mix pronto | niente doppioni; rischio sommato sotto il tetto; netting gestito; ogni run migliora il mix | la piattaforma 🔧 |
 | DEMO → LIVE | ≥ 20 giorni; ≥ 30 trade; 0 allarmi; solo demo ✅; net ≥ 0; dentro la banda; serie di perdite ok 🔧 | il server reale |
 | ramp → 100% | 30 trade dentro la banda | la piattaforma 🔧 |
 | LIVE → SUSPENDED | sotto la banda; serie di perdite oltre 1.5× | la piattaforma 🔧 |
@@ -360,22 +333,19 @@ seconda sospensione è `DEAD`.
 
 ---
 
-## 10. Cosa manca, in ordine
+## 9. Cosa manca, in ordine
 
 1. **Gate performance in `promote()`** + scheda di riferimento. Piccolo.
 2. **Scheda strategia**: stato, versione, storico dei cambi. Piccolo.
-3. **Mix: long/short insieme e doppioni.** Piccolo-medio.
-4. **Mix: "senza questo run" e pesi.** Piccolo.
-5. **Holdout nello sweep**, aperto una volta per versione. Medio.
-6. **Motore correlazioni** indicatori ↔ P/L. Medio-grande.
-7. **Banda Monte Carlo + baseline casuale**, anche per il mix. Medio.
-8. **Mix intero in demo e live**, con tetto al rischio sommato. Medio.
-9. **Live**: ramp al 25%, protezioni per strategia, ultimi 50 trade, avvisi.
+3. **Holdout nello sweep**, aperto una volta per versione. Medio.
+4. **Motore correlazioni** indicatori ↔ P/L. Medio-grande.
+5. **Banda Monte Carlo + baseline casuale**. Medio.
+6. **Live**: ramp al 25%, protezioni per strategia, ultimi 50 trade, avvisi.
    Medio.
-10. Piccoli: giorno della settimana nello sweep, commissioni e financing,
-    colonna R nei trade.
+7. Piccoli: giorno della settimana nello sweep, commissioni e financing,
+   colonna R nei trade, push e verify di un run senza mix.
 
-Più avanti: correlazioni tra strumenti diversi nel mix.
+Il mix e quello che viene dopo: [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -388,7 +358,7 @@ fare: linea tratteggiata con etichetta "da fare".
 
 ### GRAFICO 1 – Il processo completo
 render_generated_image
-prompt is Diagramma di flusso del processo "parity-deriva – Da un'idea a un trade live". Stile tecnico professionale, sfondo bianco, font sans-serif chiaro.
+prompt is Diagramma di flusso del processo "parity-deriva – Da un'idea a un trade live (una strategia)". Stile tecnico professionale, sfondo bianco, font sans-serif chiaro.
 
 Quattro corsie orizzontali (swimlane), una per server, dall'alto in basso: "Test (PC)", "Archivio (cloud)", "Trade DEMO", "Trade REAL".
 
@@ -397,17 +367,16 @@ Nella corsia Test, da sinistra a destra:
 2. "Strategia = codice + parametri" (rettangolo)
 3. Riquadro arancione "SIM" che contiene un ciclo con due blocchi e frecce circolari: "Sweep (periodo di sviluppo)" ↔ "Correlazioni indicatori ↔ P/L (da fare)"
 4. Rombo giallo "Gate holdout (una volta per versione)"
-5. Rettangolo "Mix sullo stesso strumento"
 
 Freccia verso la corsia Archivio etichettata "sync.py push":
-6. Rettangolo "Verify: rifà i run con codice e candele dell'archivio"
+5. Rettangolo "Verify: rifà il run con codice e candele dell'archivio"
 
 Freccia verso la corsia DEMO etichettata "push form":
-7. Riquadro verde chiaro "DEMO – parametri congelati, monitor di parità"
+6. Riquadro verde chiaro "DEMO – parametri congelati, monitor di parità"
 
 Freccia verso l'Archivio etichettata "record demo", poi verso la corsia REAL etichettata "push_record":
-8. Rombo giallo "Gate promozione (giudicato dal server reale)"
-9. Riquadro verde "LIVE ramp 25%" → freccia "30 trade dentro la banda" → riquadro verde scuro "LIVE 100%"
+7. Rombo giallo "Gate promozione (giudicato dal server reale)"
+8. Riquadro verde "LIVE ramp 25%" → freccia "30 trade dentro la banda" → riquadro verde scuro "LIVE 100%"
 
 In basso a destra due riquadri: "SUSPENDED" (ambra) e "DEAD" (rosso), con frecce tratteggiate che arrivano da gate e LIVE, etichettate "fuori banda / serie di perdite" e "DD oltre 1.5×".
 
@@ -453,24 +422,7 @@ Sotto, tre contatori: "versione 1 ✗", "versione 2 ✗", "versione 3 ✗ → DE
 orientation is landscape
 layout is block
 
-### GRAFICO 4 – Il mix sullo stesso strumento
-render_generated_image
-prompt is Diagramma "Mix di strategie sullo stesso strumento" per parity-deriva. Stile tecnico pulito, sfondo bianco.
-
-In alto un grafico a candele stilizzato di un solo strumento (es. EURUSD), lungo tutta la larghezza.
-
-Sotto, tre righe orizzontali, una per strategia: "Strategia A (H4)", "Strategia B (M15)", "Strategia C (H1)". In ogni riga delle barre colorate che indicano quando la posizione è aperta: verde = long, rosso = short.
-
-Tre zone evidenziate con un riquadro tratteggiato e un'etichetta:
-1. Punto in cui A è long e B è short nello stesso momento: "long e short insieme – netting o doppio spread?"
-2. Punto in cui A, B e C sono tutte long: "posizioni che si sommano – una sola scommessa grande, tetto al rischio totale"
-3. Punto in cui B e C aprono quasi sempre insieme nella stessa direzione: "doppione – il mix non diversifica"
-
-A destra un pannello "Controlli del mix": "senza questo run", "pesi per run", "banda Monte Carlo del mix", "holdout del mix", tutti con etichetta "da fare". Sopra, con etichetta "c'è già": "summed / together, margine, correlazioni, diversificazione".
-orientation is landscape
-layout is block
-
-### GRAFICO 5 – Prima di andare live
+### GRAFICO 4 – Prima di andare live
 render_generated_image
 prompt is Diagramma di sequenza "Prima di andare live" per parity-deriva. Stile tecnico pulito, sfondo bianco.
 
@@ -500,7 +452,7 @@ Legenda: ✓ c'è già, ☐ da fare.
 orientation is portrait
 layout is block
 
-### GRAFICO 6 – Stati e protezioni in live
+### GRAFICO 5 – Stati e protezioni in live
 render_generated_image
 prompt is Diagramma a stati "LIVE: ramp, protezioni, sospensione" per parity-deriva. Stile tecnico pulito, sfondo bianco.
 
@@ -525,7 +477,7 @@ Tutte le frecce verso SUSPENDED e DEAD tratteggiate con etichetta "da fare".
 orientation is landscape
 layout is block
 
-### GRAFICO 7 – La banda Monte Carlo
+### GRAFICO 6 – La banda Monte Carlo
 render_generated_image
 prompt is Grafico concettuale "La banda Monte Carlo come metro della demo e del live" per parity-deriva. Stile pulito, sfondo bianco.
 
@@ -541,20 +493,19 @@ Una linea verticale a trade 30 etichettata "fine ramp: 25% → 100% se dentro la
 orientation is landscape
 layout is block
 
-### GRAFICO 8 – Cosa c'è e cosa manca
+### GRAFICO 7 – Cosa c'è e cosa manca
 render_generated_image
-prompt is Tabella visuale "parity-deriva: cosa c'è e cosa manca nel processo" in stile roadmap. Sfondo bianco, font sans-serif.
+prompt is Tabella visuale "parity-deriva: cosa c'è e cosa manca nel processo di una strategia" in stile roadmap. Sfondo bianco, font sans-serif.
 
-Cinque colonne, una per fase: "Strategia", "SIM", "Mix", "DEMO", "LIVE".
+Quattro colonne, una per fase: "Strategia", "SIM", "DEMO", "LIVE".
 
 In ogni colonna una pila di tessere. Tessere verdi piene = "c'è già", tessere arancioni tratteggiate = "da fare".
 
 Strategia: verde "codice + DESCRIPTION", verde "bozze degli assistenti AI via MCP"; arancione "ipotesi e 'non opera quando'", arancione "scheda con stato e versione".
 SIM: verde "sweep fino a 500 combinazioni", verde "paramEffects e score", verde "pagina del run con heatmap"; arancione "holdout", arancione "motore correlazioni", arancione "baseline casuale", arancione "banda Monte Carlo".
-Mix: verde "summed / together", verde "correlazioni e diversificazione", verde "verify sull'archivio"; arancione "long/short insieme e netting", arancione "doppioni", arancione "senza questo run", arancione "pesi".
-DEMO: verde "stesso broker del live", verde "monitor di parità", verde "record demo"; arancione "confronto con la scheda", arancione "mix intero in demo".
+DEMO: verde "stesso broker del live", verde "verify sull'archivio", verde "monitor di parità", verde "record demo"; arancione "confronto con la scheda".
 LIVE: verde "promozione giudicata dal server reale", verde "loss limit 3%", verde "stop all"; arancione "gate su net e banda", arancione "ramp 25%", arancione "protezioni per strategia", arancione "avvisi".
 
-In basso una freccia con il numero d'ordine dei cantieri: "1 gate in promote() → 2 scheda → 3-4 mix → 5 holdout → 6 correlazioni → 7 Monte Carlo → 8 mix live → 9 protezioni live".
+In basso una freccia con il numero d'ordine dei cantieri: "1 gate in promote() → 2 scheda → 3 holdout → 4 correlazioni → 5 Monte Carlo → 6 protezioni live".
 orientation is landscape
 layout is block
