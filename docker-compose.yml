@@ -12,7 +12,8 @@
 # cert mode, checks the client certificates.
 services:
   parity:
-    image: ghcr.io/rrambaldi/parity-deriva:latest
+    # built from this clone: no published image for now
+    image: parity-deriva:local
     build: .
     restart: unless-stopped
     volumes:

@@ -73,9 +73,9 @@ the thanks.
 
 # Docker
 
-The image is `ghcr.io/rrambaldi/parity-deriva`, built from `main` and from each
-version tag by `.github/workflows/docker.yml`. All it needs is
-`docker-compose.yml` from this repository.
+The image is built from a clone of this repository: `docker compose up -d`
+builds it the first time (`--build` after a `git pull`). No image is published
+yet: `.github/workflows/docker.yml` pushes one to ghcr.io only when run by hand.
 
 **On a PC.** `docker compose up -d`, then open http://localhost:8731/setup. The
 setup asks for a code, which is in the container's log:
@@ -117,10 +117,6 @@ CSV files to import go in `/data/import`.
 
 Not in the image: the MetaTrader 5 bridge under Wine (provider `mt5`), the
 private strategies of `strategy/private` and the `candle_forecast` stores.
-
-Once, after the first run of the action: the package on ghcr.io starts out
-private. Make it public in the package's settings on GitHub (Package settings,
-Change visibility), or `docker compose pull` asks for a login.
 
 # Installation and Usage
 

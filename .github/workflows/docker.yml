@@ -1,12 +1,13 @@
 # The image on ghcr.io: latest from main, and one tag per version tag (v1.2.3).
-# After the first run, the package is private: set it to public once in the
+# By hand only (Actions, docker, Run workflow): no package on ghcr.io for now,
+# the user's decision of 2026-09-26. To publish on every push again:
+#   on: {push: {branches: [main], tags: ['v*']}}
+# After the first run the package is private: set it to public once in the
 # package's settings on GitHub.
 name: docker
 
 on:
-  push:
-    branches: [main]
-    tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
