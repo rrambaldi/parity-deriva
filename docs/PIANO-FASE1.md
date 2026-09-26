@@ -42,12 +42,13 @@ per le altre c'è la mia proposta.
 | # | Domanda | Proposta | Serve a |
 |---|---|---|---|
 | D1 | Quando nasce una **versione** nuova? | **Deciso il 2026-09-26.** Al gate SIM → DEMO. La versione è l'impronta del codice (hash del sorgente della strategia e degli indicatori che usa, senza commenti e righe vuote) più i parametri congelati (`groupKey` dei campi del form). In SIM i parametri cambiano senza creare versioni. Etichetta leggibile: `M1502 v3`, contata per strategia + strumento + granularità. Nessun limite al numero di versioni. | C2, C3 |
-| D2 | Il **ramp** dal 25% al 100%: automatico o con un click? | Con un click. Dopo 30 trade dentro la banda la pagina live dice "ready for full size" e un pulsante riavvia il form al 100%, con la stessa conferma del capitale di oggi. Sono soldi veri: decide una persona. | C6 |
+| D2 | Il **ramp**: chi lo sceglie, quanto dura, chi passa al 100%? | **Deciso il 2026-09-26.** Lo sceglie l'utente all'avvio del live, con la casella "ramp" accesa di default: accesa, il capitale proposto è il 25%; spenta, il 100%. Finisce al primo tra `RAMP_TRADES` (30) trade chiusi e `RAMP_DAYS` (60) giorni, tutti e due modificabili all'avvio: su D1 30 trade sarebbero un anno. Il 100% è un clic dell'utente, possibile in qualsiasi momento purché la sessione non abbia trade aperti; prima della fine del ramp chiede conferma e mostra a che punto è. | C6 |
 | D3 | Che **canale** usano gli avvisi? | Sempre nella pagina (banner su live e logs) e nel log. In più l'email con `smtplib` (stdlib) se in `.env` ci sono i campi `SMTP_*`. Telegram eventualmente dopo. | C6 |
 | D4 | L'holdout è **per strumento** o **per strategia**? | Per strumento + granularità: una data di taglio sola, uguale per tutte le strategie su quello strumento. È più semplice e più severo: nessuna strategia viene provata su quel pezzo di storico. | C3 |
 | D5 | Un diario per **strategia** o per strategia + strumento? | **Deciso il 2026-09-26.** Per strategia, cioè per nome del codice. Ogni voce dice strumento e granularità e la pagina filtra: "va su FX, non sulle azioni" si legge nello stesso posto. Le versioni restano per strategia + strumento + granularità (D1). | C2 |
 | D6 | La **demo** esige il gate? | **Deciso il 2026-09-26.** No: un form va in demo anche senza gate, con l'avviso "no gate" nella pagina live e nel diario. La promozione al server reale esige la scheda, e una scheda nasce solo dal gate: una demo senza gate non arriva al live. | C3, C1b |
 | D7 | Il **taglio dell'holdout** si sposta? | **Deciso il 2026-09-26.** Resta fisso finché non lo sposti tu dalla pagina settings. Si sposta solo in avanti e lascia almeno `HOLDOUT_MIN_DAYS` di holdout. Lo spostamento va nel diario di ogni strategia con una scheda su quello strumento. | C3 |
+| D8 | Il minimo di trade in demo sui **timeframe lenti** | **Deciso il 2026-09-26.** Il record basta con `PROMOTE_TRADES` (30) trade chiusi, oppure dopo `PROMOTE_SLOW_DAYS` (90) giorni se ne ha almeno `PROMOTE_MIN_TRADES` (10). `PROMOTE_DAYS` (20) resta. Su D1, con circa 30 trade l'anno, la demo dura circa 4 mesi invece di un anno. | C1a |
 
 ---
 
@@ -56,7 +57,7 @@ per le altre c'è la mia proposta.
 L'ordine segue le dipendenze, non il numero del cantiere:
 
 ```text
-C1a  gate "net ≥ 0" in promote()          subito, non dipende da niente
+C1a  net ≥ 0 e trade minimi in promote()  subito, non dipende da niente
 C7c  colonna R nei trade                  serve a C4 e C5
 C2   diario + scheda                      serve a C1b, C3, C6
 C5   banda Monte Carlo + baseline         serve a C1b, C3, C6
@@ -76,19 +77,27 @@ C7b  commissioni e financing              quando si vuole
 **Obiettivo.** Il server reale non promuove una strategia in perdita in demo,
 né una che in demo è andata peggio di quanto la simulazione permetteva.
 
-### C1a – net ≥ 0 (S)
+### C1a – net ≥ 0 e trade minimi sui timeframe lenti (S)
 
-- **Scelte.** `judge()` in `web/livesessions.py` calcola già `net` sui trade
-  chiusi del record: `promote()` lo aggiunge ai controlli.
+- **Scelte.**
+  - `judge()` in `web/livesessions.py` calcola già `net` sui trade chiusi del
+    record: `promote()` lo aggiunge ai controlli.
+  - Trade minimi (D8): `trades ≥ PROMOTE_TRADES`, oppure
+    `days ≥ PROMOTE_SLOW_DAYS` e `trades ≥ PROMOTE_MIN_TRADES`. `judge()`
+    dà già `days` e `trades`.
 - **File.** `web/livesessions.py` (`promote`), `etc/settings.py`
-  (`PROMOTE_MIN_NET`, default `0`).
+  (`PROMOTE_MIN_NET=0`, `PROMOTE_SLOW_DAYS=90`, `PROMOTE_MIN_TRADES=10`).
 - **Dati.** Nessun formato nuovo. Il motivo del rifiuto va in `need`, come gli
-  altri: `"net on demo ≥ 0, it has -123.40"`.
+  altri: `"net on demo ≥ 0, it has -123.40"`,
+  `"30 closed trades, or 10 after 90 days: it has 8"`.
 - **Pagina.** Niente di nuovo: la pagina live dell'archivio mostra già il
   verdetto e `need`.
 - **Test.** `tests/real_money_test.py`: record con net negativo rifiutato, con
-  net positivo accettato, gli altri controlli invariati.
-- **Fatto quando.** Un record in perdita torna con `ok: false` e il motivo.
+  net positivo accettato; 12 trade in 95 giorni accettato, 8 trade in 95
+  giorni rifiutato, 12 trade in 40 giorni rifiutato; gli altri controlli
+  invariati.
+- **Fatto quando.** Un record in perdita torna con `ok: false` e il motivo; una
+  strategia D1 passa dopo 90 giorni con 10 trade.
 - **Dipende da.** Niente.
 
 ### C1b – banda e serie di perdite (S, dopo C2 e C5)
@@ -433,12 +442,20 @@ il caso (la baseline).
 quando esce da quello che la simulazione permetteva.
 
 - **Ramp (D2).**
-  - Sul server reale, `start()` propone nel campo capitale il 25% del
-    capitale target della scheda.
-  - I metadati della sessione dicono `ramp` o `full`.
-  - Dopo `RAMP_TRADES` (30) trade chiusi dentro la banda, la pagina live
-    mostra "ready for full size". Il pulsante ferma la sessione e riavvia il
-    form al 100%, con la conferma del capitale.
+  - All'avvio sul server reale, la casella "ramp" (accesa di default)
+    decide il capitale proposto: il 25% (`RAMP_SHARE`) del capitale della
+    scheda, oppure il 100%.
+  - Accanto, la durata: `RAMP_TRADES` (30) trade o `RAMP_DAYS` (60) giorni,
+    il primo dei due, modificabili. La pagina stima quando finirà dai trade
+    al mese della scheda: "2.5 trades a month: the ramp ends by days, after
+    about 5 trades".
+  - I metadati della sessione dicono `ramp` (con i due limiti) o `full`. La
+    scelta va nel diario.
+  - A ramp finito la pagina live mostra "ready for full size". Il pulsante
+    "full size" si può premere in qualsiasi momento, purché la sessione non
+    abbia trade aperti: ferma la sessione e riavvia il form al 100%, con la
+    conferma del capitale. Prima della fine del ramp chiede conferma e
+    mostra a che punto è: trade, giorni, banda.
 - **Protezioni.** Il giro di `watch()` che ogni minuto controlla il loss limit
   controlla anche ogni sessione che ha una scheda:
 
@@ -465,11 +482,13 @@ quando esce da quello che la simulazione permetteva.
     parità.
 - **File.** `web/livesessions.py` (`watch`, `guard`, `start`, `record`);
   `web/cards.py`; `web/notify.py`; `etc/settings.py` (`RAMP_SHARE=0.25`,
-  `RAMP_TRADES=30`, `LIVE_DD_RATIO=1.5`, `LIVE_STREAK_RATIO=1.5`, `SMTP_*`);
+  `RAMP_TRADES=30`, `RAMP_DAYS=60`, `LIVE_DD_RATIO=1.5`, `LIVE_STREAK_RATIO=1.5`, `SMTP_*`);
   `web/static/live.js`, `live.html`, `logs.js`; `i18n/it.json`.
 - **Test.** `tests/real_money_test.py` e `tests/livesessions_test.py`: una
   sessione finta che supera ogni soglia viene fermata e va in `SUSPENDED`;
-  nessuna soglia mette `DEAD` da sola; il ramp propone il 25%. Nuovo
+  nessuna soglia mette `DEAD` da sola; il ramp propone il 25%, o il 100% se
+  è spento; finisce al primo tra trade e giorni; "full size" non si preme
+  con trade aperti. Nuovo
   `tests/notify_test.py`: banner scritto sempre, email solo se configurata
   (SMTP finto).
 - **Fatto quando.** Ogni soglia ferma la sessione con lo stato giusto nella

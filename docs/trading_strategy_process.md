@@ -19,7 +19,7 @@ sempre tu.
 |---|---|
 | `SIM` | in simulazione: sweep, correlazioni, loop |
 | `DEMO` | parametri congelati, gira su un account demo |
-| `LIVE` | soldi veri: prima a size ridotta (ramp), poi piena |
+| `LIVE` | soldi veri: a size ridotta (ramp) se lo scegli, poi piena |
 | `SUSPENDED` | fermata da una protezione, in attesa di verifica |
 | `DEAD` | scartata, sempre da te |
 
@@ -163,7 +163,8 @@ holdout e usata in demo e live:
 
 Già fatto:
 
-- almeno `PROMOTE_DAYS` giorni (20) e `PROMOTE_TRADES` trade (30)
+- almeno `PROMOTE_DAYS` giorni (20) e `PROMOTE_TRADES` trade (30); da
+  aggiungere per i timeframe lenti: oppure almeno 10 trade dopo 90 giorni
 - nessun allarme di parità
 - solo account demo nel record
 
@@ -183,8 +184,9 @@ Decidi tu.
 
 - Promozione con push dal server demo (c'è già). Il server reale rifiuta un
   form non promosso (c'è già).
-- **Ramp**: i primi 30 trade al **25% del capitale target**, poi 100% se la
-  curva è ancora dentro la banda.
+- **Ramp**, se lo scegli (acceso di default): **25% del capitale** fino al
+  primo tra 30 trade e 60 giorni; poi 100% con un tuo clic, senza trade
+  aperti.
 
 ### Protezioni
 
@@ -260,7 +262,8 @@ flowchart TD
     E -->|allarme parità| E
     E -->|gate promote no| A
     E -->|gate promote sì| F[LIVE ramp 25%]
-    F -->|30 trade dentro la banda| G[LIVE 100%]
+    F -->|30 trade o 60 giorni + tuo clic| G[LIVE 100%]
+    E -->|senza ramp| G
     F -->|sotto la banda / serie perdite / DD > 1.5×| S[SUSPENDED]
     G -->|sotto la banda / serie perdite / DD > 1.5×| S
     S -->|decidi tu: riverifica| E

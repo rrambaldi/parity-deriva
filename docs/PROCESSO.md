@@ -28,7 +28,7 @@ IDEA → STRATEGIA (codice + parametri)
      → GATE  : holdout, aperto una volta
      → DEMO  : stesso broker del live, parametri congelati
      → GATE  : promozione, giudicata dal server reale
-     → LIVE  : prima 25% della size, poi 100%
+     → LIVE  : ramp al 25% se lo scegli, poi 100% con un tuo clic
      → sempre sotto protezione: SUSPENDED se qualcosa va storto
      → DEAD solo quando lo decidi tu
 ```
@@ -41,7 +41,7 @@ Niente paper trading: la demo gira già sul broker vero.
 |---|---|---|
 | `SIM` | in simulazione: sweep, correlazioni, loop | liberi |
 | `DEMO` | gira su un account demo | congelati |
-| `LIVE` | soldi veri, prima in ramp (25%) poi piena | congelati |
+| `LIVE` | soldi veri, in ramp (25%) se lo scegli, poi piena | congelati |
 | `SUSPENDED` | fermata da una protezione, da riverificare | congelati |
 | `DEAD` | scartata, sempre da te: la piattaforma non scarta mai da sola | – |
 
@@ -278,14 +278,14 @@ reale**, non chi la chiede.
 | 5 | Server reale | salva il giudizio come prova (`promotions/*.json`), con la lista di cosa manca se è bocciato | ✅ |
 | 6 | Server reale | il codice della strategia arriva come bozza: si abilita a mano | ✅ |
 | 7 | Server reale | avvio: rifiuta un form non promosso e chiede di confermare il capitale a rischio | ✅ |
-| 8 | Server reale | propone il 25% del capitale target (ramp) | 🔧 |
+| 8 | Server reale | propone il ramp: 25% del capitale, se lo lasci acceso | 🔧 |
 
 ### 6.2 La checklist del gate DEMO → LIVE
 
 | Controllo | Soglia | Stato | Se non passa |
 |---|---|---|---|
 | giorni in demo | ≥ 20 (`PROMOTE_DAYS`) | ✅ | resta in DEMO |
-| trade chiusi in demo | ≥ 30 (`PROMOTE_TRADES`) | ✅ | resta in DEMO |
+| trade chiusi in demo | ≥ 30 (`PROMOTE_TRADES`); oppure ≥ 10 dopo 90 giorni, per i timeframe lenti | ✅ 30 · 🔧 10 in 90 giorni | resta in DEMO |
 | allarmi di parità | 0 | ✅ | sistemare l'esecuzione, resta in DEMO |
 | scheda: gate SIM → DEMO passato | sì | 🔧 | rifiutato: prima il gate |
 | solo account demo nel record | sì | ✅ | rifiutato |
@@ -315,8 +315,15 @@ Una strategia in perdita in demo può passare. Primo cantiere.
 
 ### 7.1 Ramp 🔧
 
-- I primi 30 trade al **25% del capitale target**.
-- Poi 100%, se la curva è rimasta dentro la banda.
+- Lo scegli tu all'avvio del live. È acceso di default.
+- Acceso: **25% del capitale** fino al primo tra 30 trade e 60 giorni. Su D1
+  30 trade sarebbero un anno.
+- Il 100% è un tuo clic, quando la sessione non ha trade aperti. Se lo premi
+  prima della fine del ramp, la pagina chiede conferma e mostra a che punto
+  sei.
+- Il ramp controlla l'esecuzione con soldi veri (slippage, fill, requote),
+  non l'edge: quello è già giudicato in SIM e in demo. La banda continua a
+  controllare anche a size piena.
 
 ### 7.2 Protezioni
 
@@ -350,8 +357,8 @@ seconda sospensione, ma non lo applica.
 |---|---|---|
 | idea → SIM | regole scritte in modo che il codice le esegua senza dubbi; ipotesi; "non opera quando" | chi scrive la strategia |
 | SIM → DEMO | ≥ 100 trade; PF bootstrap basso > 1; altopiano; PF senza i 3 migliori > 1; batte la baseline casuale; holdout: net > 0, PF ≥ 0.7×, DD ≤ 1.5× | la piattaforma 🔧 (oggi a occhio); la demo senza gate si può, il live no |
-| DEMO → LIVE | ≥ 20 giorni; ≥ 30 trade; 0 allarmi; solo demo ✅; net ≥ 0; dentro la banda; serie di perdite ok 🔧 | il server reale |
-| ramp → 100% | 30 trade dentro la banda | la piattaforma 🔧 |
+| DEMO → LIVE | ≥ 20 giorni; ≥ 30 trade (o ≥ 10 dopo 90 giorni); 0 allarmi; solo demo ✅; net ≥ 0; dentro la banda; serie di perdite ok 🔧 | il server reale |
+| ramp → 100% | fine del ramp (30 trade o 60 giorni), o prima con conferma; nessun trade aperto | tu 🔧 |
 | LIVE → SUSPENDED | sotto la banda; serie di perdite oltre 1.5×; DD oltre 1.5× | la piattaforma 🔧 |
 | qualunque stato → DEAD | quando vuoi; la pagina lo propone dopo un DD oltre 1.5× o una seconda sospensione | tu |
 
@@ -403,7 +410,7 @@ Freccia verso la corsia DEMO etichettata "push form":
 
 Freccia verso l'Archivio etichettata "record demo", poi verso la corsia REAL etichettata "push_record":
 7. Rombo giallo "Gate promozione (giudicato dal server reale)"
-8. Riquadro verde "LIVE ramp 25%" → freccia "30 trade dentro la banda" → riquadro verde scuro "LIVE 100%"
+8. Riquadro verde "LIVE ramp 25%" → freccia "30 trade o 60 giorni, poi un tuo clic" → riquadro verde scuro "LIVE 100%"
 
 In basso a destra due riquadri: "SUSPENDED" (ambra) e "DEAD" (rosso). Verso SUSPENDED frecce tratteggiate dai riquadri LIVE, etichettate "fuori banda / serie di perdite / DD oltre 1.5×". Verso DEAD frecce tratteggiate dal Gate holdout e da SUSPENDED, con l'icona di una persona e l'etichetta "decidi tu".
 
@@ -462,7 +469,7 @@ Messaggi dall'alto in basso, frecce orizzontali numerate:
 4. Archivio → REAL: "push form + record (push_record, token promote)"
 5. Nella colonna REAL un riquadro grande "Giudizio della promozione" con una checklist:
    ✓ "≥ 20 giorni in demo"
-   ✓ "≥ 30 trade chiusi"
+   ✓ "≥ 30 trade chiusi" (☐ "o ≥ 10 dopo 90 giorni", da fare)
    ✓ "0 allarmi di parità"
    ✓ "solo account demo"
    ☐ "net ≥ 0" (da fare)
@@ -492,7 +499,8 @@ Cinque stati come rettangoli arrotondati:
 
 Transizioni come frecce etichettate:
 - DEMO → LIVE ramp: "promozione"
-- LIVE ramp → LIVE 100%: "30 trade dentro la banda"
+- LIVE ramp → LIVE 100%: "30 trade o 60 giorni, poi un tuo clic"
+- DEMO → LIVE 100%: "senza ramp, se lo spegni"
 - LIVE ramp → SUSPENDED e LIVE 100% → SUSPENDED: "sotto il 5° percentile della banda" oppure "serie di perdite > 1.5× la peggiore"
 - LIVE ramp → SUSPENDED e LIVE 100% → SUSPENDED anche per "drawdown > 1.5× max DD della scheda"
 - SUSPENDED → DEMO: "decidi tu: si riverifica"
@@ -516,7 +524,7 @@ Due curve sopra:
 - una curva verde che resta dentro la fascia, etichetta "demo / live in linea → avanti"
 - una curva rossa che a circa trade 35 scende sotto il bordo basso della fascia, con un punto rosso e l'etichetta "sotto il 5° percentile → SUSPENDED"
 
-Una linea verticale a trade 30 etichettata "fine ramp: 25% → 100% se dentro la banda".
+Una linea verticale a trade 30 etichettata "fine ramp (o 60 giorni): 25% → 100% con un clic".
 orientation is landscape
 layout is block
 
