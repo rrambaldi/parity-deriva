@@ -81,6 +81,7 @@ from parity_deriva.etc import settings
 from parity_deriva.lib import indicators
 from parity_deriva.lib import s3
 from parity_deriva.lib import news as news_module
+from parity_deriva.performance import montecarlo
 from parity_deriva.performance import report as report_module
 from parity_deriva.strategy import plugins, uploaded
 from parity_deriva.web import access, cards, i18n, journal, livesessions, mcp, notify, oauth, phone, servers, storage
@@ -2561,6 +2562,23 @@ class Service(object):
 		self._write(kept, json.dumps(out).encode())
 		return out
 
+	def runBand(self, run=None, sweep=None, n=None):
+		"""
+		The Monte Carlo band of a saved run's trades (performance/montecarlo.py),
+		a point a close in the order they closed: what its capital curve is
+		drawn over on the run page, and what a card's reference is made of.
+		"""
+		if sweep:
+			payload = self.sweepPayload(sweep, n)
+		else:
+			saved = self.savedRun(run)
+			payload = saved and saved['payload']
+		if payload is None:
+			raise ServiceError("no such run on disk")
+		closed = sorted((t for t in payload.get('trades') or [] if t.get('pl') is not None),
+						key=lambda t: (t.get('exitTime') or 0))
+		return {'band': montecarlo.band(montecarlo.returns(closed, payload.get('balance')))}
+
 	def sweepPayload(self, sweep, n):
 		"""A run saved by saveSweepRun as it was saved - back from the bucket if it went there - or None."""
 		path = self.warmFile(sweep, '%d.json.gz' % int(n))
@@ -3567,6 +3585,10 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendJSON(self.service.storageFiles())
 			if route == '/api/imports/status':
 				return self.sendJSON(self.service.importStatus())
+			if route == '/api/run/band':
+				# ?run=<id> a saved backtest, ?sweep=<id>&n=<n> a run of a set
+				return self.sendJSON(self.service.runBand(self.one(query, 'run'), self.one(query, 'sweep'),
+														  self.one(query, 'n')))
 			if route == '/api/runs':
 				return self.sendJSON({'runs': self.service.runs()})
 			if route.startswith('/api/runs/'):

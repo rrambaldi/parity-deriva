@@ -1545,6 +1545,11 @@ function drawEquity() {
   const start = points[0][1];
   const last = points[points.length - 1][1];
   const values = points.map((p) => p[1]);
+  // the band a point a close, as far as the run's closes go
+  const band = state.band && state.band.p5.length ? points.slice(1).map((pt, k) => (
+    k < state.band.p5.length ? [pt[0], start * (1 + state.band.p5[k]), start * (1 + state.band.p95[k])] : null))
+    .filter(Boolean) : [];
+  for (const [, lo, hi] of band) values.push(lo, hi);
   let high = Math.max(...values), low = Math.min(...values);
   if (high === low) { high += 0.5; low -= 0.5; }
   const pad = (high - low) * 0.08;
@@ -1591,6 +1596,18 @@ function drawEquity() {
   ectx.stroke();
   ectx.setLineDash([]);
 
+  // the band, under the curve: where the capital could have been after as
+  // many closes (5th to 95th percentile)
+  if (band.length > 1) {
+    ectx.fillStyle = p.grid;
+    ectx.beginPath();
+    ectx.moveTo(x(band[0][0]), y(band[0][2]));
+    for (const [i, , hi] of band) ectx.lineTo(x(i), y(hi));
+    for (const [i, lo] of band.slice().reverse()) ectx.lineTo(x(i), y(lo));
+    ectx.closePath();
+    ectx.fill();
+  }
+
   // A step, not a slope: the realised balance does not drift between closes,
   // it sits still and then jumps. Drawing it as a slope would invent a
   // reading for every bar in between.
@@ -1633,7 +1650,8 @@ function drawEquity() {
         // currency is modelled anywhere here
         ? `  \u00b7 ${(state.data.risk * 100).toFixed(2)}% risked per trade,`
           + ' reviewed monthly \u00b7 quote currency, unconverted'
-        : '  \u00b7 price x units, not money');
+        : '  \u00b7 price x units, not money')
+    + (band.length > 1 ? `  \u00b7 grey: 5th to 95th percentile of ${state.band.n} draws of its trades` : '');
 }
 
 /* ---------------------------------------------------------- the drawdown */
@@ -2571,6 +2589,7 @@ function show(data) {
   state.sweepRef = where.get('sweep')
     ? { sweep: where.get('sweep'), run: Number(where.get('run')) } : null;
   renderStar();
+  loadBand();
   $('journal-link').href = 'journal?strategy=' + encodeURIComponent(data.strategy);
   $('journal-link').hidden = !data.strategy;
   $('chart-title').textContent = (id ? `[${id}] ` : '')
@@ -2593,6 +2612,27 @@ function show(data) {
   drawLevels();
   drawDrawdown();
   drawHeat();
+}
+
+/*
+ * The Monte Carlo band of the run on show (api/run/band, performance/
+ * montecarlo.py): the 5th to the 95th percentile of where its capital could
+ * have been after each close, its own trades drawn again a thousand times.
+ * Drawn under the curve once it comes; a run not saved has none.
+ */
+async function loadBand() {
+  state.band = null;
+  const ref = state.sweepRef;
+  const query = ref ? `sweep=${encodeURIComponent(ref.sweep)}&n=${ref.run}`
+    : state.runId ? `run=${encodeURIComponent(state.runId)}` : null;
+  if (!query) return;
+  const shown = state.data;
+  try {
+    const { band } = await (await fetch('api/run/band?' + query)).json();
+    if (state.data !== shown) return;
+    state.band = band || null;
+    drawEquity();
+  } catch (error) { /* no band: the curve alone */ }
 }
 
 /* ------------------------------------------------------------- address */

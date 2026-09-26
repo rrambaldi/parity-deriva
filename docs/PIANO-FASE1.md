@@ -62,8 +62,8 @@ L'ordine segue le dipendenze, non il numero del cantiere:
 C1a  net ≥ 0 e trade minimi in promote()  fatto (7d93728)
 C7c  colonna R nei trade                  fatto (0ca8c06)
 C8   avvisi + pagina per il telefono      fatto (21cc77b)
-C2   diario + scheda                      fatto
-C5   banda Monte Carlo + baseline         serve a C1b, C3, C6
+C2   diario + scheda                      fatto (e21e911)
+C5   banda Monte Carlo + baseline         fatto
 C3   holdout + gate SIM → DEMO            usa C2 e C5
 C1b  banda e serie di perdite in promote  usa C2 e C5
 C7d  push e verify senza mix              prima della prima demo vera
@@ -446,15 +446,19 @@ il caso (la baseline).
     trade, le ore d'ingresso pescate da quelle della strategia, la stessa
     proporzione long/short, distanze di stop e target pescate dai suoi trade,
     la stessa durata massima;
-  - si risolvono sulle stesse candele (le fini, se ci sono) con
-    `backtest/resolution.resolve_exit`, che legge già ask e bid;
+  - si risolvono sulle stesse candele del run con la regola di
+    `backtest/resolution.py` (un livello è toccato se sta nel range della
+    barra, dal lato che chiude la posizione), scritta con numpy: con
+    `resolve_exit`, che scorre le barre con `iterrows`, 200 ripetizioni
+    durerebbero minuti. Una barra che tocca stop e target insieme è uno stop;
   - 200 ripetizioni. Il risultato è il percentile del PF della strategia.
   - `ponytail:` ignora "un trade alla volta" e i filtri del money manager;
     se serve più fedeltà, si fa girare una strategia `RandomEntries` dentro
     `ledger.run`.
 - **Usata da.** Gate (C3), scheda (C2), `promote` (C1b), protezioni live (C6).
-- **Pagina.** Sul grafico del capitale del run, la banda in grigio. Nel dialog
-  del gate, il percentile della baseline.
+- **Pagina.** Sul grafico del capitale del run, la banda in grigio
+  (`/api/run/band`, un punto a ogni chiusura). Nel dialog del gate, il
+  percentile della baseline (C3).
 - **Test.** Nuovo `tests/montecarlo_test.py`: risultati uguali con lo stesso
   seed; la banda si allarga man mano che si va avanti coi trade; una
   strategia casuale finisce intorno al 50° percentile della baseline.
