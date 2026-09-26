@@ -35,6 +35,7 @@ import datetime
 import functools
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -43,7 +44,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import pandas as pd
+
 from parity_deriva.backtest import ledger
+from parity_deriva.data import calendar
 from parity_deriva.strategy import uploaded
 from parity_deriva.web import oauth, sandbox
 
@@ -243,6 +247,28 @@ TOOLS = [
 		 'note': {'type': 'string', 'maxLength': REQUEST_TEXT,
 				  'description': "what it does and how it tested - windows, trades, net, max "
 								 "drawdown: the pull request's text"}}}},
+	{'name': 'push_calendar',
+	 'description': "For the data scripts, not for an assistant: add events to the economic "
+					"calendar, or update them - an event is itself by its id and its newest "
+					"push wins, so the outcome pushed after the release replaces the empty one. "
+					"Each is one of ForexFactory's events as the calendar scraper keeps them "
+					"(id, datetime_utc, time, currency, impact, event, actual, forecast, "
+					"previous, revision, detail with its 'Usual Effect'). Up to %d a call: a "
+					"month at a time." % 5000,
+	 'inputSchema': {'type': 'object', 'required': ['events'], 'properties': {
+		 'events': {'type': 'array', 'maxItems': 5000, 'items': {'type': 'object'}}}}},
+	{'name': 'push_candles',
+	 'description': "For the data scripts, not for an assistant: add candles to an "
+					"instrument's store. Both sides, each bar [timestamp (epoch ms of its "
+					"open, UTC), open, high, low, close, volume]; up to %d bars a side a call. "
+					"Bars the store already holds are kept as they are: a push adds, it does "
+					"not correct." % 10000,
+	 'inputSchema': {'type': 'object', 'required': ['instrument', 'granularity', 'ask', 'bid'],
+					 'properties': {
+		 'instrument': {'type': 'string', 'description': "e.g. EUR_USD"},
+		 'granularity': {'type': 'string', 'enum': ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D', 'W']},
+		 'ask': {'type': 'array', 'maxItems': 10000, 'items': {'type': 'array'}},
+		 'bid': {'type': 'array', 'maxItems': 10000, 'items': {'type': 'array'}}}}},
 ]
 
 
@@ -354,6 +380,80 @@ def listData(service, args):
 			dict(g, **{'from': day(g['from'])[:10], 'to': day(g['to'])[:10]})
 			for g in row['granularities']]}
 		for row in service.instruments()]}
+
+
+#: the most a push carries: a call stays under nginx's 4 MB for /parity/mcp
+PUSH_EVENTS = 5000
+PUSH_BARS = 10000
+GRANULARITIES = ('M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D', 'W')
+
+
+def pusher(client):
+	"""
+	The data scripts hold the token itself; an assistant connected through
+	OAuth reads and backtests, it does not write the data every run reads.
+	"""
+	if not str(client).startswith('token: '):
+		raise ToolError("pushing data is for a script with the token, not for an assistant")
+
+
+def pushCalendar(service, args, client):
+	pusher(client)
+	events = args.get('events')
+	if not isinstance(events, list) or not events or len(events) > PUSH_EVENTS:
+		raise ToolError("events: 1 to %d of ForexFactory's events" % PUSH_EVENTS)
+	try:
+		rows = [calendar.fromForexFactory(e) for e in events]
+	except (ValueError, TypeError, AttributeError) as exc:
+		raise ToolError("not saved: %s" % exc)
+	where = calendar.path(service.setup)
+	with calendar.LOCK:
+		before = calendar.load(where)
+		after = calendar.merge(before, rows)
+		calendar.save(after, where)
+	return {'received': len(rows), 'added': len(after) - len(before), 'events': len(after)}
+
+
+def pushCandles(service, args, client):
+	pusher(client)
+	from parity_deriva.web.service import importer
+	csv = importer()
+	instrument = csv.instrument_name(str(args.get('instrument') or '').replace('/', '_'))
+	# the store's file name: nothing that could reach outside the data directory
+	if not re.fullmatch(r'[A-Z0-9]{2,12}(_[A-Z0-9]{2,12})?', instrument):
+		raise ToolError("instrument: letters and digits, e.g. EUR_USD")
+	granularity = csv.granularity(str(args.get('granularity') or ''))
+	if granularity not in GRANULARITIES:
+		raise ToolError("granularity: one of %s" % ', '.join(GRANULARITIES))
+	sides = []
+	for side in ('ask', 'bid'):
+		rows = args.get(side)
+		if not isinstance(rows, list) or not rows or len(rows) > PUSH_BARS:
+			raise ToolError("%s: 1 to %d bars, each [timestamp ms, open, high, low, close, "
+							"volume]" % (side, PUSH_BARS))
+		try:
+			sides.append(csv.indexed(pd.DataFrame(
+				rows, columns=csv.FIELDS if isinstance(rows[0], list) else None), side))
+		except (ValueError, TypeError) as exc:
+			raise ToolError("%s: %s" % (side, exc))
+	try:
+		frame, unpaired = csv.combine(*sides)
+	except (ValueError, TypeError) as exc:
+		raise ToolError("not saved: %s" % exc)
+	# as an import: under the backtest lock, so no run reads the store halfway
+	# through, and the cached runs dropped
+	if not service._lock.acquire(timeout=240):
+		raise ToolError("a backtest has held the stores for 4 minutes: push again later")
+	try:
+		added, _, _ = csv.merge(os.path.join(dataDir(service), instrument + '.hd5'),
+								'/' + granularity, frame, keep=True)
+		if added:
+			service._cache.clear()
+			del service._order[:]
+	finally:
+		service._lock.release()
+	return {'instrument': instrument, 'granularity': granularity, 'received': len(frame.index),
+			'added': added, 'kept': len(frame.index) - added, 'unpaired': list(unpaired)}
 
 
 # the next version is taken and written by one submit at a time
@@ -880,6 +980,10 @@ def call(service, name, args, base, client):
 		return runBacktest(service, args, base)
 	if name == 'propose_public':
 		return proposePublic(service, args)
+	if name == 'push_calendar':
+		return pushCalendar(service, args, client)
+	if name == 'push_candles':
+		return pushCandles(service, args, client)
 	raise ToolError("no tool %r" % name)
 
 

@@ -111,6 +111,7 @@ def read_side(path, progress=None):
         frame = pd.DataFrame(rows, columns=FIELDS if rows and isinstance(rows[0], list) else None)
         if progress is not None:
             progress(os.path.getsize(path))
+        return indexed(frame, os.path.basename(path))
     else:
         parts = []
         with open(path, 'rb') as handle:
@@ -119,10 +120,15 @@ def read_side(path, progress=None):
                 if progress is not None:
                     progress(handle.tell())
         frame = pd.concat(parts, ignore_index=True)
+    return indexed(frame, os.path.basename(path))
+
+
+def indexed(frame, name):
+    """A side's rows by their epoch-millisecond timestamp; `name` is for a refusal."""
     missing = [f for f in FIELDS if f not in frame.columns]
     if missing:
         raise ValueError("%s has no %s (dukascopy-node leaves the volume out without -v)"
-                         % (os.path.basename(path), ', '.join(missing)))
+                         % (name, ', '.join(missing)))
     frame.index = pd.to_datetime(frame['timestamp'], unit='ms').dt.as_unit('us')
     frame.index.name = None
     return frame
@@ -138,6 +144,11 @@ def build(ask_path, bid_path, swap=False, progress=None):
     bid = read_side(bid_path, progress and (lambda n: progress(first + n)))
     if swap:
         ask, bid = bid, ask
+    return combine(ask, bid)
+
+
+def combine(ask, bid):
+    """The store's frame from the two sides, and the rows of each with no counterpart."""
     index = ask.index.intersection(bid.index)
     # ask below bid is not a market that exists, so a file pair that says so
     # is labelled the wrong way round and must not reach the store: every
@@ -158,10 +169,12 @@ def build(ask_path, bid_path, swap=False, progress=None):
     return pd.DataFrame(data, index=index).sort_index(), dropped
 
 
-def merge(path, key, frame, dry_run=False):
+def merge(path, key, frame, dry_run=False, keep=False):
     """
     Put the frame into the store under key, keeping rows already there that
-    the import does not cover. Returns (added, replaced, written).
+    the import does not cover. Returns (added, replaced, written). With `keep`
+    the rows already there win instead, and only the missing ones go in: a
+    push over MCP (web/mcp.py) adds to a store, it does not correct one.
     """
     existing = None
     if os.path.exists(path):
@@ -170,6 +183,10 @@ def merge(path, key, frame, dry_run=False):
             existing = store[key] if key in store else None
         finally:
             store.close()
+    if keep and existing is not None:
+        frame = frame[~frame.index.isin(existing.index)]
+        if not len(frame.index):
+            return 0, 0, False
 
     if existing is None:
         added, replaced, merged = len(frame.index), 0, frame

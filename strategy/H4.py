@@ -42,6 +42,7 @@ its title so the choice is visible.
 import logging
 
 from parity_deriva.event.event import SignalEvent
+from parity_deriva.lib import news as news_module
 from parity_deriva.lib.streaming import Series
 from parity_deriva.lib.utils import granularityToTimedelta, roundPrice, \
 	signalNumber
@@ -257,6 +258,16 @@ class H4(ExecutionHandler):
 		return self.TAG or self.__class__.__name__
 
 	# ------------------------------------------------------------ helpers
+
+	def news(self, candle, before=60, after=60, impacts=('high',)):
+		"""
+		The calendar's events of this candle's currencies, from `before`
+		minutes before its close to `after` minutes after (lib/news.around):
+		what was out by the close with its outcome, what is still to come
+		with its forecast only.
+		"""
+		return news_module.around(candle.instrument, candle.time + self.bar,
+								  before, after, impacts)
 
 	def levels(self, candle, side, stop, ratio):
 		"""A target `ratio` times the stop distance, on the right side."""

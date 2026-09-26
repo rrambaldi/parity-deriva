@@ -1530,12 +1530,13 @@ class Service(object):
 			raise ServiceError("its time column is not made of times: %s" % exc)
 
 		where = calendar_module.path(self.setup)
-		before = len(calendar_module.load(where))
-		frame = calendar_module.merge(
-			calendar_module.load(where),
-			added[list(calendar_module.COLUMNS)].itertuples(index=False,
-															name=None))
-		calendar_module.save(frame, where)
+		with calendar_module.LOCK:
+			before = len(calendar_module.load(where))
+			frame = calendar_module.merge(
+				calendar_module.load(where),
+				added[list(calendar_module.COLUMNS)].itertuples(index=False,
+																name=None))
+			calendar_module.save(frame, where)
 		out = self.calendar()
 		out['added'] = int(len(frame) - before)
 		out['read'] = int(len(added))

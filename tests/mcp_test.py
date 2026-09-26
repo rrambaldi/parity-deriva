@@ -24,7 +24,10 @@ import urllib.parse
 import urllib.request
 from http.server import ThreadingHTTPServer
 
+import pandas as pd
+
 from parity_deriva.backtest import ledger
+from parity_deriva.data import calendar
 from parity_deriva.strategy import uploaded
 from parity_deriva.tests.web_test import StoreCase
 from parity_deriva.web import mcp
@@ -188,10 +191,11 @@ class MCPTest(StoreCase):
 		names = [t['name'] for t in self.rpc('tools/list')['tools']]
 		# Was: five tools. Now: list_helpers and request_feature too, which
 		# the rules in the instructions send an assistant to, and propose_public
-		# and get_news first, the one the instructions send it to before the rest
+		# and get_news first, the one the instructions send it to before the rest;
+		# then the two the data scripts push with
 		self.assertEqual(names, ['get_news', 'list_strategies', 'get_source', 'list_data',
 								 'submit_strategy', 'list_helpers', 'request_feature',
-								 'run_backtest', 'propose_public'])
+								 'run_backtest', 'propose_public', 'push_calendar', 'push_candles'])
 		data, _ = self.tool('list_data')
 		self.assertEqual(data['instruments'][0]['instrument'], 'EUR_USD')
 		source, failed = self.tool('get_source', name='parity_deriva.strategy.H4')
@@ -447,6 +451,42 @@ class MCPTest(StoreCase):
 			self.assertIn(word, answer)
 		# and the service is still here
 		self.assertEqual(self.rpc('ping'), {})
+
+	def test_a_data_script_pushes_the_calendar_and_candles(self):
+		self.bearer = self.service.oauth.newSecret()
+		event = {'id': 7, 'datetime_utc': '2025-09-11T12:15:00+00:00', 'time': '2:15pm',
+				 'currency': 'EUR', 'impact': 'high', 'event': 'Main Refinancing Rate',
+				 'actual': '', 'forecast': '2.15%', 'previous': '2.15%', 'revision': '',
+				 'detail': {'Usual Effect': "'Actual' greater than 'Forecast' is good for currency;"}}
+		told, failed = self.tool('push_calendar', events=[event])
+		self.assertFalse(failed, told)
+		self.assertEqual((told['received'], told['added']), (1, 1))
+		# the outcome, minutes later: the same event, not a second one
+		told, failed = self.tool('push_calendar', events=[dict(event, actual='2.40%')])
+		self.assertEqual((told['added'], told['events']), (0, 1), told)
+		held = calendar.load(calendar.path(self.settings))
+		self.assertEqual(held.iloc[0]['actual'], '2.40%')
+		self.assertTrue(self.tool('push_calendar', events=[dict(event, id='')])[1])
+
+		bar = lambda ms, price: [ms, price, price + 0.001, price - 0.001, price, 5]
+		first = [bar(1757592000000 + i * 300000, 1.17) for i in range(3)]
+		told, failed = self.tool('push_candles', instrument='EUR/USD', granularity='m5',
+								 ask=[b[:1] + [v + 0.0001 for v in b[1:5]] + b[5:] for b in first],
+								 bid=first)
+		self.assertFalse(failed, told)
+		self.assertEqual((told['instrument'], told['granularity'], told['added']), ('EUR_USD', 'M5', 3))
+		# again, other prices and one bar more: the three held stay as they were
+		again = [bar(1757592000000 + i * 300000, 1.30) for i in range(4)]
+		told, failed = self.tool('push_candles', instrument='EUR_USD', granularity='M5',
+								 ask=again, bid=again)
+		self.assertEqual((told['added'], told['kept']), (1, 3), told)
+		stored = pd.read_hdf(os.path.join(self.settings.DATA_DIR, 'EUR_USD.hd5'), 'M5')
+		self.assertEqual(list(stored['bid_c'].round(2)), [1.17, 1.17, 1.17, 1.30])
+		# a name that is not a store, and an assistant connected through OAuth
+		self.assertIn('instrument', self.tool('push_candles', instrument='../x', granularity='M5',
+											  ask=first, bid=first)[0])
+		with self.assertRaises(mcp.ToolError):
+			mcp.call(self.service, 'push_calendar', {'events': [event]}, self.base, 'claude.ai')
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
