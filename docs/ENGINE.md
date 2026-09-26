@@ -6,12 +6,15 @@ candles as each one closes. It is not a backtester with a live mode added on,
 nor a trading bot with a simulator beside it: the strategy, the money manager
 and the rules are the same objects in both cases.
 
++[![the simulation engine: one event bus, the same handlers, two wirings](diagrammi-engine/parity-deriva_engine.svg)](diagrammi-engine/parity-deriva_engine.svg)
+
 Everything that happens is an **event** on one bus, and every component is a
 **handler**: it reads the events it cares about and puts new ones on the bus.
 A candle closes, a strategy turns it into a signal, the money manager turns
 the signal into an order, and a broker (or the simulator, playing one) fills
 it. **The clock is the candle**: nothing moves until a bar closes, in a
 backtest or on the account.
+
 
 Three things change between the two modes:
 
