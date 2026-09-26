@@ -63,8 +63,13 @@ server è nella [roadmap](ROADMAP.md#il-diario-su-più-server).
 |---|---|---|
 | **Test** | PC di casa o cloud | SIM, sweep, correlazioni |
 | **Archivio** | cloud | tiene strategie, simulazioni, dati; rifà i run (verify); manda i form ai server di trade; legge i loro trade ogni 5 minuti |
-| **Trade demo** | cloud | DEMO |
-| **Trade real** | cloud, server separato | LIVE |
+| **Trade demo** | cloud, sempre con indirizzo pubblico | DEMO |
+| **Trade real** | cloud, server separato, sempre con indirizzo pubblico | LIVE |
+
+Un server di trade ha **sempre un indirizzo pubblico in https**: l'archivio
+ci manda i form e lo legge ogni 5 minuti, il telefono ci prende avvisi e
+trade aperti. È un requisito di parity-deriva, non un'opzione: un PC di casa
+senza indirizzo pubblico archivia e simula, non fa trading.
 
 Demo o soldi veri non si sceglie da una pagina: sta in `.env`
 (`PARITY_DERIVA_ACCOUNTS`). Un server demo non può diventare reale con un

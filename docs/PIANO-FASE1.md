@@ -614,8 +614,11 @@ il server demo e per quello reale.
     pubblico. Tutte tranne l'abbinamento vogliono il token del dispositivo.
     Dove nginx chiede il certificato, serve la stessa eccezione di `/mcp`.
   - **Limiti.**
-    - Serve un indirizzo pubblico in https (`PARITY_DERIVA_PUBLIC_URL`): un
-      server sul PC di casa senza indirizzo pubblico non ha il telefono.
+    - Il telefono parla con il server di trade al suo indirizzo pubblico
+      (`PARITY_DERIVA_PUBLIC_URL`). Un server di trade ha sempre un
+      indirizzo pubblico in https: è un requisito di parity-deriva
+      ([ARCHITECTURE.md](ARCHITECTURE.md)). La pagina settings lo dice in
+      rosso se un server con il ruolo trade non ce l'ha.
     - iPhone: le notifiche web funzionano da iOS 16.4, e solo dopo
       "Aggiungi a schermata Home". Android: da Chrome, anche senza.
 - **QR.** Lo disegna il browser, con una piccola libreria MIT copiata in
@@ -637,7 +640,8 @@ il server demo e per quello reale.
     fanno partire l'urgente giusto.
   - Nuovo `tests/phone_test.py`: il codice è monouso e scade; il token è
     salvato solo come hash; la revoca funziona; senza token le rotte del
-    telefono rispondono 401; la firma VAPID si verifica con `openssl`.
+    telefono rispondono 401; la firma VAPID si verifica con `openssl`; un
+    server trade senza `PARITY_DERIVA_PUBLIC_URL` viene segnalato.
   - Il pulsante "send a test alert" nella tab, per provarlo davvero sul
     telefono.
 - **Fatto quando.** Abbini il telefono con il QR e accetti le notifiche; una

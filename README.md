@@ -1387,7 +1387,15 @@ money one are never the same. A server without the test role takes code and
 results only from another server's push - no assistant writes a draft on it
 - and runs no backtest; one without trade starts no session. The market data
 is not a role either: one server writes the market folder, the others read
-it or take it from an upstream (above). Some ways to lay it out:
+it or take it from an upstream (above).
+
+A trade server, demo or real, always has a public https address
+(`PARITY_DERIVA_PUBLIC_URL`): the archive pushes forms to it and reads its
+sessions every 5 minutes, and a paired phone takes its alerts and its open
+trades from it. This is a requirement of parity-deriva, not an option: a PC at
+home without a public address archives and tests, it does not trade.
+
+Some ways to lay it out:
 
 - simple: archive + test + trade (demo) on one server, trade (real) on another;
 - medium: archive + test | trade (demo) | trade (real);

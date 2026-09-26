@@ -23,6 +23,12 @@ trade at once. Demo or real is not a role: it is `PARITY_DERIVA_ACCOUNTS` in
 `.env`, never set from a page, so a click cannot turn a demo server into a real
 money one. Details: [Server roles](../README.md#server-roles-archive-test-trade).
 
+**A trade server always has a public address.** Every trade server, demo or
+real, is reachable at a public https address (`PARITY_DERIVA_PUBLIC_URL`): the
+archive pushes to it and reads it every 5 minutes, and a paired phone takes its
+alerts and its open trades from it. This is a requirement of parity-deriva: a
+PC at home without a public address archives and tests, it does not trade.
+
 ## What moves between them
 
 | arrow | from → to | what |
