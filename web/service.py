@@ -82,6 +82,8 @@ from parity_deriva.lib import indicators
 from parity_deriva.lib import s3
 from parity_deriva.lib import news as news_module
 from parity_deriva.performance import baseline, montecarlo
+from parity_deriva.portfolio import filters as filters_module
+from parity_deriva.performance import entry as entry_module
 from parity_deriva.performance import gate as gate_module
 from parity_deriva.performance import report as report_module
 from parity_deriva.strategy import plugins, uploaded
@@ -1644,7 +1646,7 @@ class Service(object):
 				 newsImpacts=None, maxBars=None, strategyArgs=None,
 				 slScale=None, tpScale=None, inverse=False, trailing=None,
 				 trailProfit=False, trailPips=None, cachedOnly=False, confirmed=False,
-				 leverage=None, hold=None, readHoldout=False):
+				 leverage=None, hold=None, readHoldout=False, filters=None):
 		"""
 		Run one backtest and return the payload the page reads, with the
 		margin its account needed at `leverage` (withMargin). cachedOnly
@@ -1682,7 +1684,7 @@ class Service(object):
 		key = self.key(instrument, granularity, strategy, dtfrom, dtto, units,
 					   params, balance, risk, maxStopPips, session, intraday,
 					   news, newsImpacts, maxBars, strategyArgs, slScale, tpScale,
-				   inverse, trailing, trailProfit, trailPips)
+				   inverse, trailing, trailProfit, trailPips) + (filters,)
 		if key in self._cache or cachedOnly:
 			return self.withMargin(self._cache.get(key), leverage)
 
@@ -1754,7 +1756,8 @@ class Service(object):
 						('inverse', 'inverse', inverse),
 						('trailing', 'trailing stop', trailing),
 						('trailProfit', 'trailing profit', trailProfit),
-						('trailPips', 'trail pips', trailPips)):
+						('trailPips', 'trail pips', trailPips),
+						('filters', 'entry filter', filters)):
 						if not value:
 							continue
 						if name not in takes:
@@ -1777,7 +1780,7 @@ class Service(object):
 										slScale=slScale, tpScale=tpScale,
 										inverse=inverse, trailing=trailing,
 										trailProfit=trailProfit,
-										trailPips=trailPips,
+										trailPips=trailPips, filters=filters,
 										progress=report)
 			except Cancelled as stopped:
 				# nothing is kept and nothing is cached: half a run drawn as a
@@ -2778,6 +2781,17 @@ class Service(object):
 						key=lambda t: (t.get('exitTime') or 0))
 		return {'band': montecarlo.band(montecarlo.returns(closed, payload.get('balance')))}
 
+	def runEntry(self, run=None, sweep=None, n=None):
+		"""The entry analysis of a saved run (performance/entry.py): which entries it should not have taken."""
+		if sweep:
+			payload = self.sweepPayload(sweep, n)
+		else:
+			saved = self.savedRun(run)
+			payload = saved and saved['payload']
+		if payload is None:
+			raise ServiceError("no such run on disk")
+		return entry_module.analysis(payload)
+
 	def sweepPayload(self, sweep, n):
 		"""A run saved by saveSweepRun as it was saved - back from the bucket if it went there - or None."""
 		path = self.warmFile(sweep, '%d.json.gz' % int(n))
@@ -3345,8 +3359,17 @@ def backtestArgs(get):
 		params=pluginParams(strategy, get),
 		strategyArgs=handlerArgs(strategy, get),
 		leverage=parseLeverage(get('leverage')),
+		filters=parseFilters(get('filters')),
 		# the candles: the stores' (none), or an archive's (market.archives)
 		data=get('data') or None)
+
+
+def parseFilters(text):
+	"""An entry filter's conditions written the one way, or None (portfolio/filters.py)."""
+	try:
+		return filters_module.text(filters_module.parse(text)) or None
+	except filters_module.FilterError as exc:
+		raise ServiceError(str(exc))
 
 
 def parseExcursionBars(text):
@@ -3790,6 +3813,9 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendJSON(self.service.storageFiles())
 			if route == '/api/imports/status':
 				return self.sendJSON(self.service.importStatus())
+			if route == '/api/run/entry':
+				return self.sendJSON(self.service.runEntry(self.one(query, 'run'), self.one(query, 'sweep'),
+														   self.one(query, 'n')))
 			if route == '/api/run/band':
 				# ?run=<id> a saved backtest, ?sweep=<id>&n=<n> a run of a set
 				return self.sendJSON(self.service.runBand(self.one(query, 'run'), self.one(query, 'sweep'),

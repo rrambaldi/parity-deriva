@@ -66,8 +66,8 @@ C2   diario + scheda                      fatto (e21e911)
 C5   banda Monte Carlo + baseline         fatto (0cc433b)
 C3   holdout + gate SIM → DEMO            fatto (f3208a0)
 C1b  banda e serie di perdite in promote  fatto (6e69885)
-C7d  push e verify senza mix              fatto
-C4   motore correlazioni + filtri         usa C3 (solo periodo di sviluppo)
+C7d  push e verify senza mix              fatto (96668e1)
+C4   motore correlazioni + filtri         fatto
 C6   live: ramp, protezioni               usa C2, C5, C8
 C7a  giorno della settimana               quando si vuole
 C7b  commissioni e financing              quando si vuole
@@ -383,7 +383,9 @@ Senza questo pezzo un candidato non ha dove andare.
   - Un handler nuovo, `portfolio/filters.py` (`EntryFilter`), legge i
     `CANDLE` e tiene le serie. Il money manager lo interroga come fa con il
     calendario. È lo stesso oggetto in backtest, live e ombra.
-  - Nello sweep: `none;rsi14<50;rsi14<55` sono tre valori della griglia.
+  - Nello sweep: `none, rsi14<50, rsi14<55` sono tre valori della griglia
+    (virgole, come gli altri campi); più condizioni in un valore si uniscono
+    con `&`: `rsi14<55&hour>=7`.
   - `filters` entra nel `groupKey`: una versione con un filtro è un form
     diverso.
 - **File.** `portfolio/filters.py`; `portfolio/moneymanager.py`;
@@ -402,6 +404,10 @@ Senza questo pezzo un candidato non ha dove andare.
   `atrpct14` (ATR in % del prezzo), `dist_sma100_atr` (distanza dalla media in
   ATR), `range_atr14` (ampiezza della barra in ATR), `slope100`, `hour`,
   `weekday`.
+- **Com'è stato fatto.** Le caratteristiche stanno in `portfolio/features.py`,
+  lette una barra chiusa alla volta da `lib/streaming.Series` (che ha già RSI,
+  ATR e medie): le usano il filtro e l'analisi, stesso codice. ADX non c'è
+  ancora: si aggiunge a `Series` quando una caratteristica lo usa.
 - **Poi (C4b2).** Gli indicatori AI abilitati, calcolati nella sandbox sulle
   candele del run, come già si fa per disegnarli sul grafico.
 - **Test.** Valori noti su serie piccole scritte a mano.
@@ -416,7 +422,9 @@ Senza questo pezzo un candidato non ha dove andare.
      funzione `block_ci` di `scripts/entry_excursions.py` si sposta in
      `performance/` e la usano tutti e due;
   4. candidato = una fascia con n ≥ 30 il cui intervallo sta tutto sopra
-     l'expectancy complessiva. La soglia è il bordo del quintile;
+     l'expectancy complessiva. La soglia è il bordo del quintile. Su trade
+     vinti a caso, 20 prove danno in media meno candidati di quanti ne
+     annuncia il punto 5 (il test lo controlla);
   5. in testa ai risultati: "N caratteristiche provate → circa N × 5% escono
      buone per caso".
 - **Pagina.** Nella pagina del run, un pannello "entry conditions": una riga

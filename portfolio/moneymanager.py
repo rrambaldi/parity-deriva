@@ -126,6 +126,10 @@ class MoneyManager(ExecutionHandler):
 		self._set(args,'session')
 		self.calendar = None
 		self._set(args,'calendar')
+		# `filters` is a portfolio/filters.EntryFilter, or None: conditions on
+		# the bar a signal came on, which it answers for (blocked)
+		self.filters = None
+		self._set(args,'filters')
 		# How far the initial stop and target sit from the entry, as a
 		# multiple of where the strategy put them: 1.5 is half as far again,
 		# 0.5 half the distance, None (or 1) leaves them alone. Initial only:
@@ -392,6 +396,10 @@ class MoneyManager(ExecutionHandler):
 				% (when, "" if ahead is None
 				   else " (%s %s, %s)" % (ahead['currency'], ahead['impact'],
 										  ahead['title'])))
+			return
+		refused = self.filters.blocked(when) if self.filters is not None else None
+		if refused:
+			self.logger.info("SIGNAL IGNORED: filter %s" % refused)
 			return
 
 		ev_dict=se.to_dict()

@@ -1194,3 +1194,9 @@ dialog.sheet::backdrop { background: var(--backdrop); } /* token in tokens.css: 
 #gate-rows td.bad { color: var(--down); }
 /* the run's trades: fifteen columns, which a narrow window scrolls rather than the page */
 #trades-panel { overflow-x: auto; }
+/* the entry analysis (performance/entry.py): a row a feature, a cell a band */
+#entry-wrap { overflow-x: auto; }
+#entry-table td { white-space: nowrap; padding: 4px 10px; }
+#entry-table td.good { color: var(--up); }
+#entry-table td.bad { color: var(--down); }
+#entry-candidates div { margin-top: 6px; }

@@ -2591,6 +2591,9 @@ function show(data) {
   state.pushed = data.pushed || null;
   renderStar();
   loadBand();
+  state.entry = null;
+  $('entry-panel').hidden = !(state.sweepRef || state.runId);
+  $('entry-box').open = false;
   $('holdout-note').hidden = !data.holdout;
   if (data.holdout) $('holdout-note').textContent = `holdout starts ${data.holdout.cut}: the run stops there`;
   $('journal-link').href = 'journal?strategy=' + encodeURIComponent(data.strategy);
@@ -2637,6 +2640,68 @@ async function loadBand() {
     drawEquity();
   } catch (error) { /* no band: the curve alone */ }
 }
+
+/*
+ * The entry analysis of the run on show (api/run/entry, performance/
+ * entry.py), asked for when its panel is opened: a row a feature, a cell its
+ * band's expectancy in R, and the bands better than the run beyond chance,
+ * each with a button that opens the simulate page with it as a filter to try.
+ */
+async function loadEntry() {
+  if (state.entry) return;
+  const ref = state.sweepRef;
+  const query = ref ? `sweep=${encodeURIComponent(ref.sweep)}&n=${ref.run}`
+    : `run=${encodeURIComponent(state.runId)}`;
+  $('entry-note').textContent = 'reading\u2026';
+  try {
+    state.entry = await ask('api/run/entry?' + query);
+  } catch (error) {
+    $('entry-note').textContent = String(error.message || error);
+    return;
+  }
+  const e = state.entry;
+  $('entry-note').textContent = e.overall
+    ? `${e.overall.n} trades \u00b7 expectancy ${e.overall.expectancyR}R` : 'no trade with a stop';
+  $('entry-chance').textContent = `${e.tried} bands looked at: about ${e.chance} of them come out good by chance`;
+  const table = $('entry-table');
+  table.textContent = '';
+  for (const f of e.features) {
+    const row = table.insertRow();
+    row.insertCell().textContent = f.name;
+    for (const b of f.bands) {
+      const cell = row.insertCell();
+      cell.className = 'num ' + (b.expectancyR > 0 ? 'good' : b.expectancyR < 0 ? 'bad' : '');
+      const short = (v) => (v === null || v === undefined ? 'n/a' : String(Number(Number(v).toPrecision(3))));
+      cell.textContent = `${short(b.lo)}..${short(b.hi)}: ${short(b.expectancyR)}R (${b.n})`;
+      cell.title = `win rate ${b.winRate} \u00b7 profit factor ${b.pf} \u00b7 95%: ${b.ci[0]}..${b.ci[1]}R`;
+    }
+  }
+  const box = $('entry-candidates');
+  box.textContent = '';
+  if (!e.candidates.length) {
+    box.textContent = `no band of at least ${e.minimum} trades did better than the run beyond chance`;
+    return;
+  }
+  for (const c of e.candidates) {
+    const line = document.createElement('div');
+    line.textContent = `${c.filter}: ${c.n} trades, ${c.expectancyR}R (95%: ${c.ci[0]}..${c.ci[1]}) `;
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.dataset.icon = 'play';
+    go.textContent = 'try in a set';
+    go.addEventListener('click', () => {
+      const fields = fromAddress() ? fromAddress().fields : {};
+      try {
+        sessionStorage.setItem('parity-deriva.try', JSON.stringify({ ...fields, filters: `none, ${c.filter}` }));
+      } catch (error) { /* the simulate page opens without it */ }
+      location.href = './';
+    });
+    line.appendChild(go);
+    box.appendChild(line);
+  }
+}
+
+$('entry-box').addEventListener('toggle', () => { if ($('entry-box').open) loadEntry(); });
 
 /* ------------------------------------------------------------- address */
 

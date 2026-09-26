@@ -35,6 +35,8 @@ import pandas as pd
 from parity_deriva.data import market, store
 from parity_deriva.etc import settings
 from parity_deriva.lib.utils import pipSize
+# the 95% interval by blocks of trades, shared with the run page's entry analysis
+from parity_deriva.performance.entry import block_ci
 from parity_deriva.scripts.nm_stats import atr14
 
 BARS = {'M5': (6, 12, 48, 144), 'M15': (4, 8, 16, 32, 96), 'M30': (2, 4, 8, 16, 48),
@@ -121,18 +123,6 @@ def measure(trades, candles, m5, N, pip, base=BASE, seed=0):
 	if not f.empty:
 		f['pip'] = pip
 	return f
-
-
-def block_ci(x, block=BLOCK, n=1000, seed=0):
-	"""IC 95% della media, ricampionando blocchi di trade consecutivi."""
-	x = np.asarray(x, float)
-	if len(x) < 2 * block:
-		return np.nan, np.nan
-	starts = np.arange(len(x) - block + 1)
-	rng = np.random.default_rng(seed)
-	k = int(np.ceil(len(x) / block))
-	means = [np.concatenate([x[s:s + block] for s in rng.choice(starts, k)])[:len(x)].mean() for _ in range(n)]
-	return tuple(np.percentile(means, [2.5, 97.5]))
 
 
 def num(x):

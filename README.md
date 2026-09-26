@@ -1604,6 +1604,25 @@ dialog says how often that cut was opened and whether saved sets already read
 past it. Trying again, or discarding the version, is the user's call: nothing
 here discards one by itself.
 
+## Entry filters and the entry analysis
+
+An account option like the hours and the news: `filters`, conditions on the
+bar a signal came on that any strategy's signals must meet
+(`portfolio/filters.py`) - `rsi14<55`, `atrpct14>0.3&hour>=7`. The features are
+`rsi14`, `atrpct14`, `dist_sma100_atr`, `range_atr14`, `slope100`, `hour`,
+`weekday` (`portfolio/features.py`), read a closed bar at a time: the same
+object in the backtest, live and in the shadow. On the simulate page it is a
+grid field like the others: `none, rsi14<50, rsi14<55` is three runs.
+
+Which filters to try comes from the run page's "entry conditions"
+(`performance/entry.py`, and the MCP tool `get_entry_analysis`): the run's
+trades by each feature on their signal's bar, five bands a feature, each
+band's expectancy in R with its 95% interval (a bootstrap by blocks of
+trades), and the bands better than the run beyond that interval - each with
+"try in a set", which opens the simulate page with it as a filter to try. With
+N bands looked at, about N x 5% come out good by chance, and the panel says
+so: a candidate is a question for a set, not an answer.
+
 ## Old simulations off the disk: an S3 bucket, a Google Drive, a OneDrive
 
 The runs of a set - the trades the run page draws, a few MB each - are what

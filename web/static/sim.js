@@ -307,7 +307,7 @@ function gridFields() {
   for (const input of $('grid-strategy').querySelectorAll('input')) {
     grid[input.dataset.name] = input.value;
   }
-  for (const name of ['maxStop', 'session', 'maxBars', 'slScale', 'tpScale', 'trailPips']) {
+  for (const name of ['maxStop', 'session', 'maxBars', 'slScale', 'tpScale', 'trailPips', 'filters']) {
     // switched off, the box keeps what it held for when it is on again
     grid[name] = $('g-' + name).disabled ? '' : $('g-' + name).value;
   }
@@ -344,7 +344,7 @@ function fillForm(f) {
   for (const input of $('grid-strategy').querySelectorAll('input')) {
     if (f[input.dataset.name] !== undefined) input.value = f[input.dataset.name];
   }
-  for (const name of ['maxStop', 'session', 'maxBars', 'slScale', 'tpScale', 'trailPips']) {
+  for (const name of ['maxStop', 'session', 'maxBars', 'slScale', 'tpScale', 'trailPips', 'filters']) {
     if (f[name]) $('g-' + name).value = f[name];
   }
   for (const name of FLAGS) fillFlag(name, f[name]);
@@ -1589,6 +1589,12 @@ async function start() {
   onStrategy();
   // the form of the sweep going, or of the last one to finish
   if (job.total) fillForm({ ...(job.fields || {}), ...(job.grid || {}) });
+  // a set to try, handed over by the run page's entry analysis ("try in a set")
+  try {
+    const handed = JSON.parse(sessionStorage.getItem('parity-deriva.try') || 'null');
+    sessionStorage.removeItem('parity-deriva.try');
+    if (handed) fillForm(handed);
+  } catch (error) { /* nothing handed over */ }
   countLater();
   // not awaited: the stars can wait, the table cannot wait on them
   loadFavourites().catch((error) => message(String(error.message || error)));

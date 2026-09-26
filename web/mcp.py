@@ -366,6 +366,17 @@ TOOLS = [
 		 'run': {'type': 'string', 'description': "a backtest's id, from list_runs"},
 		 'sweep': {'type': 'string', 'description': "a set's id, from list_runs"},
 		 'n': {'type': 'integer', 'description': "one run of that set"}}}},
+	{'name': 'get_entry_analysis',
+	 'description': "Which entries a saved run should not have taken: its trades by what the market "
+					"looked like on the signal's bar (rsi14, atrpct14, dist_sma100_atr, range_atr14, "
+					"slope100, hour, weekday), five bands a feature, each band's expectancy in R with its "
+					"95% interval, and the bands better than the run beyond chance as filters to try in a "
+					"set (the form's filters field, e.g. rsi14<55&hour>=7). Mind the count: with N bands "
+					"looked at, about N x 5% come out good by chance.",
+	 'inputSchema': {'type': 'object', 'properties': {
+		 'run': {'type': 'string', 'description': "a backtest's id, from list_runs"},
+		 'sweep': {'type': 'string', 'description': "a set's id, from list_runs"},
+		 'n': {'type': 'integer', 'description': "one run of that set"}}}},
 	{'name': 'list_journals',
 	 'description': "The strategies' journals: everything done with each strategy, written by the "
 					"platform as it happened - sets, runs, favourites, code changes, mixes, versions "
@@ -1553,7 +1564,7 @@ SERVED = {'get_news': ('test',), 'list_helpers': ('test',), 'request_feature': (
 		  'list_runs': ('test', 'archive'), 'get_run': ('test', 'archive'),
 		  'pull_code': ('archive',), 'push_mix': ('archive',), 'push_sweep': ('archive', 'trade'),
 		  'push_record': ('trade',), 'live_status': ('trade',),
-		  'list_journals': servers.ROLES, 'get_journal': servers.ROLES, 'search_journals': servers.ROLES,
+		  'get_entry_analysis': ('test', 'archive'), 'list_journals': servers.ROLES, 'get_journal': servers.ROLES, 'search_journals': servers.ROLES,
 		  'add_note': servers.ROLES, 'list_cards': servers.ROLES, 'get_card': servers.ROLES}
 
 
@@ -1622,6 +1633,11 @@ def call(service, name, args, base, client):
 		return getRun(service, args, base)
 	if name == 'pull_code':
 		return pullCode(service, args, client)
+	if name == 'get_entry_analysis':
+		try:
+			return service.runEntry(args.get('run'), args.get('sweep'), args.get('n'))
+		except Exception as exc:
+			raise ToolError(str(exc))
 	if name in ('list_journals', 'get_journal', 'search_journals', 'add_note', 'list_cards', 'get_card'):
 		return journalTool(service, name, args, client)
 	if name == 'live_status':

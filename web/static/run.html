@@ -304,6 +304,21 @@
 </section>
 
 <!--
+  Which entries the strategy should not have taken (performance/entry.py): the
+  trades by what the market looked like on the signal's bar, five bands a
+  feature, and the bands that did better than the run beyond chance - filters
+  to try in a set (portfolio/filters.py). Asked for when opened.
+-->
+<section id="entry-panel" hidden>
+  <details id="entry-box">
+    <summary><span class="panel-title">entry conditions</span> <span id="entry-note"></span></summary>
+    <p id="entry-chance" class="dim"></p>
+    <div id="entry-wrap"><table id="entry-table"></table></div>
+    <div id="entry-candidates"></div>
+  </details>
+</section>
+
+<!--
   The closed trades laid out by when they were entered or exited: the days of
   the week against the hours, the months against the days, or the years
   against the months, a cell reading their win rate, their P&L or their OK

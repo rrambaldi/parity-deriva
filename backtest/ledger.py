@@ -55,6 +55,7 @@ from parity_deriva.backtest.offline import SimulatedBroker
 from parity_deriva.backtest import shadow
 from parity_deriva.data import calendar as calendar_module
 from parity_deriva.etc import settings
+from parity_deriva.portfolio.filters import EntryFilter
 from parity_deriva.portfolio.moneymanager import MoneyManager
 from parity_deriva.portfolio.session import SESSION_CLOSE, SessionCloser, TradeTimer
 from parity_deriva.portfolio.trailer import Trailer
@@ -124,7 +125,7 @@ def load_strategy(name):
 def moneyManager(units=1, setup=None, risk=None, balance=None,
 				 maxStopPips=None, session=None, calendar=None, slScale=None,
 				 tpScale=None, inverse=False, trailing=None, trailProfit=False,
-				 trailPips=None):
+				 trailPips=None, filters=None):
 	"""
 	A MoneyManager that remembers nothing from a previous run.
 
@@ -138,7 +139,7 @@ def moneyManager(units=1, setup=None, risk=None, balance=None,
 					  risk=risk, balance=balance, maxStopPips=maxStopPips,
 					  session=session, calendar=calendar, slScale=slScale,
 					  tpScale=tpScale, inverse=inverse, trailing=trailing,
-					  trailProfit=trailProfit, trailPips=trailPips)
+					  trailProfit=trailProfit, trailPips=trailPips, filters=filters)
 	mm.signals = {}
 	mm.processed = []
 	mm.onTrade = False
@@ -546,9 +547,13 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 		maxStopPips=None, progress=None, session=None, intraday=False,
 		closeAt=None, news=None, newsImpacts=None, maxBars=None,
 		strategyArgs=None, slScale=None, tpScale=None, inverse=False,
-		trailing=None, trailProfit=False, trailPips=None):
+		trailing=None, trailProfit=False, trailPips=None, filters=None):
 	"""
 	Replay stored candles through the whole offline stack and collect trades.
+
+	`filters` is an entry filter's conditions, 'rsi14<55&hour>=7'
+	(portfolio/filters.py): read off the strategy's own bars, asked by the
+	money manager when a signal comes.
 
 	The wiring is the one tests/offline_test.py pins: strategy, money manager,
 	simulator, and the adapter that says "the simulator is the broker here".
@@ -644,11 +649,12 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 
 	ledger = Ledger(instrument=instrument, granularity=granularity)
 	diary = _calendar(instrument, news, newsImpacts, cfg)
+	entry = EntryFilter(filters, granularity=granularity, instrument=instrument) if filters else None
 	manager = moneyManager(units=units, setup=cfg, risk=risk, balance=balance,
 						   maxStopPips=maxStopPips, session=session,
 						   calendar=diary, slScale=slScale, tpScale=tpScale,
 						   inverse=inverse, trailing=trailing,
-						   trailProfit=trailProfit, trailPips=trailPips)
+						   trailProfit=trailProfit, trailPips=trailPips, filters=entry)
 	# the cut the day ends at: what was asked for, the session's own end, or
 	# the end of the UTC day. Nothing here invents an hour of its own
 	closer = None
@@ -665,7 +671,8 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 		progress, account=manager, ledger=ledger, instrument=instrument,
 		granularity=granularity)
 	engine = ReplayEngine()
-	for handler in (strategy_class(pairs=[instrument], granularity=granularity,
+	for handler in ((entry,) if entry is not None else ()) + (
+					strategy_class(pairs=[instrument], granularity=granularity,
 								   **(strategyArgs or {})),
 					manager,
 					# Before the simulator, so that a stop moved on this bar

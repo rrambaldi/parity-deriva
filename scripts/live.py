@@ -161,7 +161,7 @@ def fromForm(text):
         import inspect
         takes = inspect.signature(plugin['run']).parameters
         for name, label in (('maxStopPips', 'max stop'), ('session', 'hours'),
-                            ('news', 'news')):
+                            ('news', 'news'), ('filters', 'entry filter')):
             if spec.get(name) and name not in takes:
                 raise SystemExit("%s runs its own engine, which has no %s: "
                                  "leave it empty" % (spec['strategy'], label))
@@ -440,6 +440,14 @@ def wire(engine, provider, spec, args, strategy_class, style, pairs, granularity
         if spec['maxBars']:
             rules.append(TradeTimer(spec['maxBars'], granularity=granularity,
                                     instrument=pairs[0]))
+    # the entry filter reads the strategy's bars before the strategy does, as
+    # in the backtest (backtest/ledger.py run): the bar a signal comes on is
+    # the last one it has seen
+    entry = None
+    if spec.get('filters'):
+        from parity_deriva.portfolio.filters import EntryFilter
+        entry = EntryFilter(spec['filters'], granularity=granularity, instrument=pairs[0])
+        engine.add_handler(entry)
     add_strategy(engine, strategy_class, style, pairs, granularity,
                  provider=provider, **kwargs)
     balance = None
@@ -460,7 +468,7 @@ def wire(engine, provider, spec, args, strategy_class, style, pairs, granularity
         plRate=balance / spec['capital'] if reference else 1.0,
         maxStopPips=spec['maxStopPips'], session=spec['session'],
         calendar=_calendar(pairs[0], spec['news'], spec['newsImpacts'], settings),
-        **scales))
+        filters=entry, **scales))
     engine.add_handler(provider.execution(sized=risk is not None))
     for rule in rules:
         engine.add_handler(rule)
