@@ -115,6 +115,8 @@ def report(trades):
 	losses = [v for v in values if v < 0]
 	flat = [v for v in values if v == 0]
 
+	rs = [t['r'] for t in done if t.get('r') is not None]
+
 	gross_profit = sum(wins)
 	gross_loss = -sum(losses)
 	curve = equity(values)
@@ -138,6 +140,8 @@ def report(trades):
 		'net': gross_profit - gross_loss,
 		'profitFactor': (gross_profit / gross_loss) if gross_loss else None,
 		'expectancy': (sum(values) / len(done)) if done else None,
+		# the mean R (backtest/ledger.rMultiple), over the trades with a stop
+		'expectancyR': (sum(rs) / len(rs)) if rs else None,
 
 		'averageWin': (gross_profit / len(wins)) if wins else None,
 		'averageLoss': (gross_loss / len(losses)) if losses else None,
@@ -215,6 +219,7 @@ def kpis(curve, start, dtfrom, dtto, summary=None):
 		'ulcer': ulcer,
 		'riskReward': (win / loss) if win and loss else None,
 		'expectancy': summary.get('expectancy'),
+		'expectancyR': summary.get('expectancyR'),
 		'profitFactor': summary.get('profitFactor'),
 		'winRate': summary.get('winRate'),
 		'years': years,

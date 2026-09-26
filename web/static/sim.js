@@ -23,6 +23,7 @@ const STATS = [
   ['win rate', (r) => r.report.winRate, percent],
   ['net', (r) => r.report.net, amount],
   ['profit factor', (r) => r.report.profitFactor, (v) => v === null ? 'n/a' : v.toFixed(2)],
+  ['expectancy R', (r) => r.report.expectancyR, (v) => v === null || v === undefined ? 'n/a' : v.toFixed(2)],
   ['avg win', (r) => r.report.averageWin, amount],
   ['avg loss', (r) => r.report.averageLoss, amount],
   ['max drawdown', (r) => r.report.maxDrawdown, amount],

@@ -2124,6 +2124,32 @@ function barsHeld(trade) {
   return a === null || a === undefined || b === null || b === undefined ? null : b - a;
 }
 
+// a result in risk units (backtest/ledger.rMultiple); blank with no stop,
+// or for a run saved before R was kept
+function rText(r) {
+  return r === null || r === undefined ? '' : (r > 0 ? '+' : '') + r.toFixed(2) + 'R';
+}
+
+// the run's trades as a CSV file, one row a trade
+function downloadTrades() {
+  const trades = state.data ? state.data.trades : [];
+  const head = ['n', 'signal', 'side', 'units', 'entry time', 'entry', 'exit time', 'exit',
+                'stop', 'target', 'outcome', 'pl', 'r'];
+  const cell = (v) => v === null || v === undefined ? '' : /[",\n]/.test(String(v))
+    ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+  const iso = (ms) => ms === null || ms === undefined ? '' : new Date(ms).toISOString();
+  const rows = trades.map((t) => [t.n, iso(t.signalTime), t.direction, t.units, iso(t.entryTime),
+    t.entryPrice, iso(t.exitTime), t.exitPrice, t.stopLoss, t.takeProfit, t.outcome, t.pl, t.r]
+    .map(cell).join(','));
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([[head.join(',')].concat(rows).join('\n') + '\n'],
+                                           { type: 'text/csv' }));
+  const d = state.data || {};
+  link.download = ['trades', d.strategy, d.instrument, d.granularity].filter(Boolean).join('-') + '.csv';
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 function renderTrades() {
   const body = $('trade-rows');
   body.textContent = '';
@@ -2133,6 +2159,7 @@ function renderTrades() {
   const first = state.page * PAGE_SIZE;
   const last = Math.min(trades.length, first + PAGE_SIZE);
   $('trade-pager').hidden = pages < 2;
+  $('trades-csv').hidden = !trades.length;
   $('page-info').textContent =
     `trades ${first + 1}\u2013${last} of ${trades.length} \u00b7 page ${state.page + 1} of ${pages}`;
   $('page-prev').disabled = state.page === 0;
@@ -2144,7 +2171,7 @@ function renderTrades() {
     const row = document.createElement('tr');
     row.className = 'empty';
     const cell = document.createElement('td');
-    cell.colSpan = 14;
+    cell.colSpan = 15;
     cell.textContent = state.data
       ? 'this run entered no trades'
       : 'run a backtest to see its trades';
@@ -2180,6 +2207,7 @@ function renderTrades() {
       ['num', price(trade.takeProfit)],
       ['outcome-cell', null],
       ['num pl ' + (trade.pl > 0 ? 'good' : trade.pl < 0 ? 'bad' : ''), pl(trade.pl)],
+      ['num', rText(trade.r)],
       ['num', trade.pl === null ? '' : pl(cumulative)],
     ];
     for (const [cls, text] of cells) {
@@ -2279,6 +2307,7 @@ function renderReport() {
     stat(state.data.risk ? 'net (quote ccy)' : 'net (price x units)',
          pl(r.net), r.net > 0 ? 'good' : r.net < 0 ? 'bad' : ''),
     stat('profit factor', r.profitFactor === null ? 'n/a' : r.profitFactor.toFixed(2)),
+    stat('expectancy R', rText(r.expectancyR) || 'n/a'),
     stat('avg win', pl(r.averageWin)),
     stat('avg loss', pl(r.averageLoss)),
     stat('max drawdown', pl(r.maxDrawdown), 'bad'),
@@ -2590,6 +2619,7 @@ let dragged = false;
 
 $('page-prev').addEventListener('click', () => { state.page--; renderTrades(); });
 $('page-next').addEventListener('click', () => { state.page++; renderTrades(); });
+$('trades-csv').addEventListener('click', downloadTrades);
 // from nothing selected, next starts at the first trade and prev at the last
 $('trade-next').addEventListener('click', () =>
   select(state.selected === null ? 0 : state.selected + 1));

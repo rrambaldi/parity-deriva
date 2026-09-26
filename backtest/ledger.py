@@ -482,6 +482,9 @@ class Ledger(ExecutionHandler):
 					'exitPrice': leg['exitPrice'],
 					'outcome': leg['outcome'],
 					'pl': leg['pl'],
+					# the result in risk units: -1 is a trade that lost what
+					# its initial stop put at risk, whatever the size
+					'r': rMultiple(leg['pl'], leg['entryPrice'], leg['stopLoss'], leg['units']),
 					'balance': leg['balance'],
 				})
 		out.sort(key=lambda t: (t['entryTime'], t['key']))
@@ -741,6 +744,13 @@ def _reading(report):
 			raise Cancelled("stopped while %s, after %d of %d candles"
 							% (stage, done, total))
 	return reading
+
+
+def rMultiple(pl, entry, stop, units):
+	"""pl over what the initial stop risked, or None with no stop or no result."""
+	if pl is None or entry is None or stop is None or not units or entry == stop:
+		return None
+	return pl / (abs(entry - stop) * abs(units))
 
 
 def _float(value):

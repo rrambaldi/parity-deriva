@@ -168,6 +168,18 @@ class LedgerRecordingTest(unittest.TestCase):
         self.assertEqual(trade['direction'], 'short')
         self.assertEqual(trade['outcome'], 'STOP_LOSS_ORDER')
 
+    def test_r_is_the_result_over_what_the_initial_stop_risked(self):
+        self.signal()
+        self.order(units=-2, price=11690.0, sl=11700.0, tp=11670.0)
+        self.ack(price=11690.0)
+        self.fill(price=11690.0)
+        self.close(price=11700.0, reason='STOP_LOSS_ORDER', pl=-20.0)
+        trade, = self.ledger.trades()
+        self.assertEqual(trade['r'], -1.0)
+        self.assertEqual(ledger_module.rMultiple(40.0, 11690.0, 11700.0, -2), 2.0)
+        self.assertIsNone(ledger_module.rMultiple(40.0, 11690.0, None, -2))
+        self.assertIsNone(ledger_module.rMultiple(None, 11690.0, 11700.0, -2))
+
     def test_a_trade_still_open_is_listed_with_no_result(self):
         """
         The data running out is not an outcome the broker reported, so it is
@@ -533,6 +545,11 @@ class ReportTest(unittest.TestCase):
         self.assertIsNone(r['winRate'])
         self.assertIsNone(r['profitFactor'])
         self.assertEqual(r['net'], 0)
+
+    def test_the_expectancy_in_r_counts_the_trades_with_a_stop(self):
+        trades = [{'pl': 2.0, 'r': 2.0}, {'pl': -1.0, 'r': -1.0}, {'pl': 5.0, 'r': None}]
+        self.assertEqual(report_module.report(trades)['expectancyR'], 0.5)
+        self.assertIsNone(report_module.report(self.trades(1.0))['expectancyR'])
 
     def test_the_ordinary_case(self):
         r = report_module.report(self.trades(2.0, -1.0, 3.0, -4.0))
