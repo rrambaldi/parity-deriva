@@ -93,16 +93,26 @@ market data comes from (the archive, or your own files). Then the service
 restarts on what you chose. A profile (`etc/profiles/*.json`, or one downloaded
 from another server's settings) fills the answers in, secrets aside.
 
-How people get in:
+How people get in, chosen at the setup and changed later on the settings
+page, Access tab:
 
 * **certificate** - a client certificate in the browser, from an authority the
-  setup makes (it hands out the first `.p12`) or one you already have.
-  Caddy checks it.
+  setup or the Access tab makes (it hands out the `.p12`) or one you already
+  have. Caddy checks it.
 * **Google, Microsoft 365 or GitHub** - sign in with one of them, and only the
   addresses, domains (`@example.com`) or GitHub users (`github:name`) on the
   list get in. You register the app with the provider; the setup shows the
   callback address to give it.
+* **certificate and account** - both at once, in case one of the two doors has
+  a hole: the certificate first, then the account on the list.
 * **none** - for a PC only: it refuses anything that came through a proxy.
+
+Each one on the list is **authorizing** (may change things) or **read only**
+(sees every page, starts, saves and deletes nothing). Certificates go on the
+list as `cert:<name>`; while it names none, every certificate of the authority
+is in. The Access tab refuses a change that would shut you out: a certificate
+mode needs your certificate on the request, an account mode needs you signed in
+with an account that stays authorizing.
 
 Whatever the choice, `/mcp`, `/oauth/` and `/.well-known/` stay open: the AI
 assistants and the other parity servers reach them with their own tokens.

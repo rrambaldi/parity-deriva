@@ -86,6 +86,16 @@ class ListTest(unittest.TestCase):
         self.assertIsNone(access.allowed(['github:someone'], allow))
         self.assertIsNone(access.allowed(['a@b.c'], []))
 
+    def test_an_exact_entry_before_a_domain_and_the_certificates_rule(self):
+        allow = [{'who': '@b.it', 'can': 'read'}, {'who': 'boss@b.it', 'can': 'write'}]
+        self.assertEqual(access.match(['boss@b.it'], allow), ('boss@b.it', 'write'))
+        self.assertEqual(access.match(['x@b.it'], allow), ('x@b.it', 'read'))
+        # no certificate named: every one of the authority writes
+        self.assertEqual(access.certCan('Anyone', allow), 'write')
+        allow.append({'who': 'cert:Anna', 'can': 'read'})
+        self.assertEqual(access.certCan('anna', allow), 'read')
+        self.assertIsNone(access.certCan('Anyone', allow))
+
     def test_a_cookie_signed_here_unexpired_and_untouched(self):
         key = b'k' * 32
         value = access.sign(key, {'ids': ['a@b.c'], 'until': time.time() + 60})
@@ -100,9 +110,12 @@ class ListTest(unittest.TestCase):
         self.assertIsNone(access.unsign(key, value[:-3] + 'àèì'))
 
     def test_the_list_is_checked_on_the_way_in(self):
-        self.assertEqual(access.cleanAllow([' A@B.it ', '@x.it', 'github:me', '']),
-                         ['@x.it', 'a@b.it', 'github:me'])
-        for bad in ([], ['nobody'], ['github:'], 'a@b.it'):
+        self.assertEqual(access.cleanAllow([' A@B.it ', {'who': '@x.it', 'can': 'read'}, 'github:me', '',
+                                            {'who': 'CERT:Anna  <Bianchi>'}]),
+                         [{'who': '@x.it', 'can': 'read'}, {'who': 'a@b.it', 'can': 'write'},
+                          {'who': 'cert:Anna Bianchi', 'can': 'write'}, {'who': 'github:me', 'can': 'write'}])
+        self.assertEqual(access.cleanAllow([], empty=True), [])
+        for bad in ([], ['nobody'], ['github:'], 'a@b.it', ['cert:'], [{'who': 'a@b.it', 'can': 'admin'}]):
             with self.assertRaises(access.AccessError):
                 access.cleanAllow(bad)
 
@@ -234,11 +247,15 @@ class SignInTest(Case):
         cookie = 'pd_session=' + access.sign(access.cookieKey(self.setup), {'ids': ['x@b.it'], 'until': time.time() + 60})
         status, _, raw = self.call('POST', '/api/access/settings', {'allow': ['y@c.it']}, headers={'Cookie': cookie})
         self.assertEqual(status, 400)
-        self.assertIn('leaves you out', json.loads(raw)['error'])
+        self.assertIn('the list lets in', json.loads(raw)['error'])
         status, _, raw = self.call('POST', '/api/access/settings', {'allow': ['x@b.it', 'y@c.it']},
                                    headers={'Cookie': cookie})
-        self.assertEqual(json.loads(raw)['allow'], ['x@b.it', 'y@c.it'])
+        self.assertEqual(json.loads(raw)['allow'], [{'who': 'x@b.it', 'can': 'write'}, {'who': 'y@c.it', 'can': 'write'}])
+        self.assertEqual(json.loads(raw)['signed'], 'x@b.it')
         self.assertEqual(json.loads(raw)['providers']['google'], {'id': 'gid', 'secret': True})
+        status, _, raw = self.call('POST', '/api/access/settings',
+                                   {'allow': [{'who': 'x@b.it', 'can': 'read'}]}, headers={'Cookie': cookie})
+        self.assertIn('only look', json.loads(raw)['error'])
 
 
 class SetupTest(Case):
@@ -319,6 +336,21 @@ class SetupTest(Case):
         self.assertEqual(servers.read(self.setup)['auth'], {'mode': 'cert', 'ca': 'own'})
         access._setup['done'] = False
 
+    def test_paranoid_both_a_certificate_and_an_account(self):
+        cookie = self.enter()
+        answer = {'auth': {'mode': 'both', 'allow': [{'who': 'a@b.it', 'can': 'write'}, 'c@d.it'],
+                           'public_url': 'https://parity.example.com',
+                           'providers': {'github': {'id': 'h', 'secret': 'hs'}}},
+                  'ca': {'make': True, 'name': 'Claudia'}, 'roles': ['archive'],
+                  'market': {'candles': 'manual', 'calendar': 'manual'}}
+        status, _, raw = self.call('POST', '/api/setup/finish', answer,
+                                   headers=dict(cookie, **{'X-Forwarded-For': '1.2.3.4'}))
+        self.assertEqual(status, 200, raw)
+        self.assertTrue(json.loads(raw)['p12'])
+        kept = servers.read(self.setup)['auth']
+        self.assertEqual((kept['mode'], kept['allow'][1]), ('both', {'who': 'c@d.it', 'can': 'write'}))
+        self.assertEqual(access.envRead(self.setup)[access.SECRET % 'GITHUB'], 'hs')
+
     def test_answers_refused_leave_the_server_in_setup(self):
         cookie = self.enter()
         for answer, why in (
@@ -361,13 +393,117 @@ class CertificateTest(Case):
             text = handle.read().split('\nparity.example.com {', 1)[1]
         self.assertNotIn('client_auth', text)
         self.assertNotIn('@@', text)
+        # an authority, whatever the mode: the certificate is asked for, so it can be tried
         access.makeCA(self.setup)
+        with open(access.caddyfile(self.setup)) as handle:
+            self.assertIn('client_auth', handle.read().split('\nparity.example.com {', 1)[1])
         self.auth({'mode': 'cert', 'ca': 'own'})
         with open(access.caddyfile(self.setup)) as handle:
             text = handle.read().split('\nparity.example.com {', 1)[1]
         self.assertIn('\t\tclient_auth {\n\t\t\tmode verify_if_given\n\t\t\ttrust_pool file /parity/ca/ca.crt', text)
         os.environ['PARITY_DERIVA_DOMAIN'] = 'bad domain; import /etc'
         self.assertIsNone(access.caddyfile(self.setup))
+
+
+
+class PermissionTest(Case):
+
+    def cookie(self, who):
+        return {'Cookie': 'pd_session=' + access.sign(access.cookieKey(self.setup),
+                                                      {'ids': [who], 'until': time.time() + 60})}
+
+    def test_read_only_looks_and_changes_nothing(self):
+        self.auth({'mode': 'oauth', 'allow': [{'who': '@b.it', 'can': 'read'}, {'who': 'boss@b.it', 'can': 'write'}],
+                   'providers': {'google': {'id': 'g'}}})
+        access.envKeep({access.SECRET % 'GOOGLE': 's'}, self.setup)
+        self.serve()
+        reader, boss = self.cookie('x@b.it'), self.cookie('boss@b.it')
+        self.assertEqual(json.loads(self.call('GET', '/api/access', headers=reader)[2])['can'], 'read')
+        self.assertEqual(self.call('GET', '/api/favourites', headers=reader)[0], 200)
+        status, _, raw = self.call('POST', '/api/favourites', {'source': {}}, headers=reader)
+        self.assertEqual(status, 403)
+        self.assertIn('read only', json.loads(raw)['error'])
+        # the POSTs that only read go on to their route, with their body
+        for path, body in (('/api/backtest', {'cachedOnly': True}), ('/api/sweep', {'dry': True, 'grid': {}}),
+                           ('/api/market/compare', {})):
+            status, _, raw = self.call('POST', path, body, headers=reader)
+            self.assertNotIn('read only', raw.decode(), path)
+        self.assertEqual(self.call('POST', '/api/sweep', {'dry': False}, headers=reader)[0], 403)
+        self.assertNotEqual(self.call('POST', '/api/favourites', {'source': {}}, headers=boss)[0], 403)
+
+    def test_certificates_by_name_once_the_list_names_one(self):
+        self.auth({'mode': 'cert', 'allow': [{'who': 'cert:Anna', 'can': 'read'}, {'who': 'cert:Boss', 'can': 'write'}]})
+        self.serve()
+        status, headers, _ = self.call('GET', '/', headers={'X-Client-Subject': 'CN=Other,O=x'})
+        self.assertEqual(headers['location'], 'http://127.0.0.1:%d/login?error=not-allowed' % self.port)
+        self.assertEqual(self.call('GET', '/api/favourites', headers={'X-Client-Subject': 'CN=Anna'})[0], 200)
+        self.assertEqual(self.call('POST', '/api/favourites', {'source': {}}, headers={'X-Client-Subject': 'CN=Anna'})[0], 403)
+        self.assertNotEqual(self.call('POST', '/api/favourites', {'source': {}},
+                                      headers={'X-Client-Subject': 'CN=Boss'})[0], 403)
+
+    def test_both_wants_the_certificate_and_the_account(self):
+        self.auth({'mode': 'both', 'allow': [{'who': 'a@b.it', 'can': 'write'}], 'providers': {'google': {'id': 'g'}}})
+        access.envKeep({access.SECRET % 'GOOGLE': 's'}, self.setup)
+        self.serve()
+        account, cert = self.cookie('a@b.it'), {'X-Client-Subject': 'CN=Anyone'}
+        self.assertEqual(self.call('GET', '/api/favourites', headers=account)[0], 403)
+        self.assertEqual(self.call('GET', '/api/favourites', headers=cert)[0], 401)
+        status, _, raw = self.call('GET', '/api/access', headers=dict(account, **cert))
+        self.assertEqual((json.loads(raw)['user'], json.loads(raw)['can']), ('a@b.it', 'write'))
+        self.assertEqual(self.call('GET', '/api/favourites', headers=dict(account, **cert))[0], 200)
+
+
+class SwitchTest(Case):
+    """The Access tab changes the mode, and refuses what would shut out the one changing it."""
+
+    def setUp(self):
+        Case.setUp(self)
+        self.serve()
+
+    def save(self, body, headers=None):
+        status, _, raw = self.call('POST', '/api/access/settings', body, headers=headers)
+        return status, json.loads(raw)
+
+    def test_from_the_proxys_to_this_pc_only_and_back_to_a_certificate(self):
+        self.assertIn('proxy', self.save({'mode': 'none'}, {'X-Forwarded-For': '1.2.3.4'})[1]['error'])
+        self.assertEqual(self.save({'mode': 'none'})[1]['mode'], 'none')
+        self.assertIn('authority first', self.save({'mode': 'cert'})[1]['error'])
+        status, raw = self.call('POST', '/api/access/ca', {'make': True})[::2]
+        self.assertEqual(json.loads(raw)['ca'], 'own')
+        self.assertIn('no client certificate', self.save({'mode': 'cert'})[1]['error'])
+        me = {'X-Client-Subject': 'CN=Claudia,O=parity-deriva'}
+        self.assertIn('leaves out', self.save({'mode': 'cert', 'allow': [{'who': 'cert:Other'}]}, me)[1]['error'])
+        status, shown = self.save({'mode': 'cert'}, me)
+        self.assertEqual((shown['mode'], shown['certificate'], shown['user'], shown['can']),
+                         ('cert', 'Claudia', 'Claudia', 'write'))
+        # the authority in use stays
+        self.assertIn('stop working', json.loads(self.call('POST', '/api/access/ca', {'make': True}, headers=me)[2])['error'])
+        # the first certificate named: the one issuing it goes on the list too
+        issued = json.loads(self.call('POST', '/api/access/cert', {'name': 'Anna', 'can': 'read'}, headers=me)[2])
+        self.assertTrue(issued['p12'] and issued['password'])
+        self.assertEqual(issued['settings']['allow'], [{'who': 'cert:Anna', 'can': 'read'}, {'who': 'cert:Claudia', 'can': 'write'}])
+        self.assertEqual(self.call('GET', '/api/favourites', headers=me)[0], 200)
+
+    def test_to_an_account_only_signed_in_with_one_that_writes(self):
+        self.assertIn('provider first', self.save({'mode': 'oauth', 'allow': ['a@b.it']})[1]['error'])
+        body = {'mode': 'oauth', 'allow': ['a@b.it'], 'public_url': 'https://parity.example.com',
+                'providers': {'google': {'id': 'g', 'secret': 's'}, 'github': {'id': ''}}}
+        self.assertIn('sign in first', self.save(body)[1]['error'])
+        # the sign-in to try works before the switch, the providers kept already
+        self.save({'providers': body['providers'], 'public_url': body['public_url']})
+        self.assertEqual(access.mode(self.setup), None)
+        status, headers, _ = self.call('GET', '/auth/start/google?next=%2Fsettings')
+        self.assertTrue(headers['location'].startswith('https://accounts.google.com/'))
+        cookie = {'Cookie': 'pd_session=' + access.sign(access.cookieKey(self.setup), {'ids': ['a@b.it'], 'until': time.time() + 60})}
+        self.assertEqual(self.save(body, cookie)[1]['mode'], 'oauth')
+        self.assertEqual(self.call('GET', '/api/favourites')[0], 401)
+        self.assertEqual(self.call('GET', '/api/favourites', headers=cookie)[0], 200)
+        # and to both: the certificate as well
+        access.makeCA(self.setup)
+        self.assertIn('no client certificate', self.save({'mode': 'both'}, cookie)[1]['error'])
+        both = dict(cookie, **{'X-Client-Subject': 'CN=Claudia'})
+        self.assertEqual(self.save({'mode': 'both'}, both)[1]['mode'], 'both')
+        self.assertEqual(self.call('GET', '/api/favourites', headers=cookie)[0], 403)
 
 
 if __name__ == '__main__':

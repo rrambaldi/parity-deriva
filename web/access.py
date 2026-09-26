@@ -1,17 +1,28 @@
 """
-Who may open the pages: a client certificate, a Google, Microsoft or GitHub
-account on a list, or nobody but this PC - and the first start's setup that
-chooses. The MCP endpoint is not in here: it has its own door (web/oauth.py),
-and the servers talk to each other through it with their tokens.
+Who may open the pages and what they may do there: a client certificate, a
+Google, Microsoft or GitHub account on a list, both at once, or nobody but this
+PC - and the first start's setup that chooses. The MCP endpoint is not in
+here: it has its own door (web/oauth.py), and the servers talk to each other
+through it with their tokens.
 
 DATA_DIR/server.json keeps it under "auth" (web/servers.py keeps the rest):
 
-	{"mode": "oauth", "allow": ["someone@x.it", "@digithera.it", "github:rrambaldi"],
+	{"mode": "oauth",
+	 "allow": [{"who": "someone@x.it", "can": "write"}, {"who": "@digithera.it", "can": "read"},
+			   {"who": "github:rrambaldi", "can": "write"}, {"who": "cert:Mario Rossi", "can": "read"}],
 	 "providers": {"google": {"id": "..."}, "microsoft": {"id": "...", "tenant": "common"},
 				   "github": {"id": "..."}}}
-	{"mode": "cert", "ca": "own"}   the proxy checks the certificate; "own" when
-									DATA_DIR/ca holds the authority's key too
-	{"mode": "none"}                this PC only: a request through a proxy is refused
+
+	cert   a certificate of the authority in DATA_DIR/ca, which the proxy checks
+	oauth  an account on the list
+	both   a certificate and an account on the list: the account says who, the
+		   certificate is a second door in case the first has a hole
+	none   this PC only: a request through a proxy is refused
+
+"can" is write - may change things - or read: sees everything, changes nothing
+(every POST refused but the few that only read, READS). An exact entry wins
+over an @domain one. A certificate is in with write while the list names no
+"cert:" at all; once it names one, only the listed certificates are.
 
 The secrets - the providers' client secrets, the cookie's key - are in
 DATA_DIR/.env, 0600, with what the setup writes there for etc/settings.py (the
@@ -23,13 +34,13 @@ No "auth" at all is how it always was: a proxy in front, nginx with its client
 certificate, and nothing checked here. Unless PARITY_DERIVA_WIZARD=1, which the
 Docker image sets: then every page is the setup's until it is done, and the
 setup asks for a code printed in the log, so that whoever finds the port first
-is not the one who sets the server up.
+is not the one who sets the server up. The Access tab changes the mode later,
+and refuses a change that would shut out the one making it (locked()).
 
-In cert mode the proxy verifies the certificate and says whose it is in
-X-Client-Subject: Caddy as docker/Caddyfile.template has it, nginx with
-`ssl_verify_client optional;` and `proxy_set_header X-Client-Subject
-$ssl_client_s_dn;`. A page without it is refused; the MCP routes are open, as
-the assistants have no certificate.
+The proxy verifies the certificate and says whose it is in X-Client-Subject:
+Caddy as docker/Caddyfile.template has it, nginx with `ssl_verify_client
+optional;` and `proxy_set_header X-Client-Subject $ssl_client_s_dn;`. The MCP
+routes are open, as the assistants have no certificate.
 """
 
 import base64
@@ -37,6 +48,7 @@ import glob
 import hashlib
 import hmac
 import http.cookies
+import io
 import json
 import logging
 import os
@@ -57,7 +69,8 @@ from parity_deriva.data import market, sources
 from parity_deriva.etc import settings
 from parity_deriva.web import mcp, servers
 
-MODES = ('cert', 'oauth', 'none')
+MODES = ('cert', 'oauth', 'both', 'none')
+CAN = ('write', 'read')
 PROVIDERS = {
 	'google': {'authorize': 'https://accounts.google.com/o/oauth2/v2/auth',
 			   'token': 'https://oauth2.googleapis.com/token',
@@ -79,6 +92,8 @@ STATE_TTL = 600
 #: always open, whatever the mode: the assistants' door, the pages' files, the sign-in
 PUBLIC = ('/mcp', '/login', '/logout', '/api/access')
 PUBLIC_UNDER = ('/oauth/', '/.well-known/', '/static/', '/auth/')
+#: the POSTs a read-only user may make: they read, they change nothing
+READS = ('/api/market/compare', '/api/market/impact')
 #: the client_auth block of docker/Caddyfile.template in cert mode; /parity is
 #: where docker-compose.yml mounts DATA_DIR in the caddy container
 CLIENT_AUTH = '\t\tclient_auth {\n\t\t\tmode verify_if_given\n\t\t\ttrust_pool file /parity/ca/ca.crt\n\t\t}'
@@ -167,10 +182,16 @@ def cookieKey(setup):
 
 # ------------------------------------------------------------------ config
 
-def config(setup):
-	"""server.json's "auth", or None when there is none (or none that makes sense)."""
+def stored(setup):
+	"""server.json's "auth" as it is, a mode or not: {} for none."""
 	found = servers.read(setup).get('auth')
-	return found if isinstance(found, dict) and found.get('mode') in MODES else None
+	return dict(found) if isinstance(found, dict) else {}
+
+
+def config(setup):
+	"""server.json's "auth", or None when it has no mode (an authority made before one was chosen)."""
+	found = stored(setup)
+	return found if found.get('mode') in MODES else None
 
 
 def wizard():
@@ -178,7 +199,7 @@ def wizard():
 
 
 def mode(setup):
-	"""cert, oauth, none; 'setup' until the Docker image's setup is done; None: nothing checked here."""
+	"""cert, oauth, both, none; 'setup' until the Docker image's setup is done; None: nothing checked here."""
 	# the setup's answers are written but this process has the old environment:
 	# setup still, until the one Docker starts again answers
 	if _setup['done']:
@@ -225,18 +246,41 @@ def cookies(handler):
 	return dict((k, v.value) for k, v in jar.items())
 
 
-def allowed(identities, allow):
+def entries(allow):
+	"""The list as [{'who', 'can'}], lower case to match; a plain string may write."""
+	out = []
+	for row in allow or ():
+		row = {'who': row} if isinstance(row, str) else row
+		if isinstance(row, dict) and str(row.get('who') or '').strip():
+			out.append({'who': ' '.join(str(row['who']).split()).lower(),
+						'can': 'read' if row.get('can') == 'read' else 'write'})
+	return out
+
+
+def match(identities, allow):
 	"""
-	The first of an account's identities the list lets in, or None. An entry is
-	an address, '@domain' for every address of it, or 'github:<login>'.
+	(identity, can) for the first of an account's identities the list lets in,
+	an exact entry before an @domain one; None when it lets in none of them.
 	"""
-	rules = [str(a).strip().lower() for a in allow or () if str(a).strip()]
-	for who in identities:
-		who = who.lower()
-		for rule in rules:
-			if who == rule or (rule.startswith('@') and not who.startswith('github:') and who.endswith(rule)):
-				return who
+	rows = entries(allow)
+	ids = [str(i).lower() for i in identities]
+	for who in ids:
+		for row in rows:
+			if row['who'] == who:
+				return who, row['can']
+	for who in ids:
+		if who.startswith(('github:', 'cert:')) or '@' not in who:
+			continue
+		for row in rows:
+			if row['who'].startswith('@') and who.endswith(row['who']):
+				return who, row['can']
 	return None
+
+
+def allowed(identities, allow):
+	"""The identity the list lets in, or None."""
+	found = match(identities, allow)
+	return found[0] if found else None
 
 
 def subjectName(subject):
@@ -244,19 +288,47 @@ def subjectName(subject):
 	return found.group(1).strip() if found else (subject or '').strip()
 
 
-def user(handler):
-	"""Who this request is: the account signed in, the certificate's name; None for nobody known."""
+def certificate(handler):
+	"""The name on this request's client certificate, as the proxy says it; None without one."""
+	return subjectName(handler.headers.get('X-Client-Subject')) or None
+
+
+def certCan(name, allow):
+	"""What a certificate may do: write while the list names no certificate, else its entry's; None: out."""
+	rows = [r for r in entries(allow) if r['who'].startswith('cert:')]
+	if not rows:
+		return 'write'
+	found = match(['cert:' + name], rows)
+	return found[1] if found else None
+
+
+def signed(handler, allow):
+	"""(account, can) of the account this browser signed in with, if the list lets it in."""
+	payload = unsign(cookieKey(handler.service.setup), cookies(handler).get(COOKIE))
+	return match(payload.get('ids') or [], allow) if payload else None
+
+
+def who(handler):
+	"""(name, can) of whoever this request is in the mode there is; None for nobody the list lets in."""
 	setup = handler.service.setup
 	current = mode(setup)
-	if current == 'cert':
-		return subjectName(handler.headers.get('X-Client-Subject')) or None
-	if current != 'oauth':
-		return None
-	payload = unsign(cookieKey(setup), cookies(handler).get(COOKIE))
-	if not payload:
-		return None
-	# the list read again: somebody taken off it is out at the next click
-	return allowed(payload.get('ids') or [], (config(setup) or {}).get('allow'))
+	allow = (config(setup) or {}).get('allow')
+	if current in ('cert', 'both'):
+		name = certificate(handler)
+		if not name:
+			return None
+		if current == 'cert':
+			can = certCan(name, allow)
+			return (name, can) if can else None
+	if current in ('oauth', 'both'):
+		# the list read again: somebody taken off it is out at the next click
+		return signed(handler, allow)
+	return None
+
+
+def user(handler):
+	found = who(handler)
+	return found[0] if found else None
 
 
 def setupDone(handler):
@@ -302,6 +374,24 @@ def refuse(handler, method, route, status, message, page=None):
 	return mcp.reply(handler, status, {'error': message})
 
 
+def reading(handler, route):
+	"""A POST that only reads: a saved run read again, a sweep's size, the market data compared."""
+	if route in READS:
+		return True
+	if route not in ('/api/backtest', '/api/sweep'):
+		return False
+	raw = mcp.body(handler)
+	# put back for the route that reads the body after us. ponytail: fine while
+	# the handler speaks HTTP/1.0, one request a connection; with keep-alive the
+	# next request would be read from this copy
+	handler.rfile = io.BytesIO(raw)
+	try:
+		body = json.loads(raw or b'{}')
+	except ValueError:
+		return False
+	return isinstance(body, dict) and bool(body.get('cachedOnly' if route == '/api/backtest' else 'dry'))
+
+
 def gate(handler, method, route, query):
 	"""Answer a request this server does not let through; True when answered."""
 	current = mode(handler.service.setup)
@@ -317,13 +407,16 @@ def gate(handler, method, route, query):
 						  "this server lets in its own PC only, and this request came through a proxy",
 						  'login?error=proxy')
 		return False
-	if current == 'cert':
-		if (handler.headers.get('X-Client-Subject') or '').strip():
-			return False
+	if current in ('cert', 'both') and not certificate(handler):
 		return refuse(handler, method, route, 403, "this server wants a client certificate", 'login?error=certificate')
-	if user(handler):
-		return False
-	return refuse(handler, method, route, 401, "sign in first", 'login')
+	found = who(handler)
+	if not found:
+		if current == 'cert':
+			return refuse(handler, method, route, 403, "this certificate is not on the list", 'login?error=not-allowed')
+		return refuse(handler, method, route, 401, "sign in first", 'login')
+	if found[1] == 'read' and method == 'POST' and not reading(handler, route):
+		return refuse(handler, method, route, 403, "read only: %s may look, not change" % found[0])
+	return False
 
 
 # ---------------------------------------------------------------- sign-in
@@ -335,8 +428,9 @@ def redirectUri(handler, name):
 def start(handler, name, query):
 	"""Off to the provider, with a state to know the way back by, and PKCE."""
 	setup = handler.service.setup
-	kept = config(setup) or {}
-	if mode(setup) != 'oauth' or name not in providers(kept, setup):
+	kept = stored(setup)
+	# any mode but the setup: the Access tab signs in to try before it switches to an account
+	if mode(setup) == 'setup' or name not in providers(kept, setup):
 		return mcp.reply(handler, 302, b'', headers=[('Location', base(handler) + '/login?error=failed')])
 	back = (query.get('next') or ['/'])[0]
 	# a path of this server's only: never //elsewhere
@@ -380,13 +474,13 @@ def identities(name, token):
 def callback(handler, name, query):
 	"""Back from the provider: the code for a token, the token for who it is, the list for whether in."""
 	setup = handler.service.setup
-	kept = config(setup) or {}
+	kept = stored(setup)
 	failed = [('Location', base(handler) + '/login?error=failed')]
 	with _lock:
 		pending = _pending.pop((query.get('state') or [''])[0], None)
 	code = (query.get('code') or [''])[0]
 	if not pending or pending['provider'] != name or pending['until'] < time.time() or not code \
-			or mode(setup) != 'oauth' or name not in providers(kept, setup):
+			or mode(setup) == 'setup' or name not in providers(kept, setup):
 		return mcp.reply(handler, 302, b'', headers=failed)
 	tenant = kept['providers'][name].get('tenant') or 'common'
 	url = PROVIDERS[name]['token']
@@ -454,9 +548,22 @@ def keepCA(pem, setup):
 		handle.write(pem + '\n')
 
 
+def certName(text):
+	"""A name as a certificate carries it: letters, digits, space . @ - and no more, 60 at most."""
+	return ' '.join(re.sub(r'[^\w .@-]', '', str(text or '')).split())[:60]
+
+
+def authorityHeld(setup):
+	"""own: DATA_DIR/ca has the key too; external: only the certificate; None: no authority."""
+	where = caDir(setup)
+	if os.path.exists(os.path.join(where, 'ca.key')):
+		return 'own'
+	return 'external' if os.path.exists(os.path.join(where, 'ca.crt')) else None
+
+
 def issue(name, setup):
 	"""A client certificate for a person, signed here: (the .p12's bytes, its password)."""
-	name = ' '.join(re.sub(r'[^\w .@-]', '', str(name or '')).split())[:60]
+	name = certName(name)
 	where = caDir(setup)
 	if not name:
 		raise AccessError("whose certificate: a name")
@@ -492,8 +599,8 @@ def issue(name, setup):
 def caddyfile(setup):
 	"""
 	DATA_DIR/Caddyfile for the caddy container, which reloads it when it
-	changes: the domain of PARITY_DERIVA_DOMAIN, and in cert mode the client
-	certificate asked for. Nothing without the domain.
+	changes: the domain of PARITY_DERIVA_DOMAIN, and the client certificate
+	asked for (not required) once there is an authority. Nothing without the domain.
 	"""
 	domain = os.environ.get('PARITY_DERIVA_DOMAIN', '').strip()
 	if not domain:
@@ -503,7 +610,9 @@ def caddyfile(setup):
 		return None
 	with open(os.path.join(HOME, 'docker', 'Caddyfile.template')) as handle:
 		text = handle.read()
-	certs = (config(setup) or {}).get('mode') == 'cert' and os.path.exists(os.path.join(caDir(setup), 'ca.crt'))
+	# whenever there is an authority, whatever the mode: a certificate is seen,
+	# and so tried, before a mode that wants one is chosen
+	certs = authorityHeld(setup) is not None
 	text = text.replace('@@DOMAIN@@', domain).replace('@@CLIENT_AUTH@@', CLIENT_AUTH if certs else '')
 	path = os.path.join(dataDir(setup), 'Caddyfile')
 	try:
@@ -565,16 +674,33 @@ def checkArchive(asked):
 	return {'ok': True, 'instruments': len(found.get('instruments') or [])}
 
 
-def cleanAllow(allow):
+def cleanAllow(allow, empty=False):
+	"""The list as server.json keeps it, each entry checked: [{'who', 'can'}], sorted."""
 	if not isinstance(allow, list):
 		raise AccessError("who may enter: a list")
-	out = sorted(set(' '.join(str(a).split()).lower() for a in allow if str(a).strip()))
-	for rule in out:
-		if not (rule.startswith('github:') and len(rule) > 7) and not re.fullmatch(r'[^@\s]*@[^@\s]+\.[^@\s]+', rule):
-			raise AccessError("%r: an address, @domain or github:<login>" % rule)
-	if not out:
-		raise AccessError("who may enter: at least one address, @domain or github:<login>")
-	return out
+	out = {}
+	for row in allow:
+		row = {'who': row} if isinstance(row, str) else row
+		if not isinstance(row, dict):
+			raise AccessError("who may enter: {who, can} each")
+		name = ' '.join(str(row.get('who') or '').split())
+		if not name:
+			continue
+		if name.lower().startswith('cert:'):
+			name = 'cert:' + certName(name[5:])
+			if name == 'cert:':
+				raise AccessError("cert:<the name on the certificate>")
+		else:
+			name = name.lower()
+			if not (name.startswith('github:') and len(name) > 7) and not re.fullmatch(r'[^@\s]*@[^@\s]+\.[^@\s]+', name):
+				raise AccessError("%r: an address, @domain, github:<login> or cert:<name>" % name)
+		level = row.get('can') or 'write'
+		if level not in CAN:
+			raise AccessError("%s: authorizing (write) or read only (read)" % name)
+		out[name.lower()] = {'who': name, 'can': level}
+	if not out and not empty:
+		raise AccessError("who may enter: at least one address, @domain, github:<login> or cert:<name>")
+	return sorted(out.values(), key=lambda r: r['who'].lower())
 
 
 def publicUrl(text):
@@ -612,8 +738,6 @@ def cleanProviders(asked, kept, setup):
 			env[SECRET % name.upper()] = str(row['secret']).strip()
 		elif not secret(SECRET % name.upper(), setup):
 			raise AccessError("%s: the client secret" % name)
-	if not out:
-		raise AccessError("at least one of google, microsoft, github, with its client id and secret")
 	return out, env
 
 
@@ -631,7 +755,7 @@ def finish(handler, answer):
 	chosen = auth.get('mode')
 	roles = answer.get('roles')
 	if chosen not in MODES:
-		raise AccessError("how one gets in: cert, oauth or none")
+		raise AccessError("how one gets in: cert, oauth, both or none")
 	if not isinstance(roles, list) or not roles or any(r not in servers.ROLES for r in roles):
 		raise AccessError("the roles: one or more of %s" % ', '.join(servers.ROLES))
 	accounts = answer.get('accounts') or 'demo'
@@ -654,12 +778,14 @@ def finish(handler, answer):
 		   'restart': True}
 	if chosen == 'none' and handler.headers.get('X-Forwarded-For'):
 		raise AccessError("no access control is for the PC this runs on, and you came through a proxy")
-	if chosen == 'oauth':
+	if chosen in ('oauth', 'both'):
 		kept['allow'] = cleanAllow(auth.get('allow'))
 		kept['providers'], found = cleanProviders(auth.get('providers') or {}, {}, setup)
+		if not kept['providers']:
+			raise AccessError("at least one of google, microsoft, github, with its client id and secret")
 		env.update(found)
 		env['PARITY_DERIVA_PUBLIC_URL'] = publicUrl(auth.get('public_url'))
-	if chosen == 'cert':
+	if chosen in ('cert', 'both'):
 		# nothing would check the certificate, and every page would be refused
 		if not (os.environ.get('PARITY_DERIVA_DOMAIN') or handler.headers.get('X-Forwarded-For')):
 			raise AccessError("a certificate is checked by the proxy in front, and there is none: set "
@@ -712,50 +838,151 @@ def finish(handler, answer):
 # --------------------------------------------------------- settings page
 
 def view(handler):
-	"""The Access tab's settings: no secret, only whether one is there."""
+	"""The Access tab's settings: no secret, only whether one is there; and what this browser brings."""
 	setup = handler.service.setup
-	kept = config(setup) or {}
+	kept = stored(setup)
 	shown = {}
 	for name, row in (kept.get('providers') or {}).items():
 		shown[name] = dict(row, secret=bool(secret(SECRET % name.upper(), setup)))
-	ca = kept.get('ca') if kept.get('mode') == 'cert' else None
-	return {'mode': kept.get('mode'), 'allow': kept.get('allow') or [], 'providers': shown,
+	found = who(handler)
+	me = signed(handler, kept.get('allow'))
+	current = mode(setup)
+	return {'mode': current if current in MODES else None, 'allow': cleanAllow(kept.get('allow') or [], empty=True),
+			'providers': shown,
 			'public_url': secret('PARITY_DERIVA_PUBLIC_URL', setup) or getattr(setup, 'PUBLIC_URL', None) or '',
-			'callbacks': dict((n, redirectUri(handler, n)) for n in PROVIDERS), 'ca': ca, 'user': user(handler)}
+			'callbacks': dict((n, redirectUri(handler, n)) for n in PROVIDERS), 'ca': authorityHeld(setup),
+			'user': found[0] if found else None, 'can': can(handler, found),
+			'signed': me[0] if me else None, 'certificate': certificate(handler),
+			'proxied': bool(handler.headers.get('X-Forwarded-For')),
+			'domain': os.environ.get('PARITY_DERIVA_DOMAIN') or None}
+
+
+def can(handler, found):
+	"""write or read for whoever this is; write with nothing checked here (none, or the proxy's)."""
+	if found:
+		return found[1]
+	return 'write' if mode(handler.service.setup) in ('none', None) else None
+
+
+def locked(handler, new, env, switching=True):
+	"""
+	Refuse a setting that would shut out the one saving it, or leave them read
+	only, saying why: what the mode needs must be there, and this very request
+	must already pass it.
+	"""
+	setup = handler.service.setup
+	target, allow = new.get('mode'), new.get('allow') or []
+	if target == 'none':
+		if handler.headers.get('X-Forwarded-For'):
+			raise AccessError("nothing checked lets in the PC this runs on only, and you came through a proxy")
+		return
+	if target in ('cert', 'both'):
+		if not authorityHeld(setup):
+			raise AccessError("a certificate needs an authority first: make one here or load yours")
+		name = certificate(handler)
+		if not name:
+			raise AccessError("this browser brought no client certificate: import yours, reload the page, then change")
+		if target == 'cert':
+			held = certCan(name, allow)
+			if held != 'write':
+				raise AccessError("the list %s your certificate (%s)" % (
+					'lets only look' if held else 'leaves out', name))
+			return
+	pending = lambda key: env[key] if key in env else secret(key, setup)
+	if not [n for n, r in (new.get('providers') or {}).items() if r.get('id') and pending(SECRET % n.upper())]:
+		raise AccessError("an account needs a provider first: its client id and secret")
+	# on a switch only: a server on an account already signs in at the address it has
+	if switching and not (pending('PARITY_DERIVA_PUBLIC_URL') or getattr(setup, 'PUBLIC_URL', None)):
+		raise AccessError("an account needs this server's public address: the providers send back there")
+	me = signed(handler, allow)
+	if not me:
+		raise AccessError("sign in first with a provider (the links under Accounts), with an account the list lets in")
+	if me[1] != 'write':
+		raise AccessError("the list lets you (%s) only look: keep yourself authorizing" % me[0])
 
 
 def change(handler, asked):
-	"""The Access tab's save: who may enter, the providers, the public address. Never the mode."""
+	"""The Access tab's save: the mode, who may enter and what they may do, the providers, the public address."""
 	setup = handler.service.setup
-	kept = dict(config(setup) or {})
 	if not isinstance(asked, dict):
 		raise AccessError("the changes, as JSON")
-	if kept.get('mode') != 'oauth':
-		raise AccessError("only a server one signs in to with an account has a list and providers")
+	kept = stored(setup)
+	new = dict(kept)
+	if 'mode' in asked:
+		if asked['mode'] not in MODES:
+			raise AccessError("how one gets in: cert, oauth, both or none")
+		new['mode'] = asked['mode']
 	env = {}
 	if 'allow' in asked:
-		kept['allow'] = cleanAllow(asked['allow'])
-		# the one saving it would be out at the next click
-		me = unsign(cookieKey(setup), cookies(handler).get(COOKIE)) or {}
-		if not allowed(me.get('ids') or [], kept['allow']):
-			raise AccessError("this list leaves you out: keep your own address on it")
+		new['allow'] = cleanAllow(asked['allow'], empty=True)
 	if 'providers' in asked:
-		kept['providers'], found = cleanProviders(asked['providers'], kept.get('providers'), setup)
+		new['providers'], found = cleanProviders(asked['providers'], kept.get('providers'), setup)
 		env.update(found)
 	if 'public_url' in asked:
 		env['PARITY_DERIVA_PUBLIC_URL'] = publicUrl(asked['public_url'])
+	# no mode yet - the proxy's, as always - checks nothing: the providers kept
+	# to sign in with and try, before the switch to them
+	if new.get('mode') in MODES:
+		locked(handler, new, env, switching=new['mode'] != kept.get('mode'))
 	if env:
 		envKeep(env, setup)
-	servers.keep('auth', kept, setup)
+	servers.keep('auth', new, setup)
+	if new.get('mode') != kept.get('mode'):
+		logger.warning("access: %s -> %s, by %s", kept.get('mode') or 'the proxy', new['mode'],
+					   certificate(handler) or (signed(handler, new.get('allow')) or ['this PC'])[0])
+	caddyfile(setup)
 	return view(handler)
+
+
+def authority(handler, asked):
+	"""The Access tab's authority: one made here, or somebody else's certificate. Not under a mode that uses it."""
+	setup = handler.service.setup
+	kept = stored(setup)
+	if kept.get('mode') in ('cert', 'both'):
+		raise AccessError("the certificates in use would stop working: change how people get in first")
+	if isinstance(asked, dict) and asked.get('pem'):
+		keepCA(asked['pem'], setup)
+		kept['ca'] = 'external'
+	elif isinstance(asked, dict) and asked.get('make'):
+		makeCA(setup)
+		kept['ca'] = 'own'
+	else:
+		raise AccessError("make: true, or pem: the authority's certificate")
+	servers.keep('auth', kept, setup)
+	caddyfile(setup)
+	return view(handler)
+
+
+def newCertificate(handler, asked):
+	"""A certificate issued from the Access tab, and its name on the list with what it may do."""
+	setup = handler.service.setup
+	asked = asked if isinstance(asked, dict) else {}
+	name, allowed_ = certName(asked.get('name')), asked.get('can') or 'write'
+	if allowed_ not in CAN:
+		raise AccessError("authorizing (write) or read only (read)")
+	blob, password = issue(name, setup)
+	kept = stored(setup)
+	rows = list(kept.get('allow') or [])
+	mine = certificate(handler)
+	# the first certificate named would shut out every other one, the one of
+	# whoever is issuing it too: that one goes on the list first
+	if kept.get('mode') == 'cert' and mine and not any(r['who'].startswith('cert:') for r in entries(rows)):
+		rows.append({'who': 'cert:' + certName(mine), 'can': 'write'})
+	rows.append({'who': 'cert:' + name, 'can': allowed_})
+	kept['allow'] = cleanAllow(rows, empty=True)
+	servers.keep('auth', kept, setup)
+	logger.warning("client certificate issued for %s (%s) by %s", name, allowed_, user(handler) or 'this PC')
+	return {'p12': base64.b64encode(blob).decode(), 'password': password, 'settings': view(handler)}
 
 
 def profile(setup):
 	"""This server as a profile another one can start from: no secret, no authority."""
 	kept = config(setup) or {}
 	auth = {'mode': kept.get('mode')}
-	if kept.get('mode') == 'oauth':
-		auth.update(allow=kept.get('allow') or [], providers=dict(
+	if kept.get('allow'):
+		auth['allow'] = cleanAllow(kept['allow'], empty=True)
+	if kept.get('mode') in ('oauth', 'both'):
+		auth.update(providers=dict(
 			(n, dict((k, v) for k, v in r.items() if k in ('id', 'tenant'))) for n, r in (kept.get('providers') or {}).items()),
 			public_url=secret('PARITY_DERIVA_PUBLIC_URL', setup))
 	held = servers.roles(setup)
@@ -790,10 +1017,11 @@ def route(handler, method, path, query):
 			handler.sendFile('login.html')
 			return True
 		if method == 'GET' and path == '/api/access':
-			kept = config(setup)
+			found = who(handler)
 			return mcp.reply(handler, 200, {'mode': current if current in MODES else None,
-											'setup': current == 'setup', 'user': user(handler),
-											'providers': providers(kept, setup) if current == 'oauth' else []})
+											'setup': current == 'setup', 'user': found[0] if found else None,
+											'can': can(handler, found),
+											'providers': [] if current == 'setup' else providers(stored(setup), setup)})
 		if method == 'GET' and path.startswith('/auth/start/'):
 			return start(handler, path[len('/auth/start/'):], query)
 		if method == 'GET' and path.startswith('/auth/callback/'):
@@ -816,11 +1044,9 @@ def route(handler, method, path, query):
 			if path == '/api/access/settings':
 				return mcp.reply(handler, 200, change(handler, asked(handler)))
 			if path == '/api/access/cert':
-				if (config(setup) or {}).get('mode') != 'cert':
-					raise AccessError("certificates are for a server one enters with a certificate")
-				blob, password = issue(asked(handler).get('name'), setup)
-				logger.warning("client certificate issued by %s", user(handler) or 'somebody')
-				return mcp.reply(handler, 200, {'p12': base64.b64encode(blob).decode(), 'password': password})
+				return mcp.reply(handler, 200, newCertificate(handler, asked(handler)))
+			if path == '/api/access/ca':
+				return mcp.reply(handler, 200, authority(handler, asked(handler)))
 	except (AccessError, ValueError) as exc:
 		return mcp.reply(handler, 400, {'error': str(exc)})
 	return False

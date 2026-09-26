@@ -72,8 +72,9 @@ function buildProviders() {
 // what is on show follows the answers: each choice opens its own questions
 function show() {
   const m = mode();
-  $('mode-cert').hidden = m !== 'cert';
-  $('mode-oauth').hidden = m !== 'oauth';
+  // both: the certificate's questions and the accounts' ones
+  $('mode-cert').hidden = m !== 'cert' && m !== 'both';
+  $('mode-oauth').hidden = m !== 'oauth' && m !== 'both';
   $('mode-none').hidden = m !== 'none';
   const make = checked('ca')[0] !== 'pem';
   $('ca-make').hidden = !make;
@@ -109,7 +110,8 @@ function apply(profile) {
   $('name').value = profile.name || '';
   setRadio('mode', auth.mode);
   if (auth.mode === 'none' && state.proxied) setRadio('mode', '');
-  $('allow').value = (auth.allow || []).join('\n');
+  // a list entry is an address or {who, can}: here everyone on it may change things
+  $('allow').value = (auth.allow || []).map((a) => (typeof a === 'string' ? a : a.who)).join('\n');
   if (auth.public_url) $('public-url').value = auth.public_url;
   for (const [key] of PROVIDERS) {
     $(`use-${key}`).checked = !!providers[key];
@@ -134,7 +136,7 @@ function answer() {
   const out = { name: $('name').value.trim(), auth: { mode: m }, roles: roles(),
     accounts: checked('accounts')[0] || 'demo',
     market: { candles: $('candles').value, calendar: $('calendar').value } };
-  if (m === 'cert') {
+  if (m === 'cert' || m === 'both') {
     if (checked('ca')[0] === 'pem') {
       const pem = $('ca-pem').value.trim();
       if (!pem.includes('BEGIN CERTIFICATE')) {
@@ -147,7 +149,7 @@ function answer() {
       out.ca = { make: true, name };
     }
   }
-  if (m === 'oauth') {
+  if (m === 'oauth' || m === 'both') {
     const providers = {};
     for (const [key, label] of PROVIDERS) {
       if (!$(`use-${key}`).checked) continue;
@@ -177,7 +179,7 @@ function answer() {
 // the answers without a secret, to set up the next server like this one
 function profileOf(body) {
   const auth = { mode: body.auth.mode };
-  if (body.auth.mode === 'oauth') {
+  if (body.auth.mode === 'oauth' || body.auth.mode === 'both') {
     auth.allow = body.auth.allow;
     auth.public_url = body.auth.public_url;
     auth.providers = Object.fromEntries(Object.entries(body.auth.providers).map(
@@ -246,7 +248,7 @@ function waitRestart() {
     try {
       const access = await call('api/access');
       if (access.setup === false) {
-        const oauth = access.mode === 'oauth';
+        const oauth = access.mode === 'oauth' || access.mode === 'both';
         say('restart', 'Ready. ');
         $('restart').appendChild(link(oauth ? 'login' : './', oauth ? 'sign in' : 'open the app'));
         return;

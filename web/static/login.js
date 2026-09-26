@@ -34,7 +34,7 @@ function appLink(text) {
 
 fetch('api/access').then((reply) => reply.json()).then((access) => {
   if (['certificate', 'proxy'].includes(params.get('error'))) return;
-  if (access.mode !== 'oauth') {
+  if (access.mode !== 'oauth' && access.mode !== 'both') {
     $('login-note').append('This server does not sign people in: there is nothing to sign in to. ', appLink('open the app'));
     return;
   }

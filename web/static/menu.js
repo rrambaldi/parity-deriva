@@ -290,7 +290,13 @@ function marginText(m) {
     name.style.cssText = 'overflow: hidden; text-overflow: ellipsis; min-width: 0';
     name.textContent = access.user;
     who.append(name);
-    if (access.mode === 'oauth') {
+    if (access.can === 'read') {
+      const only = document.createElement('span');
+      only.textContent = '(read only)';
+      only.style.flexShrink = '0';
+      who.append(only);
+    }
+    if (access.mode === 'oauth' || access.mode === 'both') {
       const out = document.createElement('a');
       out.href = 'logout';
       out.textContent = 'log out';
