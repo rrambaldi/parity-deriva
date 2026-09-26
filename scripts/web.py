@@ -85,6 +85,9 @@ def main(argv=None):
         # processes with it, and the database says they should be trading
         for session in server.RequestHandlerClass.service.live.resume():
             logger.info("live session %s resumed" % session)
+    # the market data's sources on their timers (data/sources.py): nothing
+    # on a server that only reads it, or whose sources are all manual
+    server.RequestHandlerClass.service.sources.start()
 
     def restart(signum, frame):
         # the socket is closed first so the new process can bind the port;

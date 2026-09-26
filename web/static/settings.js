@@ -50,24 +50,102 @@ async function loadStores() {
 
 // Where the stores and the calendar are, and whether this server writes them
 // (data/market.py). A server that only reads has nothing to import: the
-// writer does that, and the buttons for it go.
+// writer does that, and the buttons for it go. The writer's sources are
+// data/sources.py; the last run of each is shown under them.
+let marketRunning = false;
 function showMarket(state) {
   $('market-dir').value = state.dir;
   $('market-writer').checked = state.writer;
   $('market-state').textContent = `candles and calendar in ${state.dir} \u00b7 `
     + (state.writer ? 'this server writes them'
       : 'read only: imports and pushes go to the server that writes them');
-  for (const id of ['data-actions', 'calendar-how', 'calendar-actions']) $(id).hidden = !state.writer;
+  for (const id of ['data-actions', 'calendar-how', 'calendar-actions', 'market-sources', 'market-run']) {
+    $(id).hidden = !state.writer;
+  }
+  const provider = $('market-provider');
+  if (!provider.options.length) {
+    for (const name of state.providers) provider.add(new Option(name, name));
+  }
+  provider.value = state.provider || 'oanda';
+  for (const kind of ['candles', 'calendar']) {
+    $(`market-${kind}`).value = state[kind].source;
+    $(`market-${kind}-every`).value = state[kind].every;
+  }
+  $('market-upstream').value = state.upstream.url;
+  $('market-token').value = '';
+  $('market-token').placeholder = state.upstream.token ? 'kept: type a new one to change it' : '';
+  marketFields();
+  const runs = Object.entries(state.runs).filter(([, run]) => run.at);
+  $('market-runs').hidden = !runs.length;
+  $('market-runs').textContent = runs.map(([kind, run]) => `${kind} ${new Date(run.at).toISOString().slice(0, 16).replace('T', ' ')} UTC`
+    + ` ${run.running ? 'running' : run.ok ? 'ok' : 'failed'}\n` + run.lines.map((l) => `  ${l}`).join('\n')).join('\n');
+  marketRunning = runs.some(([, run]) => run.running);
+  $('market-mirror-state').textContent = state.mirror
+    ? 'serving: other servers copy this market data with the mirror token, at the connector address below'
+    : 'not serving the market data to other servers';
+  $('market-mirror-token').textContent = state.mirror || '';
+  for (const id of ['market-mirror-token', 'market-mirror-copy', 'market-mirror-off']) $(id).hidden = !state.mirror;
+  $('market-mirror-on').textContent = state.mirror ? 'new mirror token' : 'serve other servers';
+}
+
+// the upstream's two fields when a kind comes from it, the broker when the candles do
+function marketFields() {
+  const sources = [$('market-candles').value, $('market-calendar').value];
+  for (const box of document.querySelectorAll('#market-sources [data-for]')) {
+    box.hidden = !sources.includes(box.dataset.for);
+  }
+}
+$('market-candles').addEventListener('change', marketFields);
+$('market-calendar').addEventListener('change', marketFields);
+
+async function followMarket() {
+  while (marketRunning) {
+    await new Promise((resolve) => { setTimeout(resolve, 2000); });
+    showMarket(await ask('api/market'));
+  }
+  await loadStores();
+  await loadImports();
+  showCalendar();
 }
 
 $('market-save').addEventListener('click', () => dataAction(async () => {
-  showMarket(await post('api/market', JSON.stringify(
-    { dir: $('market-dir').value, writer: $('market-writer').checked })));
+  const changes = { dir: $('market-dir').value, writer: $('market-writer').checked };
+  if (changes.writer) {
+    for (const kind of ['candles', 'calendar']) {
+      changes[kind] = { source: $(`market-${kind}`).value, every: Number($(`market-${kind}-every`).value) };
+    }
+    const sources = [changes.candles.source, changes.calendar.source];
+    if (sources.includes('upstream')) {
+      changes.upstream = { url: $('market-upstream').value, token: $('market-token').value };
+    }
+    if (sources.includes('providers')) changes.provider = $('market-provider').value;
+  }
+  showMarket(await post('api/market', JSON.stringify(changes)));
   dataLog(['market data saved']);
   await loadStores();
   await loadImports();
   showCalendar();
 }));
+
+$('market-run').addEventListener('click', () => dataAction(async () => {
+  const kinds = ['candles', 'calendar'].filter((kind) => $(`market-${kind}`).value !== 'manual');
+  if (!kinds.length) { dataLog(['both are manual: nothing to pull']); return; }
+  let state;
+  for (const kind of kinds) state = await post('api/market/run', JSON.stringify({ kind }));
+  showMarket(state);
+  await followMarket();
+}));
+
+for (const [id, on] of [['market-mirror-on', true], ['market-mirror-off', false]]) {
+  $(id).addEventListener('click', () => dataAction(async () => {
+    if (!on && !await askUser('Stop serving? Every server copying this market data loses its access.',
+      'stop serving', 'close')) return;
+    showMarket(await post('api/market/mirror', JSON.stringify({ on })));
+  }));
+}
+$('market-mirror-copy').addEventListener('click', () => navigator.clipboard.writeText(
+  $('market-mirror-token').textContent).then(() => dataLog(['mirror token copied']),
+  () => dataLog(['copy it by hand: the browser refused'])));
 
 /* --------------------------------------------------------- the calendar */
 
@@ -615,7 +693,8 @@ $('mcp-disconnect').addEventListener('click', async () => {
 });
 
 showMcp().catch((error) => mcpSay(String(error.message || error)));
-ask('api/market').then(showMarket).catch((error) => dataLog([String(error.message || error)]));
+ask('api/market').then((state) => { showMarket(state); if (marketRunning) followMarket(); })
+  .catch((error) => dataLog([String(error.message || error)]));
 showCalendar();
 loadStores().then(loadImports).catch((error) => dataLog([String(error.message || error)]));
 // an import started earlier, from this page or another, is picked up

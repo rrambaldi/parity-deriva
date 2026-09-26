@@ -307,6 +307,24 @@ TOOLS = [
 		 'granularity': {'type': 'string', 'enum': ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D', 'W']},
 		 'ask': {'type': 'array', 'maxItems': 10000, 'items': {'type': 'array'}},
 		 'bid': {'type': 'array', 'maxItems': 10000, 'items': {'type': 'array'}}}}},
+	{'name': 'market_status',
+	 'description': "For another parity server, not for an assistant: the series each store "
+					"keeps, with bars, from and to (epoch ms), and the calendar's events.",
+	 'inputSchema': {'type': 'object', 'properties': {}}},
+	{'name': 'pull_candles',
+	 'description': "For another parity server, not for an assistant: one stored series' bars "
+					"after `after` (epoch ms), up to %d, each side as push_candles takes them; "
+					"`more` says there are others after these." % 10000,
+	 'inputSchema': {'type': 'object', 'required': ['instrument', 'granularity'], 'properties': {
+		 'instrument': {'type': 'string'},
+		 'granularity': {'type': 'string', 'enum': ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D', 'W']},
+		 'after': {'type': 'integer'}, 'limit': {'type': 'integer', 'maximum': 10000}}}},
+	{'name': 'pull_calendar',
+	 'description': "For another parity server, not for an assistant: the calendar's events "
+					"from `since` (YYYY-MM-DD), %d a call from `start`; `next` is the next "
+					"call's start, null at the end." % 5000,
+	 'inputSchema': {'type': 'object', 'properties': {
+		 'since': {'type': 'string'}, 'start': {'type': 'integer'}}}},
 ]
 
 
@@ -481,8 +499,8 @@ def pushCalendar(service, args, client):
 	return {'received': len(rows), 'added': len(after) - len(before), 'events': len(after)}
 
 
-def pushCandles(service, args, client):
-	pusher(service, client)
+def series(args):
+	"""The instrument and granularity a push or a pull names, checked."""
 	from parity_deriva.web.service import importer
 	csv = importer()
 	instrument = csv.instrument_name(str(args.get('instrument') or '').replace('/', '_'))
@@ -492,6 +510,12 @@ def pushCandles(service, args, client):
 	granularity = csv.granularity(str(args.get('granularity') or ''))
 	if granularity not in GRANULARITIES:
 		raise ToolError("granularity: one of %s" % ', '.join(GRANULARITIES))
+	return csv, instrument, granularity
+
+
+def pushCandles(service, args, client):
+	pusher(service, client)
+	csv, instrument, granularity = series(args)
 	sides = []
 	for side in ('ask', 'bid'):
 		rows = args.get(side)
@@ -507,20 +531,91 @@ def pushCandles(service, args, client):
 		frame, unpaired = csv.combine(*sides)
 	except (ValueError, TypeError) as exc:
 		raise ToolError("not saved: %s" % exc)
-	# as an import: under the backtest lock, so no run reads the store halfway
-	# through, and the cached runs dropped
-	if not service._lock.acquire(timeout=240):
-		raise ToolError("a backtest has held the stores for 4 minutes: push again later")
-	try:
-		added, _, _ = csv.merge(market.store(instrument, service.setup),
-								'/' + granularity, frame, keep=True)
-		if added:
-			service._cache.clear()
-			del service._order[:]
-	finally:
-		service._lock.release()
+	added = service.mergeBars(instrument, granularity, frame, keep=True)
 	return {'instrument': instrument, 'granularity': granularity, 'received': len(frame.index),
 			'added': added, 'kept': len(frame.index) - added, 'unpaired': list(unpaired)}
+
+
+def puller(client):
+	"""Another parity server copying the market data: the token, or the mirror one."""
+	if not str(client).startswith(('token: ', 'mirror: ')):
+		raise ToolError("pulling the market data is for a server with the token, not for an assistant")
+
+
+def marketStatus(service, args, client):
+	"""The series each store keeps (not the ones built from them) and the calendar's span."""
+	puller(client)
+	where = calendar.path(service.setup)
+	held = calendar.load(where)
+	return {'instruments': [
+		{'instrument': row['instrument'],
+		 'granularities': [g for g in row['granularities'] if not g.get('derivedFrom')]}
+		for row in service.instruments()],
+		'calendar': {'events': len(held),
+					 'to': held['time'].max().strftime('%Y-%m-%d %H:%M:%S') if len(held) else None,
+					 'changed': int(os.path.getmtime(where) * 1000) if os.path.exists(where) else None}}
+
+
+def pullCandles(service, args, client):
+	"""
+	The bars of one stored series after `after` (epoch ms, the last one the
+	caller holds), `limit` of them at most, each side as push_candles takes
+	them: the answer to a pull is a push the other way.
+	"""
+	puller(client)
+	from parity_deriva.data import store
+	_, instrument, granularity = series(args)
+	path = market.store(instrument, service.setup)
+	key = '/' + granularity
+	try:
+		limit = max(1, min(int(args.get('limit') or PUSH_BARS), PUSH_BARS))
+		after = args.get('after')
+		after = pd.Timestamp(int(after), unit='ms') if after not in (None, '') else None
+	except (TypeError, ValueError):
+		raise ToolError("after: epoch milliseconds; limit: 1 to %d" % PUSH_BARS)
+	if not os.path.exists(path):
+		raise ToolError("no store for %s" % instrument)
+	with pd.HDFStore(path, mode='r') as held:
+		if key not in held:
+			raise ToolError("%s keeps no %s series (%s)" % (instrument, granularity,
+															', '.join(held.keys())))
+		index = pd.DatetimeIndex(held.select_column(key, 'index')).unique().sort_values()
+	todo = index[index > after] if after is not None else index
+	if not len(todo):
+		return {'instrument': instrument, 'granularity': granularity, 'ask': [], 'bid': [], 'more': False}
+	upto = todo[min(limit, len(todo)) - 1]
+	frame = store.load(path, granularity, todo[0], upto)
+	frame = frame[~frame.index.duplicated(keep='last')]
+	stamps = pd.DatetimeIndex(frame.index).as_unit('ms').asi8.tolist()
+	volume = frame['volume'].astype('int64').tolist()
+	def side(name):
+		legs = [frame['%s_%s' % (name, leg)].tolist() for leg in 'ohlc']
+		return [[stamps[i]] + [leg[i] for leg in legs] + [volume[i]] for i in range(len(stamps))]
+	return {'instrument': instrument, 'granularity': granularity, 'ask': side('ask'),
+			'bid': side('bid'), 'more': bool(upto < index[-1])}
+
+
+def pullCalendar(service, args, client):
+	"""
+	The calendar's events from `since` (a day, YYYY-MM-DD; all of them
+	without), PUSH_EVENTS at a time from `start`: `next` is the next call's
+	start, None at the end.
+	"""
+	puller(client)
+	held = calendar.load(calendar.path(service.setup))
+	try:
+		since = pd.Timestamp(str(args['since'])) if args.get('since') else None
+		start = max(0, int(args.get('start') or 0))
+	except (TypeError, ValueError):
+		raise ToolError("since: a day, YYYY-MM-DD; start: the `next` of the call before")
+	if since is not None:
+		held = held[held['time'] >= since]
+	page = held.iloc[start:start + PUSH_EVENTS]
+	events = [dict((column, str(value)) for column, value in row.items())
+			  for row in page.assign(time=page['time'].dt.strftime('%Y-%m-%d %H:%M:%S'))
+			  .to_dict('records')]
+	end = start + len(page)
+	return {'events': events, 'next': end if end < len(held) else None}
 
 
 # the next version is taken and written by one submit at a time
@@ -1075,7 +1170,13 @@ def sandboxed(service, job, timeout=None):
 	return answer
 
 
+#: all a mirror token may do: another parity server copying the market data
+PULLS = ('market_status', 'pull_candles', 'pull_calendar')
+
+
 def call(service, name, args, base, client):
+	if str(client).startswith('mirror: ') and name not in PULLS:
+		raise ToolError("the mirror token only copies the market data: %s" % ', '.join(PULLS))
 	if name == 'get_news':
 		return getNews(service, args, client)
 	if name == 'list_strategies':
@@ -1100,6 +1201,12 @@ def call(service, name, args, base, client):
 		return pushCalendar(service, args, client)
 	if name == 'push_candles':
 		return pushCandles(service, args, client)
+	if name == 'market_status':
+		return marketStatus(service, args, client)
+	if name == 'pull_candles':
+		return pullCandles(service, args, client)
+	if name == 'pull_calendar':
+		return pullCalendar(service, args, client)
 	raise ToolError("no tool %r" % name)
 
 
@@ -1333,8 +1440,9 @@ def route(handler, method, path, query):
 										'error': {'code': -32700, 'message': "not JSON"}})
 		# the OAuth client's own name; with the secret in the header, the only
 		# name there is is the program's User-Agent
-		client = authority.holder(bearer) or 'token: %s' % (
-			handler.headers.get('User-Agent') or 'no user agent')[:60]
+		client = authority.holder(bearer) or '%s: %s' % (
+			'mirror' if authority.mirrorIs(bearer) else 'token',
+			(handler.headers.get('User-Agent') or 'no user agent')[:60])
 		if isinstance(message, list):
 			answers = [a for a in (handle(handler.service, m, base, client) for m in message) if a]
 		else:

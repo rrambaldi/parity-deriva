@@ -47,8 +47,43 @@
     <div id="market-state"></div>
     <div id="market-actions">
       <label>market folder <input type="text" id="market-dir" spellcheck="false"></label>
-      <label><input type="checkbox" id="market-writer"> this server writes it</label>
+      <label id="market-writer-box"><input type="checkbox" id="market-writer"> this server writes it</label>
+    </div>
+    <!-- the writer's sources (data/sources.py): the forexfactory scraper is
+         not one, it is a program of its own that pushes over MCP -->
+    <div id="market-sources" class="market-row">
+      <label>candles from
+        <select id="market-candles">
+          <option value="manual">manual: import, pushes</option>
+          <option value="upstream">another parity</option>
+          <option value="providers">a broker's API</option>
+        </select></label>
+      <label>every (min) <input type="number" id="market-candles-every" min="1" max="10080" value="60"></label>
+      <label>calendar from
+        <select id="market-calendar">
+          <option value="manual">manual: import, pushes</option>
+          <option value="upstream">another parity</option>
+        </select></label>
+      <label>every (min) <input type="number" id="market-calendar-every" min="1" max="10080" value="60"></label>
+      <label data-for="upstream">other parity's MCP address
+        <input type="url" id="market-upstream" spellcheck="false" placeholder="https://host/parity/mcp"></label>
+      <label data-for="upstream">its mirror token
+        <input type="password" id="market-token" autocomplete="off"></label>
+      <label data-for="providers">broker <select id="market-provider"></select></label>
+    </div>
+    <div class="market-row">
       <button type="button" id="market-save" data-icon="yes">save</button>
+      <button type="button" id="market-run" data-icon="rerun">pull now</button>
+    </div>
+    <pre id="market-runs" hidden></pre>
+    <!-- the other side: servers that copy this one's market data, with a
+         token of their own that can do nothing else (mcp.PULLS) -->
+    <div id="market-mirror" class="market-row">
+      <span id="market-mirror-state"></span>
+      <code id="market-mirror-token" hidden></code>
+      <button type="button" id="market-mirror-copy" data-icon="copy" hidden>copy</button>
+      <button type="button" id="market-mirror-on" data-icon="add">new mirror token</button>
+      <button type="button" id="market-mirror-off" data-icon="close" hidden>stop serving</button>
     </div>
   </div>
   <!-- what the stores hold now: the series each one keeps, and the ones the

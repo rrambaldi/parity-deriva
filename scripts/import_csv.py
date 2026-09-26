@@ -196,6 +196,9 @@ def _merge(path, key, frame, dry_run, keep):
             existing = store[key] if key in store else None
         finally:
             store.close()
+    # in the store's own order: an append in another one is refused
+    if existing is not None and set(frame.columns) == set(existing.columns):
+        frame = frame[list(existing.columns)]
     if keep and existing is not None:
         frame = frame[~frame.index.isin(existing.index)]
         if not len(frame.index):

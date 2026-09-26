@@ -1253,6 +1253,20 @@ folder: a reader in another process keeps the file it opened, and a writer
 killed halfway leaves the store as it was. Runs, strategies, favourites and
 live sessions stay in each server's own `DATA_DIR`.
 
+On the writer, the candles and the calendar each have a source, chosen in
+the same box (`data/sources.py`), with how often it runs:
+
+| source | what it does |
+|---|---|
+| manual | the page's import and the MCP pushes (`push_candles`, `push_calendar`); nothing on a timer |
+| another parity | pulls what it lacks from another server's MCP endpoint (`market_status`, `pull_candles`, `pull_calendar`) with that server's mirror token |
+| a broker's API | the bars after the last one, for every series the stores keep, from a broker that serves ask and bid, with this server's keys (candles only) |
+
+"serve other servers" gives this server a mirror token: another parity -
+the PC, a server for real money - copies the market data with it and can do
+nothing else over MCP. The forexfactory scraper is not a source: it is a
+program of its own and pushes, like any outside one.
+
 # Tests
 
 The project ships a test suite under ```parity_deriva/tests/``` (plain

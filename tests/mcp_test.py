@@ -316,7 +316,8 @@ class MCPTest(StoreCase):
 		# then the two the data scripts push with
 		self.assertEqual(names, ['get_news', 'list_strategies', 'get_source', 'list_data',
 								 'submit_strategy', 'submit_indicator', 'list_helpers', 'request_feature',
-								 'run_backtest', 'propose_public', 'push_calendar', 'push_candles'])
+								 'run_backtest', 'propose_public', 'push_calendar', 'push_candles',
+								 'market_status', 'pull_candles', 'pull_calendar'])
 		data, _ = self.tool('list_data')
 		self.assertEqual(data['instruments'][0]['instrument'], 'EUR_USD')
 		source, failed = self.tool('get_source', name='parity_deriva.strategy.H4')
@@ -611,8 +612,26 @@ class MCPTest(StoreCase):
 											  ask=first, bid=first)[0])
 		with self.assertRaises(mcp.ToolError):
 			mcp.call(self.service, 'push_calendar', {'events': [event]}, self.base, 'claude.ai')
+		# another server copies it with the mirror token, which does nothing else
+		self.bearer = self.service.oauth.newMirror()
+		told, failed = self.tool('market_status')
+		self.assertFalse(failed, told)
+		self.assertEqual(told['instruments'][0]['instrument'], 'EUR_USD')
+		self.assertEqual(told['calendar']['events'], 1)
+		told, failed = self.tool('pull_candles', instrument='EUR_USD', granularity='M5',
+								 after=first[1][0], limit=1)
+		self.assertEqual(([b[0] for b in told['ask']], told['more']), ([first[2][0]], True), told)
+		self.assertEqual([round(v, 5) for v in told['bid'][0][1:5]], [1.17, 1.171, 1.169, 1.17])
+		told, failed = self.tool('pull_calendar', since='2025-09-01')
+		self.assertEqual(([e['actual'] for e in told['events']], told['next']), (['2.40%'], None))
+		for name in ('list_strategies', 'push_calendar'):
+			self.assertIn('mirror token only', self.tool(name, events=[event])[0])
+		self.service.oauth.dropMirror()
+		self.assertEqual(self.http('/mcp', {'jsonrpc': '2.0', 'id': 1, 'method': 'ping'},
+								   {'Authorization': 'Bearer %s' % self.bearer})[0], 401)
+		self.bearer = self.service.oauth.shownSecret()
 		# a server that only reads the market data takes no push at all
-		market.save(self.settings.DATA_DIR, False, self.settings)
+		market.save({'writer': False}, self.settings)
 		for name, args in (('push_calendar', {'events': [event]}),
 						   ('push_candles', {'instrument': 'EUR_USD', 'granularity': 'M5',
 											 'ask': first, 'bid': first})):

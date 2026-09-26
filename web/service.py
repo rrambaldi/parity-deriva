@@ -73,6 +73,7 @@ from parity_deriva.backtest import shadow
 from parity_deriva.backtest.driver import Cancelled
 from parity_deriva.data import calendar as calendar_module
 from parity_deriva.data import market
+from parity_deriva.data import sources
 from parity_deriva.data import store
 from parity_deriva.data.candledb import CandleDB
 from parity_deriva.etc import settings
@@ -360,6 +361,8 @@ class Service(object):
 		# over it that somebody enabled, and its one sandbox at a time
 		dataDir = getattr(self.setup, 'DATA_DIR', '') or '.'
 		self.oauth = oauth.Authority(os.path.join(dataDir, 'mcp.json'))
+		# where the writer's market data comes from; started by scripts/web.py
+		self.sources = sources.Sources(self)
 		ledger.STRATEGIES.update(uploaded.backtest(dataDir))
 		self._sandbox = threading.Lock()
 
@@ -569,17 +572,50 @@ class Service(object):
 		return out
 
 	def marketData(self):
-		"""The market folder, whether this server writes it, and DATA_DIR."""
-		return dict(market.config(self.setup), home=getattr(self.setup, 'DATA_DIR', '') or '.')
+		"""
+		The settings page's market box: the folder, the role, the sources and
+		their last runs, the mirror token other servers copy it with. The
+		upstream's token is said to be there, not shown.
+		"""
+		from parity_deriva.trading import providers
+		kept = market.config(self.setup)
+		kept['upstream'] = dict(kept['upstream'], token=bool(kept['upstream']['token']))
+		return dict(kept, home=market.home(self.setup), providers=providers.available(),
+					runs=self.sources.state, mirror=self.oauth.shownMirror())
 
 	def setMarketData(self, body):
-		"""Point the stores and the calendar at another folder, or change the role."""
+		"""Change the folder, the role or a source (market.save)."""
 		if self._job.get('running'):
 			raise ServiceError("an import is writing the stores: wait for it to finish")
-		market.save(body.get('dir'), body.get('writer'), self.setup)
+		market.save(body, self.setup)
 		self._cache.clear()
 		del self._order[:]
 		return self.marketData()
+
+	def mirror(self, on):
+		"""A new mirror token for the servers that copy this one's market data, or none."""
+		if on:
+			self.oauth.newMirror()
+		else:
+			self.oauth.dropMirror()
+		return self.marketData()
+
+	def mergeBars(self, instrument, granularity, frame, keep=False):
+		"""
+		Bars into a store as an import puts them: under the backtest lock, so
+		no run reads it halfway, and the cached runs dropped. How many were new.
+		"""
+		if not self._lock.acquire(timeout=240):
+			raise ServiceError("a backtest has held the stores for 4 minutes: try again later")
+		try:
+			added, _, _ = importer().merge(self.storePath(instrument), '/' + granularity,
+										   frame, keep=keep)
+			if added:
+				self._cache.clear()
+				del self._order[:]
+		finally:
+			self._lock.release()
+		return added
 
 	# -------------------------------------------------------------- refusals
 
@@ -3065,15 +3101,21 @@ class Handler(BaseHTTPRequestHandler):
 				length = int(self.headers.get('Content-Length') or 0)
 				body = self.rfile.read(length).decode('utf-8', 'replace')
 				return self.sendJSON(self.service.importCalendar(body))
-			if route == '/api/market':
-				# {"dir": "/abs/folder", "writer": true|false}
+			if route in ('/api/market', '/api/market/run', '/api/market/mirror'):
+				# {"dir"?, "writer"?, "candles"?, ...} changes market.json,
+				# {"kind": "candles"} runs its source now, {"on": bool} the mirror token
 				length = int(self.headers.get('Content-Length') or 0)
 				try:
 					body = json.loads(self.rfile.read(length) or b'{}')
 				except ValueError:
 					body = None
 				if not isinstance(body, dict):
-					raise ServiceError('the body is {"dir": "/a/folder", "writer": true}')
+					raise ServiceError('the body is a JSON object')
+				if route == '/api/market/run':
+					self.service.sources.trigger(body.get('kind'))
+					return self.sendJSON(self.service.marketData())
+				if route == '/api/market/mirror':
+					return self.sendJSON(self.service.mirror(bool(body.get('on'))))
 				return self.sendJSON(self.service.setMarketData(body))
 			if route == '/api/imports/run':
 				try:

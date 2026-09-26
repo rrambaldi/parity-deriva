@@ -84,6 +84,8 @@ class Authority(object):
 			state = {}
 		state.setdefault('secret', None)
 		state.setdefault('plain', None)
+		state.setdefault('mirror', None)
+		state.setdefault('mirrorPlain', None)
 		state.setdefault('clients', {})
 		state.setdefault('tokens', {})
 		return state
@@ -132,15 +134,41 @@ class Authority(object):
 			state['tokens'] = {}
 			self.write(state)
 
-	def secretIs(self, text):
-		held = self.read()['secret']
+	def secretIs(self, text, which='secret'):
+		held = self.read()[which]
 		return bool(held and text and hmac.compare_digest(held, digest(text)))
 
+	# ----------------------------------------------------- the mirror token
+
+	def newMirror(self):
+		"""
+		A second token, for another parity server that copies the market data
+		(mcp.PULLS and nothing else); the old one stops working.
+		"""
+		mirror = secrets.token_urlsafe(32)
+		with self.lock:
+			state = self.read()
+			state['mirror'], state['mirrorPlain'] = digest(mirror), mirror
+			self.write(state)
+		return mirror
+
+	def dropMirror(self):
+		with self.lock:
+			state = self.read()
+			state['mirror'] = state['mirrorPlain'] = None
+			self.write(state)
+
+	def mirrorIs(self, text):
+		return self.secretIs(text, 'mirror')
+
+	def shownMirror(self):
+		return self.read()['mirrorPlain']
+
 	def allowed(self, bearer):
-		"""Is `bearer` the secret or a live access token?"""
+		"""Is `bearer` the secret, the mirror token or a live access token?"""
 		if not bearer:
 			return False
-		if self.secretIs(bearer):
+		if self.secretIs(bearer) or self.mirrorIs(bearer):
 			return True
 		token = self.read()['tokens'].get(digest(bearer))
 		return bool(token and token['kind'] == 'access' and token['expires'] > time.time())
