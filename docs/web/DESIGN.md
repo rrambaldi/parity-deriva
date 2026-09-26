@@ -136,7 +136,7 @@ direzione in rosso e il P&L in verde, ed è corretto così.
   minuscolo come ogni testo. Solo titoli: etichette, campi, tabelle e numeri
   restano in Plex. Scelta del 25/09/2026 fra Jost, Manrope, Instrument Serif e
   Newsreader (`docs/web/font-titoli-proposte.html`), poi fra le varianti di
-  Instrument (`web/titoli-instrument-varianti.html`): con tutto in Plex a 15 px la
+  Instrument (`docs/web/titoli-instrument-varianti.html`): con tutto in Plex a 15 px la
   pagina non aveva un punto d'attacco.
 - PD Instrument ha un peso solo: la gerarchia la fanno misura e carattere. Sui
   titoli sempre `font-weight: 400` e `font-synthesis: none` (`h2`/`h3` sono in

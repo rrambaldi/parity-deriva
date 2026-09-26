@@ -115,8 +115,8 @@ autonome in `web/`, si aprono col doppio clic).
 |---|---|---|---|
 | parametri sì/no | **segmentato `Y \| N`** (fra checkbox ridisegnato, segmentato, chip) | `docs/web/checkbox-proposte.html` | DESIGN § 6 Campi; prompt, aggiunta Y \| N |
 | testata dei dialog | **"titolo con contesto"**: titolo, conteggio, riga d'aiuto, `esc`, chiusura quadrata senza fondo (fra essenziale, contesto, barra strumenti, blocco unico) | `docs/web/dialog-testata-proposte.html` | DESIGN § 6 Dialog; prompt, aggiunta dialog |
-| font dei titoli | **PD Instrument**: Instrument Serif allargato ×1,08, spaziatura +0,01 em (candidati Jost, Manrope, Instrument Serif, Newsreader; poi +0,02/+0,04 em, largo 105 %/108 %) | `docs/web/font-titoli-proposte.html`, `web/titoli-instrument-varianti.html` | DESIGN § 4; `tokens.css` (`--font-title`, `--fs-h-*`); prompt, aggiunta font |
-| scritta nella testata | **0,07 em** con crenatura, invece di 0,16 senza (prove a 0,11 / 0,07 / 0,04) | `web/titoli-instrument-varianti.html` | DESIGN § 7; `loghi/definitivo/README.md` |
+| font dei titoli | **PD Instrument**: Instrument Serif allargato ×1,08, spaziatura +0,01 em (candidati Jost, Manrope, Instrument Serif, Newsreader; poi +0,02/+0,04 em, largo 105 %/108 %) | `docs/web/font-titoli-proposte.html`, `docs/web/titoli-instrument-varianti.html` | DESIGN § 4; `tokens.css` (`--font-title`, `--fs-h-*`); prompt, aggiunta font |
+| scritta nella testata | **0,07 em** con crenatura, invece di 0,16 senza (prove a 0,11 / 0,07 / 0,04) | `docs/web/titoli-instrument-varianti.html` | DESIGN § 7; `loghi/definitivo/README.md` |
 | risorse del server in testata | **una spia sola** (`server ok` o la misura peggiore) con pannello al clic; niente verde, soglie 80 / 90 % (fra mini indicatori, in linea sobria, a tacche, spia). Scelta di Claude su "continua", da confermare | `docs/web/risorse-proposte.html` | DESIGN § 6 Risorse del server; `tokens.css` (`--backdrop`, `--shadow-float`); prompt, aggiunta risorse |
 
 - Scala dei titoli: 24 px pagina, 22 px dialog, 18 px pannelli (prima tutti 15 px).
@@ -140,7 +140,7 @@ loghi/
   definitivo/                   logo M1 + monocolore M2, favicon, PNG, font, tokens.css
   sorgenti/                     script che rigenerano tutto
   riassunto-sessione-logo.md    questo file
-web/
+docs/web/
   DESIGN.md                     linee guida per il layout
   REFACTORING-claude-code.md    prompt per Claude Code: refactoring grafico del viewer (+ aggiunte del 25/09)
   checkbox-proposte.html        prova: parametri sì/no
