@@ -11,8 +11,11 @@ before anything of the strategy is imported.
 
 The job is {"memoryMb", "fields" (the page's form), "strategy": {"name",
 "path"} for a draft or null, "check": true to only import the draft and
-build it}. The answer, on stdout, is {"payload"} or {"strategy"} or {"error",
+build it} - or {"memoryMb", "indicator": {"name", "path"}} to run an
+indicator's draft over stored candles (uploaded.examine). The answer, on
+stdout, is {"payload"} or {"strategy"} or {"indicator"} or {"error",
 "trace"}. A print() in the strategy goes to stderr and not into the answer.
+The draft indicators are there for the draft strategies that take them.
 """
 
 import json
@@ -54,14 +57,19 @@ def main():
 	resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
 	answer = os.fdopen(os.dup(1), 'w')
 	os.dup2(2, 1)
+	draft, trial = job.get('strategy'), job.get('indicator')
 	try:
 		from parity_deriva.backtest import ledger
 		from parity_deriva.strategy import uploaded
 		from parity_deriva.web import service
-		draft = job.get('strategy')
+		dataDir = os.environ['PARITY_DERIVA_DATA_DIR']
+		uploaded.loadIndicators(dataDir, withDrafts=True)
 		if draft:
 			ledger.STRATEGIES[draft['name']] = uploaded.load(draft['name'], draft['path'])
-		if job.get('check'):
+		if trial:
+			out = {'indicator': uploaded.examine(uploaded.loadIndicator(trial['name'], trial['path']),
+												 candles(dataDir))}
+		elif job.get('check'):
 			name = draft['name']
 			klass = ledger.load_strategy(name)
 			klass(pairs=[getattr(klass, 'INSTRUMENT', None) or 'EUR_USD'],
@@ -81,8 +89,37 @@ def main():
 	except BaseException as exc:
 		out = {'error': "%s: %s" % (type(exc).__name__, exc),
 			   'trace': traceback.format_exc()[-3000:]}
+		# what examine() found wrong says it all: no trace to read through
+		if type(exc).__name__ == 'UploadError' and trial:
+			del out['trace']
 	json.dump(out, answer)
 	answer.close()
+
+
+def candles(dataDir):
+	"""
+	The last uploaded.TRIAL_BARS H1 candles of EUR_USD, or of the first store
+	there is, as a strategy is fed them: what an indicator is tried on.
+	"""
+	from parity_deriva.data import replay
+	from parity_deriva.event.event import CandleEvent
+	stores = sorted(n for n in os.listdir(dataDir) if n.endswith('.hd5'))
+	if not stores:
+		return []
+	name = 'EUR_USD.hd5' if 'EUR_USD.hd5' in stores else stores[0]
+	from parity_deriva.strategy import uploaded
+	frame = replay.frame(os.path.join(dataDir, name), 'H1')[0].iloc[-uploaded.TRIAL_BARS:]
+	columns = dict((column, frame[column].tolist()) for _s, _p, column in replay.COLUMNS)
+	volume = frame['volume'].tolist()
+	out = []
+	for i, when in enumerate(frame.index):
+		candle = CandleEvent(dict(
+			[('time', when.to_pydatetime()), ('volume', int(volume[i])), ('complete', True)]
+			+ [(side, dict((part, columns['%s_%s' % (side, part)][i]) for part in 'ohlc'))
+			   for side in ('ask', 'bid', 'mid')]))
+		candle.instrument, candle.granularity = name[:-4], 'H1'
+		out.append(candle)
+	return out
 
 
 if __name__ == '__main__':

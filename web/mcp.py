@@ -55,9 +55,10 @@ PROTOCOLS = ('2025-11-25', '2025-06-18', '2025-03-26')
 
 GUIDE = """\
 parity-deriva backtests forex strategies on stored bid/ask candles. Through this
-server you can read the strategies and the data, write strategies of your own
-as drafts, and backtest them. You cannot trade and you cannot enable a
-strategy: the user does that on the settings page, after reading your code.
+server you can read the strategies and the data, write strategies and
+indicators of your own as drafts, and backtest them. You cannot trade and you
+cannot enable a strategy or an indicator: the user does that on the settings
+page, after reading your code.
 
 A strategy is one Python file with exactly one class, a subclass of
 parity_deriva.strategy.H4.H4 (read it with get_source
@@ -86,9 +87,29 @@ the strategy's name. The class's name has to be its own: one another strategy's
 class has, built-in or yours, is refused (your versions of one name share it).
 A version the same as the one before it is refused too.
 
+An indicator of your own, when list_helpers has none that fits, is one file
+with exactly one class, fed a candle at a time as
+parity_deriva.lib.streaming.Series is (you may build it on a Series):
+- add(self, candle): one closed bar, oldest first - the candle signal() gets.
+- value(self): None while it warms up, then a number, or a tuple of numbers
+  named by LINES, e.g. LINES = ('upper', 'middle', 'lower').
+- PANEL = False for a price, drawn on the candles; PANEL = True for a number
+  of its own scale, drawn in the strip under them - an ATR, an RSI, a 0/1.
+- __init__'s arguments are its parameters, each with a number for a default;
+  the class's docstring says what it computes.
+submit_indicator runs it over stored candles before it saves it, and refuses
+a value that is not a number, no value at all, two copies of it that disagree
+(state kept on the class), a price far off the candles, and more than 1 ms a
+candle. A strategy takes it by its code, the version written out:
+    from parity_deriva.strategy.uploaded import indicator
+    Keltner = indicator('KELTNER 1')
+and has the chart draw it by listing it in INDICATORS, the keys but 'label'
+its arguments: INDICATORS = ({'indicator': 'KELTNER 1', 'period': 20},). The
+user enables an indicator before any strategy that takes it.
+
 Work in this order: get_news first - what changed in this project's code
 and asks you to do about it, which comes before anything else you were asked;
-list_data, list_strategies and list_helpers to see what exists; submit_strategy to save a version of a draft (it is imported and built
+list_data, list_strategies and list_helpers to see what exists; submit_indicator for an indicator that is missing; submit_strategy to save a version of a draft (it is imported and built
 at once, and an error comes back with its traceback); run_backtest on a year or
 two first, then widen. Every backtest is saved, and its link opens it on the
 user's page.
@@ -101,10 +122,11 @@ newest version. The server ends the file with a PARITY_DERIVA line - the
 version, and the version of the server it was written on. Leave it: it is
 rewritten on every submit.
 
-The public repository of strategies: when the user wants a strategy of yours
-in it, call propose_public with its code and a note of what it does and how it
-tested. Nothing is sent from here - the user reads it and opens the pull
-request from the settings page, once that version is enabled.
+The public repository of strategies and indicators: when the user wants one
+of yours in it, call propose_public with its code and a note of what it does
+and how it tested. Nothing is sent from here - the user reads it and opens the
+pull request from the settings page, once that version is enabled. A
+strategy's pull request brings the indicators it takes along.
 
 Rules:
 1. Build on what exists. Before writing an indicator, a candle pattern, a
@@ -112,13 +134,14 @@ Rules:
    and use, and you do not copy its code into the strategy. Read one with
    get_source when its line is not enough. A built-in strategy close to yours
    is a base to subclass, not a file to copy.
-2. A missing indicator or function is a feature request, not your code. Call
-   request_feature with what it computes (the formula, or a reference), what
-   it takes and gives, and the strategy that needs it, and tell the user the
-   strategy waits for it; list_helpers shows the requests already open, so do
-   not file one twice. Write it inside the strategy only when the user asks for
-   that now - and then file the request all the same, and say so in a comment
-   where it is written.
+2. A missing indicator is an indicator of its own (submit_indicator), not
+   code inside the strategy: so it is read and enabled once, drawn on the
+   chart, and taken by the next strategy too. What is not an indicator - a
+   function the helpers lack, data the project does not have, a change to how
+   the backtest fills - is a feature request: request_feature with what it
+   does, what it takes and gives, and the strategy that needs it, and tell the
+   user the strategy waits for it; list_helpers shows the requests already
+   open, so do not file one twice.
 3. Test on years the rules were not tuned on: develop and tune on a first
    stretch (up to the end of 2021, say), then one run on the years after with
    the parameters unchanged. Give both, and say so when the later years are
@@ -185,8 +208,8 @@ TOOLS = [
 					"its parameters.",
 	 'inputSchema': {'type': 'object', 'properties': {}}},
 	{'name': 'get_source',
-	 'description': "The Python source of a strategy (by its name) or of a module a strategy "
-					"may import, e.g. parity_deriva.strategy.H4 or parity_deriva.lib.streaming.",
+	 'description': "The Python source of a strategy or an indicator (by its name) or of a module "
+					"a strategy may import, e.g. parity_deriva.strategy.H4 or parity_deriva.lib.streaming.",
 	 'inputSchema': {'type': 'object', 'required': ['name'],
 					 'properties': {'name': {'type': 'string'}}}},
 	{'name': 'list_data',
@@ -203,16 +226,30 @@ TOOLS = [
 				  'description': "upper case, digits and dashes, e.g. MY-EMA-CROSS - "
 								 "without a version: the server adds it"},
 		 'source': {'type': 'string', 'description': "the whole Python file"}}}},
+	{'name': 'submit_indicator',
+	 'description': "Save an indicator as the next version of a draft, as submit_strategy does "
+					"a strategy: one class fed a candle at a time, add(candle) and value(), with "
+					"PANEL and, for several numbers, LINES - the guide in submit_strategy says "
+					"how. It is run over stored candles in the sandbox first and nothing is saved "
+					"if a check fails; the answer says what it gave - its warm-up, its range, its "
+					"time a candle.",
+	 'inputSchema': {'type': 'object', 'required': ['name', 'source'], 'properties': {
+		 'name': {'type': 'string', 'pattern': uploaded.NAME.pattern,
+				  'description': "upper case, digits and dashes, e.g. KELTNER - without a "
+								 "version: the server adds it. Not a strategy's name"},
+		 'source': {'type': 'string', 'description': "the whole Python file"}}}},
 	{'name': 'list_helpers',
 	 'description': "What a strategy is built from, to use rather than write again: the "
 					"indicators, series, swings, candle patterns and level helpers of this "
-					"project, one line each with its arguments, by module - and the feature "
+					"project, one line each with its arguments, by module; the indicators "
+					"written here (submit_indicator), drafts and enabled; and the feature "
 					"requests already open.",
 	 'inputSchema': {'type': 'object', 'properties': {}}},
 	{'name': 'request_feature',
-	 'description': "Ask the user for an indicator or a function a strategy needs and "
-					"list_helpers does not have, instead of writing it into the strategy. "
-					"The user reads the requests on the settings page.",
+	 'description': "Ask the user for what a strategy needs that list_helpers does not have "
+					"and is not an indicator (that one you write with submit_indicator): a "
+					"function, data, a change to the backtest. The user reads the requests on "
+					"the settings page.",
 	 'inputSchema': {'type': 'object', 'required': ['title', 'description'], 'properties': {
 		 'title': {'type': 'string', 'maxLength': REQUEST_TITLE,
 				   'description': "what it is, e.g. Keltner channel on the streaming Series"},
@@ -238,12 +275,13 @@ TOOLS = [
 					 'properties': dict((k, {'type': t, 'description': d})
 										for k, (t, d) in OPTIONS.items())}}}},
 	{'name': 'propose_public',
-	 'description': "Propose one version of a strategy of yours for the public repository of "
-					"strategies, when the user asks for it. Nothing is sent: the user reads it "
+	 'description': "Propose one version of a strategy or an indicator of yours for the public "
+					"repository, when the user asks for it. Nothing is sent: the user reads it "
 					"on the settings page and opens the pull request from there, once that "
 					"version is enabled.",
 	 'inputSchema': {'type': 'object', 'required': ['strategy', 'note'], 'properties': {
-		 'strategy': {'type': 'string', 'description': "its code, e.g. MY-EMA 3"},
+		 'strategy': {'type': 'string', 'description': "its code, e.g. MY-EMA 3, or KELTNER 1 "
+													  "for an indicator"},
 		 'note': {'type': 'string', 'maxLength': REQUEST_TEXT,
 				  'description': "what it does and how it tested - windows, trades, net, max "
 								 "drawdown: the pull request's text"}}}},
@@ -335,12 +373,35 @@ def serverVersion():
 	return version + ('+%s%s' % (commit, '.dirty' if dirty else '') if commit else '')
 
 
+def written(service, kind):
+	"""code -> path of every version of `kind` written here, drafts and enabled."""
+	return dict(uploaded.drafts(dataDir(service), kind), **uploaded.enabled(dataDir(service), kind))
+
+
+def kindOf(service, code):
+	"""What `code` is: 'indicators' for one of the indicators, else 'strategies'."""
+	return 'indicators' if code in written(service, 'indicators') else 'strategies'
+
+
+def takers(service, code):
+	"""The strategies written here that take the indicator `code`: (code, state) each."""
+	out = []
+	for state, held in (('draft', uploaded.drafts(dataDir(service))),
+						('enabled', uploaded.enabled(dataDir(service)))):
+		for name, path in held.items():
+			with open(path) as handle:
+				if code in uploaded.used(handle.read()):
+					out.append((name, state))
+	return out
+
+
 def resolve(service, name):
-	"""A strategy's code: `name` itself, or the newest version of a name of yours."""
+	"""A strategy's or an indicator's code: `name` itself, or the newest version of a name of yours."""
 	held = dict(uploaded.drafts(dataDir(service)), **uploaded.enabled(dataDir(service)))
-	if name in held or name in web().strategies():
+	if name in held or name in web().strategies() or name in written(service, 'indicators'):
 		return name
-	return uploaded.latest(dataDir(service), name) or name
+	return uploaded.latest(dataDir(service), name) \
+		or uploaded.latest(dataDir(service), name, 'indicators') or name
 
 
 # ---------------------------------------------------------------- the tools
@@ -361,7 +422,8 @@ def listStrategies(service, args):
 
 def getSource(service, args):
 	name = resolve(service, str(args.get('name') or ''))
-	for held in (uploaded.drafts(dataDir(service)), uploaded.enabled(dataDir(service))):
+	for kind in uploaded.KINDS:
+		held = written(service, kind)
 		if name in held:
 			with open(held[name]) as handle:
 				return {'name': name, 'source': handle.read()}
@@ -480,7 +542,8 @@ def classOwner(service, name, klass):
 	return None
 
 
-def submitStrategy(service, args, client):
+def submit(service, args, client, kind='strategies'):
+	"""A strategy's or an indicator's next version, checked in the sandbox and kept as a draft."""
 	name, source = str(args.get('name') or ''), args.get('source')
 	if not uploaded.NAME.fullmatch(name):
 		raise ToolError("name: upper case, digits and dashes, 2 to 40, e.g. MY-EMA-CROSS - "
@@ -489,43 +552,55 @@ def submitStrategy(service, args, client):
 		raise ToolError("source: the whole Python file")
 	if name in web().strategies():
 		raise ToolError("%s is a built-in strategy: choose another name" % name)
+	# one name is one thing: a code alone says whether it is a strategy or an indicator
+	other = [k for k in uploaded.KINDS if k != kind][0]
+	if uploaded.latest(dataDir(service), name, other):
+		raise ToolError("%s is the name of one of the %s already: choose another" % (name, other))
 	problems = uploaded.check(source)
+	if kind == 'indicators' and uploaded.used(source):
+		problems.append("an indicator does not take another uploaded indicator: build it on "
+						"parity_deriva.lib.streaming instead")
 	if problems:
 		raise ToolError("not saved:\n" + "\n".join(problems))
-	where = os.path.join(uploaded.root(dataDir(service)), 'drafts')
+	where = os.path.join(uploaded.root(dataDir(service), kind), 'drafts')
 	os.makedirs(where, exist_ok=True)
 	# Was: a draft of the same name was replaced. Now: never - each submit is
 	# the name's next version, and the one run and read before stays
 	with _submitLock:
 		# the newest version sent again, as it is: no version to make of it
-		newest = uploaded.latest(dataDir(service), name)
+		newest = uploaded.latest(dataDir(service), name, kind)
 		if newest:
-			held = dict(uploaded.drafts(dataDir(service)), **uploaded.enabled(dataDir(service)))
-			with open(held[newest]) as handle:
+			with open(written(service, kind)[newest]) as handle:
 				if uploaded.stamp(handle.read(), name, 0, '') == uploaded.stamp(source, name, 0, ''):
 					raise ToolError("not saved: the same code as %s, no new version made" % newest)
-		version, server = uploaded.nextVersion(dataDir(service), name), serverVersion()
+		version, server = uploaded.nextVersion(dataDir(service), name, kind), serverVersion()
 		code = uploaded.code(name, version)
 		path = os.path.join(where, uploaded.fileName(code))
 		trial = os.path.join(where, '_' + uploaded.fileName(code))
 		with open(trial, 'w') as handle:
 			handle.write(uploaded.stamp(source, name, version, server))
 		try:
-			answer = sandboxed(service, {'check': True, 'strategy': {'name': code, 'path': trial}},
-							   timeout=60)
-			owner = classOwner(service, name, answer['strategy']['class'])
-			if owner:
-				raise ToolError("not saved: class %s is already the class of %s - rename the class"
-								% (answer['strategy']['class'], owner))
+			if kind == 'indicators':
+				found = sandboxed(service, {'indicator': {'name': code, 'path': trial}},
+								  timeout=60)['indicator']
+			else:
+				found = sandboxed(service, {'check': True, 'strategy': {'name': code, 'path': trial}},
+								  timeout=60)['strategy']
+				owner = classOwner(service, name, found['class'])
+				if owner:
+					raise ToolError("not saved: class %s is already the class of %s - rename the class"
+									% (found['class'], owner))
 			os.replace(trial, path)
 		finally:
 			if os.path.exists(trial):
 				os.remove(trial)
-		found = dict(answer['strategy'], server=server, submitted=int(time.time() * 1000),
-					 client=client)
+		found = dict(found, server=server, submitted=int(time.time() * 1000), client=client)
 		keepMeta(path, found)
 	return dict(found, name=code, family=name, version=version, state='draft',
-				next="run_backtest with strategy %s" % code)
+				next="run_backtest with strategy %s" % code if kind == 'strategies' else
+				"take it in a strategy: from parity_deriva.strategy.uploaded import indicator, "
+				"then %s = indicator(%r); the user enables it before the strategy"
+				% (found['class'], code))
 
 
 def runBacktest(service, args, base):
@@ -645,7 +720,12 @@ def helpers():
 
 
 def listHelpers(service, args):
-	return {'modules': helpers(), 'requested': [
+	mine = [dict(dict((k, m.get(k)) for k in ('class', 'description', 'panel', 'lines', 'parameters')),
+				 code=code, state=state)
+			for state, held in (('draft', uploaded.drafts(dataDir(service), 'indicators')),
+								('enabled', uploaded.enabled(dataDir(service), 'indicators')))
+			for code, m in ((c, meta(p)) for c, p in held.items())]
+	return {'modules': helpers(), 'indicators': mine, 'requested': [
 		dict((k, r.get(k)) for k in ('id', 'title', 'strategy')) for r in requests(service)]}
 
 
@@ -846,11 +926,12 @@ def dropRequest(service, id, name='requests'):
 def proposePublic(service, args):
 	code = resolve(service, str(args.get('strategy') or ''))
 	note = str(args.get('note') or '').strip()
-	enabled = uploaded.enabled(dataDir(service))
-	path = uploaded.drafts(dataDir(service)).get(code) or enabled.get(code)
+	kind = kindOf(service, code)
+	enabled = uploaded.enabled(dataDir(service), kind)
+	path = written(service, kind).get(code)
 	if not path:
-		raise ToolError("%s is not one of yours: only a strategy written here goes to the "
-						"public repository (list_strategies)" % code)
+		raise ToolError("%s is not one of yours: only a strategy or an indicator written here "
+						"goes to the public repository (list_strategies, list_helpers)" % code)
 	if not note or len(note) > REQUEST_TEXT:
 		raise ToolError("note: what it does and how it tested, 1 to %d characters" % REQUEST_TEXT)
 	found = meta(path)
@@ -889,15 +970,17 @@ def pullRequest(service, code):
 	The pull request of a version the assistant proposed and the user enabled,
 	opened on PUBLIC_REPO with GITHUB_TOKEN from the settings page: its file as
 	it is, stamp included, and a card of what the page knows of it beside it,
-	under strategies/NAME/, on a branch of its own - of the repository when
-	the token may push to it, else of the token's fork of it.
+	under strategies/NAME/ or indicators/NAME/, on a branch of its own - of the
+	repository when the token may push to it, else of the token's fork of it.
+	A strategy's brings the indicators it takes that the repository lacks.
 	"""
 	setup = service.setup
 	repo, token = getattr(setup, 'PUBLIC_REPO', None), getattr(setup, 'GITHUB_TOKEN', None)
 	if not repo or not token:
 		raise ToolError("no public repository: set PARITY_DERIVA_PUBLIC_REPO (owner/name) and "
 						"PARITY_DERIVA_GITHUB_TOKEN in parity_deriva/.env, then restart")
-	path = uploaded.enabled(dataDir(service)).get(code)
+	kind = kindOf(service, code)
+	path = uploaded.enabled(dataDir(service), kind).get(code)
 	if not path:
 		raise ToolError("%s is not enabled: a pull request carries a version somebody read" % code)
 	found = meta(path)
@@ -920,31 +1003,57 @@ def pullRequest(service, code):
 			except ToolError:
 				time.sleep(2)
 		github(token, 'POST', '/repos/%s/merge-upstream' % head, {'branch': base})
+	files = pullFiles(kind, code, source, found, found['proposed']['note'])
+	taken = uploaded.used(source) if kind == 'strategies' else []
+	for used in taken:
+		held = uploaded.enabled(dataDir(service), 'indicators').get(used)
+		if not held:
+			raise ToolError("%s takes %s, which is not enabled" % (code, used))
+		try:
+			github(token, 'GET', '/repos/%s/contents/%s?ref=%s' % (repo, urllib.parse.quote(
+				'indicators/%s/%s' % (uploaded.split(used)[0], uploaded.fileName(used))), base))
+			continue
+		except ToolError as exc:
+			if not str(exc).startswith('GitHub said 404'):
+				raise
+		with open(held) as handle:
+			files += pullFiles('indicators', used, handle.read(), meta(held),
+							   (meta(held).get('proposed') or {}).get('note') or 'taken by %s' % code)
 	sha = github(token, 'GET', '/repos/%s/git/ref/heads/%s' % (repo, base))['object']['sha']
 	# the time in it: a try that failed half way leaves its branch, and the next is another
-	branch = 'strategy/%s-v%d-%d' % (found['family'], found['version'], time.time())
+	branch = '%s/%s-v%d-%d' % ({'strategies': 'strategy', 'indicators': 'indicator'}[kind],
+							   found['family'], found['version'], time.time())
 	github(token, 'POST', '/repos/%s/git/refs' % head, {'ref': 'refs/heads/' + branch, 'sha': sha})
-	card = dict((k, found.get(k)) for k in ('family', 'version', 'server', 'description',
-											'instrument', 'granularity', 'parameters', 'submitted'))
-	card.update(code=code, note=found['proposed']['note'])
-	folder = 'strategies/%s/' % found['family']
-	for name, text in ((uploaded.fileName(code), source),
-					   (uploaded.fileName(code)[:-3] + '.json', json.dumps(card, indent=1) + '\n')):
-		github(token, 'PUT', '/repos/%s/contents/%s' % (head, urllib.parse.quote(folder + name)),
+	for name, text in files:
+		github(token, 'PUT', '/repos/%s/contents/%s' % (head, urllib.parse.quote(name)),
 			   {'message': 'Add %s' % code, 'branch': branch,
 				'content': base64.b64encode(text.encode()).decode()})
+	meant = ('meant for %s %s' % (found.get('instrument') or 'any instrument', found.get('granularity') or '')
+			 if kind == 'strategies' else 'drawn %s' % ('in a strip of its own' if found.get('panel')
+														else 'on the candles'))
 	pull = github(token, 'POST', '/repos/%s/pulls' % repo, {
 		'title': 'Add %s' % code, 'base': base,
 		'head': branch if head == repo else '%s:%s' % (head.split('/')[0], branch),
-		'body': '**%s**: %s\n\n- written on parity-deriva %s\n- meant for %s %s\n'
-				'- parameters: %s\n\n%s\n' % (
+		'body': '**%s**: %s\n\n- written on parity-deriva %s\n- %s\n'
+				'- parameters: %s\n%s\n%s\n' % (
 					code, found.get('description') or '', found.get('server') or 'a server before versions',
-					found.get('instrument') or 'any instrument', found.get('granularity') or '',
-					', '.join(p.get('name', '') for p in found.get('parameters') or ()) or 'none',
+					meant, ', '.join(p.get('name', '') for p in found.get('parameters') or ()) or 'none',
+					'- takes the indicators %s\n' % ', '.join(taken) if taken else '',
 					found['proposed']['note'])})
 	found['pull'] = {'url': pull['html_url'], 'number': pull['number'], 'at': int(time.time() * 1000)}
 	keepMeta(path, found)
 	return status(service)
+
+
+def pullFiles(kind, code, source, found, note):
+	"""(path, text) of the two files a version is in the public repository: its source and its card."""
+	keys = ('family', 'version', 'server', 'description') + (
+		('instrument', 'granularity') if kind == 'strategies' else ('panel', 'lines')) + ('parameters', 'submitted')
+	card = dict((k, found.get(k)) for k in keys)
+	card.update(code=code, note=note)
+	folder = '%s/%s/' % (kind, uploaded.split(code)[0])
+	return [(folder + uploaded.fileName(code), source),
+			(folder + uploaded.fileName(code)[:-3] + '.json', json.dumps(card, indent=1) + '\n')]
 
 
 def sandboxed(service, job, timeout=None):
@@ -975,7 +1084,9 @@ def call(service, name, args, base, client):
 	if name == 'request_feature':
 		return requestFeature(service, args)
 	if name == 'submit_strategy':
-		return submitStrategy(service, args, client)
+		return submit(service, args, client)
+	if name == 'submit_indicator':
+		return submit(service, args, client, 'indicators')
 	if name == 'run_backtest':
 		return runBacktest(service, args, base)
 	if name == 'propose_public':
@@ -1026,42 +1137,59 @@ def handle(service, message, base, client):
 # ------------------------------------------------- the settings page's side
 
 def status(service):
-	"""The settings page's box: the secret, the clients, the strategies."""
-	rows = []
-	for state, held in (('draft', uploaded.drafts(dataDir(service))),
-						('enabled', uploaded.enabled(dataDir(service)))):
-		for name, path in held.items():
-			rows.append(dict(meta(path), name=name, state=state))
-	return dict(service.oauth.status(), strategies=sorted(
-		rows, key=lambda r: r.get('submitted') or 0, reverse=True),
-		requests=requests(service)[::-1], news=news(service)[::-1])
+	"""The settings page's box: the secret, the clients, the strategies and the indicators."""
+	def rows(kind):
+		out = []
+		for state, held in (('draft', uploaded.drafts(dataDir(service), kind)),
+							('enabled', uploaded.enabled(dataDir(service), kind))):
+			for name, path in held.items():
+				out.append(dict(meta(path), name=name, state=state))
+		return sorted(out, key=lambda r: r.get('submitted') or 0, reverse=True)
+	return dict(service.oauth.status(), strategies=rows('strategies'), indicators=rows('indicators'),
+				requests=requests(service)[::-1], news=news(service)[::-1])
 
 
 def source(service, name):
-	for held in (uploaded.drafts(dataDir(service)), uploaded.enabled(dataDir(service))):
+	for kind in uploaded.KINDS:
+		held = written(service, kind)
 		if name in held:
 			with open(held[name]) as handle:
 				text = handle.read()
 			return {'name': name, 'source': text, 'problems': uploaded.check(text)}
-	raise ToolError("no uploaded strategy %r" % name)
+	raise ToolError("no uploaded strategy or indicator %r" % name)
 
 
 def act(service, name, action):
-	"""enable, disable or delete an uploaded strategy, from the settings page."""
-	draft = uploaded.drafts(dataDir(service)).get(name)
-	live = uploaded.enabled(dataDir(service)).get(name)
+	"""
+	enable, disable or delete an uploaded strategy or indicator, from the
+	settings page. A strategy that takes an indicator nobody enabled does not
+	load, so it is not enabled; an indicator an enabled strategy takes is not
+	disabled.
+	"""
+	kind = kindOf(service, name)
+	draft = uploaded.drafts(dataDir(service), kind).get(name)
+	live = uploaded.enabled(dataDir(service), kind).get(name)
 	if action == 'enable':
 		if not draft:
 			raise ToolError("no draft %r" % name)
-		if name in ledger.STRATEGIES:
-			raise ToolError("a strategy is already called %s" % name)
-		target = os.path.join(uploaded.root(dataDir(service)), uploaded.fileName(name))
+		if name in (uploaded.LOADED if kind == 'indicators' else ledger.STRATEGIES):
+			raise ToolError("something is already called %s" % name)
+		if kind == 'strategies':
+			with open(draft) as handle:
+				missing = [c for c in uploaded.used(handle.read()) if c not in uploaded.LOADED]
+			if missing:
+				raise ToolError("%s takes %s: enable %s first" % (
+					name, ', '.join(missing), 'it' if len(missing) == 1 else 'them'))
+		target = os.path.join(uploaded.root(dataDir(service), kind), uploaded.fileName(name))
 		moves = [(draft, target), (draft[:-3] + '.json', target[:-3] + '.json')]
 		for a, b in moves:
 			if os.path.exists(a):
 				os.replace(a, b)
 		try:
-			ledger.STRATEGIES[name] = uploaded.load(name, target)
+			if kind == 'indicators':
+				uploaded.loadIndicator(name, target)
+			else:
+				ledger.STRATEGIES[name] = uploaded.load(name, target)
 		except BaseException as exc:
 			for a, b in moves:
 				if os.path.exists(b):
@@ -1071,9 +1199,16 @@ def act(service, name, action):
 	elif action == 'disable':
 		if not live:
 			raise ToolError("%s is not enabled" % name)
-		ledger.STRATEGIES.pop(name, None)
-		sys.modules.pop(uploaded.moduleName(name), None)
-		where = os.path.join(uploaded.root(dataDir(service)), 'drafts')
+		if kind == 'indicators':
+			users = [code for code, state in takers(service, name) if state == 'enabled']
+			if users:
+				raise ToolError("%s is taken by %s, enabled: disable %s first"
+								% (name, ', '.join(users), 'it' if len(users) == 1 else 'them'))
+			uploaded.unloadIndicator(name)
+		else:
+			ledger.STRATEGIES.pop(name, None)
+			sys.modules.pop(uploaded.moduleName(name), None)
+		where = os.path.join(uploaded.root(dataDir(service), kind), 'drafts')
 		os.makedirs(where, exist_ok=True)
 		for a in (live, live[:-3] + '.json'):
 			if os.path.exists(a):
@@ -1082,9 +1217,9 @@ def act(service, name, action):
 		# an enabled one is disabled first: what the page asked about (uses)
 		if live and not draft:
 			act(service, name, 'disable')
-			draft = uploaded.drafts(dataDir(service)).get(name)
+			draft = uploaded.drafts(dataDir(service), kind).get(name)
 		if not draft:
-			raise ToolError("no uploaded strategy %r" % name)
+			raise ToolError("no uploaded strategy or indicator %r" % name)
 		for a in (draft, draft[:-3] + '.json'):
 			if os.path.exists(a):
 				os.remove(a)
@@ -1097,8 +1232,13 @@ def uses(service, name):
 	"""
 	What runs `name` now, a line each, for the page to say before it is
 	disabled or deleted: the live sessions trading it, with their open trades,
-	and the simulations. Nothing here is stopped - that stays the user's.
+	and the simulations. Nothing here is stopped - that stays the user's. For
+	an indicator: the strategies that take it.
 	"""
+	if kindOf(service, name) == 'indicators':
+		return ["%s strategy %s takes it%s" % (
+			state, code, ": disable that first" if state == 'enabled' else ": its backtests will fail")
+			for code, state in takers(service, name)]
 	out = []
 	live = service.live
 	for session in live.ids():
@@ -1260,7 +1400,8 @@ def route(handler, method, path, query):
 				asked = json.loads(body(handler) or b'{}')
 			except ValueError:
 				asked = {}
-			submitStrategy(handler.service, asked, 'imported from a file')
+			submit(handler.service, asked, 'imported from a file',
+				   'indicators' if asked.get('kind') == 'indicators' else 'strategies')
 			return reply(handler, 200, status(handler.service))
 		if path in ('/api/mcp/news', '/api/mcp/news/drop'):
 			try:

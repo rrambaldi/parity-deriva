@@ -9,6 +9,7 @@ process, so a loop and a memory eater are each stopped the real way.
 """
 
 import base64
+import datetime
 import hashlib
 import html
 import json
@@ -28,6 +29,7 @@ import pandas as pd
 
 from parity_deriva.backtest import ledger
 from parity_deriva.data import calendar
+from parity_deriva.event.event import CandleEvent
 from parity_deriva.strategy import uploaded
 from parity_deriva.tests.web_test import StoreCase
 from parity_deriva.web import mcp
@@ -56,6 +58,55 @@ class EveryThird(H4):
 		return 1, stop, self.levels(candle, 1, stop, 2.0)
 '''
 
+KELTNER = '''
+from parity_deriva.lib.streaming import Series
+
+
+class Keltner:
+	"""Keltner channel: the EMA of the closes, and K times the ATR either side of it."""
+	PANEL = False
+	LINES = ('upper', 'middle', 'lower')
+
+	def __init__(self, period=20, k=2.0):
+		self.period, self.k = int(period), k
+		self.series = Series(ema=(self.period,), atr=self.period)
+
+	def add(self, candle):
+		self.series.add(candle)
+
+	def value(self):
+		middle, atr = self.series.ema(self.period), self.series.atr()
+		if middle is None or atr is None:
+			return None
+		return (middle + self.k * atr, middle, middle - self.k * atr)
+'''
+
+#: a strategy that takes it: its state is the indicator itself
+TAKER = '''
+from parity_deriva.strategy.H4 import H4
+from parity_deriva.strategy.uploaded import indicator
+
+Keltner = indicator('KELTNER 1')
+
+
+class BandBreak(H4):
+	GRANULARITY = 'H1'
+	DESCRIPTION = "Long on a close over the upper Keltner band, the stop on the middle one, 2R."
+	INDICATORS = ({'indicator': 'KELTNER 1', 'period': 10},)
+
+	def setup(self, args):
+		self._set(args, 'period', 10)
+
+	def series(self):
+		return Keltner(period=self.period)
+
+	def signal(self, state, candle):
+		bands = state.value()
+		if not bands or candle.mid['c'] <= bands[0]:
+			return None
+		return 1, bands[1], self.levels(candle, 1, bands[1], 2.0)
+'''
+
 
 class CheckTest(unittest.TestCase):
 
@@ -72,6 +123,76 @@ class CheckTest(unittest.TestCase):
 							 ("def f(:", "line 1")):
 			problems = uploaded.check(source)
 			self.assertTrue(any(word in p for p in problems), (source, problems))
+
+	def test_a_strategy_takes_an_uploaded_indicator_by_its_whole_code_and_nothing_else(self):
+		taking = ("from parity_deriva.strategy.uploaded import indicator\nK = indicator('KELTNER 2')\n"
+				  "INDICATORS = ({'indicator': 'RANGE 1', 'period': 5}, {'kind': 'ema'})\n")
+		self.assertEqual(uploaded.check(taking), [])
+		self.assertEqual(uploaded.used(taking), ['KELTNER 2', 'RANGE 1'])
+		for source, word in ((taking.replace("'KELTNER 2'", "'KELTNER'"), "whole code"),
+							 (taking.replace("'KELTNER 2'", "name"), "whole code"),
+							 (taking.replace("'RANGE 1'", "'RANGE'"), "whole code"),
+							 ("from parity_deriva.strategy.uploaded import load", "nothing else"),
+							 ("from parity_deriva.strategy.uploaded import indicator as i", "nothing else"),
+							 ("import parity_deriva.strategy.uploaded", "import of")):
+			problems = uploaded.check(source)
+			self.assertTrue(any(word in p for p in problems), (source, problems))
+
+
+class IndicatorTest(unittest.TestCase):
+	"""examine(): what a submitted indicator is run through, on a random walk."""
+
+	def setUp(self):
+		self.where = tempfile.mkdtemp()
+		self.addCleanup(shutil.rmtree, self.where)
+		self.candles, price, step = [], 1.10, 0.0
+		for i in range(300):
+			step = (step * 7 + 3) % 11  # a walk that is the same every run
+			before, price = price, price + (step - 5) * 0.0002
+			bar = {'o': before, 'h': max(before, price) + 0.0005, 'l': min(before, price) - 0.0005, 'c': price}
+			self.candles.append(CandleEvent({'time': datetime.datetime(2024, 1, 1) + datetime.timedelta(hours=i),
+											 'mid': bar, 'bid': bar, 'ask': bar, 'volume': 1}))
+
+	def made(self, source, code='TRY 1'):
+		path = os.path.join(self.where, uploaded.fileName(code))
+		with open(path, 'w') as handle:
+			handle.write(source)
+		self.addCleanup(uploaded.unloadIndicator, code)
+		return uploaded.loadIndicator(code, path)
+
+	def test_a_price_with_three_lines_is_drawn_on_the_candles(self):
+		found = uploaded.examine(self.made(KELTNER), self.candles)
+		self.assertEqual((found['class'], found['panel'], found['lines'], found['warmup']),
+						 ('Keltner', False, ['upper', 'middle', 'lower'], 19))
+		self.assertEqual(found['parameters'], [{'name': 'period', 'default': 20}, {'name': 'k', 'default': 2.0}])
+		upper, middle, lower = found['values']
+		self.assertTrue(upper['min'] > lower['min'] and upper['last'] > middle['last'] > lower['last'])
+		curves = uploaded.drawn({'indicator': 'TRY 1', 'period': 10}, self.candles)
+		self.assertEqual([c['label'] for c in curves], ['Keltner 10 upper', 'Keltner 10 middle', 'Keltner 10 lower'])
+		self.assertEqual([len(c['values']) for c in curves], [300] * 3)
+		self.assertEqual((curves[0]['values'][8], curves[0]['panel']), (None, False))
+
+	def test_what_the_chart_or_a_strategy_would_find_out_later_is_refused_now(self):
+		atr = KELTNER.replace("PANEL = False\n\tLINES = ('upper', 'middle', 'lower')", "PANEL = False").replace(
+			"return (middle + self.k * atr, middle, middle - self.k * atr)", "return atr")
+		for source, word in (
+				(atr, "a number of its own scale - PANEL = True"),
+				(atr.replace("PANEL = False", "PANEL = 'price'"), "PANEL = True for the strip"),
+				(KELTNER.replace('\t"""Keltner channel: the EMA of the closes, and K times the ATR either '
+								 'side of it."""\n', ''), "a docstring"),
+				(KELTNER.replace("\tLINES = ('upper', 'middle', 'lower')\n", ""), "name them, LINES"),
+				(KELTNER.replace("('upper', 'middle', 'lower')", "('upper', 'lower')"), "LINES names 2 lines"),
+				(KELTNER.replace("return (middle", "return 'up' or (middle"), "value() gave 'up'"),
+				(KELTNER.replace("if middle is None or atr is None:", "if True:"), "no number in 300 candles"),
+				(KELTNER.replace("def __init__(self, period=20, k=2.0):", "def __init__(self, period=20, k=None):"),
+				 "needs a number for its default"),
+				(KELTNER.replace("PANEL = False", "PANEL = True\n\tseen = [0]").replace(
+					"self.series.add(candle)", "self.series.add(candle)\n\t\tself.seen[0] += 1").replace(
+					"return (middle + self.k * atr, middle, middle - self.k * atr)",
+					"return (atr, atr, self.seen[0])"), "keeps state on the class")):
+			with self.assertRaises(uploaded.UploadError, msg=word) as refused:
+				uploaded.examine(self.made(source), self.candles)
+			self.assertIn(word, str(refused.exception))
 
 
 class VersionTest(unittest.TestCase):
@@ -194,7 +315,7 @@ class MCPTest(StoreCase):
 		# and get_news first, the one the instructions send it to before the rest;
 		# then the two the data scripts push with
 		self.assertEqual(names, ['get_news', 'list_strategies', 'get_source', 'list_data',
-								 'submit_strategy', 'list_helpers', 'request_feature',
+								 'submit_strategy', 'submit_indicator', 'list_helpers', 'request_feature',
 								 'run_backtest', 'propose_public', 'push_calendar', 'push_candles'])
 		data, _ = self.tool('list_data')
 		self.assertEqual(data['instruments'][0]['instrument'], 'EUR_USD')
@@ -490,6 +611,101 @@ class MCPTest(StoreCase):
 											  ask=first, bid=first)[0])
 		with self.assertRaises(mcp.ToolError):
 			mcp.call(self.service, 'push_calendar', {'events': [event]}, self.base, 'claude.ai')
+
+	def test_an_assistant_writes_an_indicator_a_strategy_takes_and_the_chart_draws(self):
+		self.bearer = self.service.oauth.newSecret()
+		self.addCleanup(lambda: (ledger.STRATEGIES.pop('BAND-BREAK 1', None),
+								 uploaded.unloadIndicator('KELTNER 1')))
+		rules = self.rpc('initialize', {'protocolVersion': '2025-06-18'})['instructions']
+		self.assertIn('submit_indicator', rules)
+		saved, failed = self.tool('submit_indicator', name='KELTNER', source=KELTNER)
+		self.assertFalse(failed, saved)
+		self.assertEqual((saved['name'], saved['state'], saved['panel'], saved['lines']),
+						 ('KELTNER 1', 'draft', False, ['upper', 'middle', 'lower']))
+		self.assertIn("indicator('KELTNER 1')", saved['next'])
+		self.assertNotIn('KELTNER 1', uploaded.LOADED)  # a draft is never imported here
+		# checked in the sandbox on the stored candles: a price off them is refused
+		wrong, failed = self.tool('submit_indicator', name='RANGE', source=KELTNER.replace(
+			"return (middle + self.k * atr, middle, middle - self.k * atr)", "return atr").replace(
+			"\tLINES = ('upper', 'middle', 'lower')\n", ""))
+		self.assertTrue(failed)
+		self.assertIn('PANEL = True', wrong)
+		# one name is one thing, and a strategy's version is written out
+		self.assertIn('one of the indicators', self.tool('submit_strategy', name='KELTNER', source=GOOD)[0])
+		self.assertIn('whole code', self.tool('submit_strategy', name='BAND-BREAK', source=TAKER.replace(
+			"indicator('KELTNER 1')", "indicator('KELTNER')"))[0])
+
+		# a draft strategy takes the draft indicator in the sandbox, and its
+		# backtest draws it on the candles
+		taker, failed = self.tool('submit_strategy', name='BAND-BREAK', source=TAKER)
+		self.assertFalse(failed, taker)
+		run, failed = self.tool('run_backtest', strategy='BAND-BREAK', instrument='EUR_USD',
+								granularity='H1', **{'from': '2017-02-01', 'to': '2017-02-09'})
+		self.assertFalse(failed, run)
+		status, raw, _ = self.http('/api/backtest', dict(
+			urllib.parse.parse_qsl(urllib.parse.urlsplit(run['link']).query), cachedOnly=1),
+			{'X-Parity-Deriva': '1'})
+		payload = json.loads(raw)
+		self.assertEqual([(c['label'], c['panel']) for c in payload['indicators']],
+						 [('Keltner 10 upper', False), ('Keltner 10 middle', False), ('Keltner 10 lower', False)])
+		self.assertEqual(len(payload['indicators'][0]['values']), len(payload['candles']))
+
+		act = lambda name, action: self.http('/api/mcp/strategy', {'name': name, 'action': action},
+											 {'X-Parity-Deriva': '1'})
+		# the strategy waits for its indicator
+		status, raw, _ = act('BAND-BREAK 1', 'enable')
+		self.assertEqual(status, 400, raw)
+		self.assertIn(b'takes KELTNER 1: enable it first', raw)
+		self.assertEqual(act('KELTNER 1', 'enable')[0], 200)
+		status, raw, _ = act('BAND-BREAK 1', 'enable')
+		self.assertEqual(status, 200, raw)
+		self.assertEqual([(r['name'], r['state']) for r in json.loads(raw)['indicators']], [('KELTNER 1', 'enabled')])
+		self.assertEqual([(i['code'], i['state']) for i in self.tool('list_helpers')[0]['indicators']],
+						 [('KELTNER 1', 'enabled')])
+		# and the indicator stays while an enabled strategy takes it
+		self.assertEqual(json.loads(self.http('/api/mcp/uses?name=KELTNER%201')[1])['uses'],
+						 ['enabled strategy BAND-BREAK 1 takes it: disable that first'])
+		status, raw, _ = act('KELTNER 1', 'disable')
+		self.assertEqual(status, 400)
+		self.assertIn(b'taken by BAND-BREAK 1', raw)
+
+		# the strategy's pull request brings the indicator the repository lacks
+		self.settings.PUBLIC_REPO, self.settings.GITHUB_TOKEN = 'pub/strats', 'secret'
+		calls = []
+
+		def github(token, method, path, body=None):
+			calls.append((method, path, body))
+			if method == 'GET' and '/contents/' in path:
+				raise mcp.ToolError("GitHub said 404 to GET %s: Not Found" % path)
+			return {('GET', '/repos/pub/strats'): {'default_branch': 'main', 'permissions': {'push': True}},
+					('GET', '/repos/pub/strats/git/ref/heads/main'): {'object': {'sha': 'abc'}},
+					('POST', '/repos/pub/strats/pulls'): {'html_url': 'https://github.com/pub/strats/pull/8',
+														  'number': 8}}.get((method, path), {})
+		for code in ('BAND-BREAK 1', 'KELTNER 1'):
+			self.assertFalse(self.tool('propose_public', strategy=code, note='2017, a week')[1])
+		with unittest.mock.patch.object(mcp, 'github', github):
+			self.assertEqual(self.http('/api/mcp/pull', {'name': 'BAND-BREAK 1'}, {'X-Parity-Deriva': '1'})[0], 200)
+			put = [path for method, path, body in calls if method == 'PUT']
+			self.assertEqual(put, ['/repos/pub/strats/contents/strategies/BAND-BREAK/BAND-BREAK%401.py',
+								   '/repos/pub/strats/contents/strategies/BAND-BREAK/BAND-BREAK%401.json',
+								   '/repos/pub/strats/contents/indicators/KELTNER/KELTNER%401.py',
+								   '/repos/pub/strats/contents/indicators/KELTNER/KELTNER%401.json'])
+			opened = [body for method, path, body in calls if path == '/repos/pub/strats/pulls'][0]
+			self.assertIn('takes the indicators KELTNER 1', opened['body'])
+			calls[:] = []
+			status, raw, _ = self.http('/api/mcp/pull', {'name': 'KELTNER 1'}, {'X-Parity-Deriva': '1'})
+		self.assertEqual(status, 200, raw)
+		self.assertEqual([r['pull']['number'] for r in json.loads(raw)['indicators']], [8])
+		branch = [body for method, path, body in calls if method == 'POST' and path.endswith('/git/refs')][0]
+		self.assertTrue(branch['ref'].startswith('refs/heads/indicator/KELTNER-v1-'), branch)
+		card = [body for method, path, body in calls if path.endswith('KELTNER%401.json')][0]
+		self.assertEqual(json.loads(base64.b64decode(card['content']))['panel'], False)
+
+		# off in the other order: the strategy, then the indicator
+		self.assertEqual(act('BAND-BREAK 1', 'delete')[0], 200)
+		self.assertEqual(act('KELTNER 1', 'disable')[0], 200)
+		self.assertNotIn('KELTNER 1', uploaded.LOADED)
+		self.assertEqual(json.loads(act('KELTNER 1', 'delete')[1])['indicators'], [])
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

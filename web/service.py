@@ -2075,7 +2075,10 @@ class Service(object):
 			# something that draws what it is handed
 			# highs and lows as well as closes: an ATR of the closes is a
 			# different number wearing the same name
-			'indicators': indicators.curves(specs, closes, highs, lows),
+			'indicators': [curve for spec in specs or () for curve in (
+				# an uploaded one is fed the candles the strategy was fed
+				uploaded.drawn(spec, result.candles) if 'indicator' in spec
+				else [indicators.curve(spec, closes, highs, lows)])],
 			# RG2 - the slope measure and the percentiles of it, for the
 			# shading the chart offers. Not a signal and not a strategy's
 			# curve: it is the reading REGIME_SLOPE_MIN will be chosen from,

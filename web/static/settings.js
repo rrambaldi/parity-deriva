@@ -295,23 +295,19 @@ function mcpButtons(s, view) {
     return button;
   });
 }
-// the rows last shown, by name: what the code's dialog says above it
+// the rows last shown, by name: what the code's dialog says above it. An
+// indicator's has kind 'indicators'
 let mcpStrategies = {};
 
-async function showMcp(state) {
-  state = state || await ask('api/mcp');
-  $('mcp-url').textContent = new URL('mcp', location.href).href;
-  $('mcp-state').textContent = (state.secret ? 'a token is set' : 'no token yet: make one to connect an assistant')
-    + (state.clients.length ? ` \u00b7 connected: ${state.clients.join(', ')}` : '');
-  $('mcp-disconnect').disabled = !state.clients.length;
-  $('mcp-show').disabled = !state.secret;
-  const rows = $('mcp-rows');
+// the rows of one table, strategies or indicators
+function mcpFill(rows, items) {
   rows.textContent = '';
-  mcpStrategies = Object.fromEntries(state.strategies.map((s) => [s.name, s]));
-  for (const s of state.strategies) {
+  for (const s of items) {
     const tr = rows.insertRow();
+    const drawn = s.kind !== 'indicators' ? ''
+      : s.panel ? 'in its own strip \u00b7 ' : 'on the candles \u00b7 ';
     for (const text of [s.name, s.state, s.client || 'unknown', s.submitted ? day(s.submitted) : '',
-      s.description || '']) {
+      drawn + (s.description || '')]) {
       tr.insertCell().textContent = text;
     }
     // the server it was written on (its stamp), and where it is on its way
@@ -331,7 +327,22 @@ async function showMcp(state) {
     tr.cells[4].title = 'double click: the whole description';
     tr.insertCell().append(...mcpButtons(s, true));
   }
+}
+
+async function showMcp(state) {
+  state = state || await ask('api/mcp');
+  $('mcp-url').textContent = new URL('mcp', location.href).href;
+  $('mcp-state').textContent = (state.secret ? 'a token is set' : 'no token yet: make one to connect an assistant')
+    + (state.clients.length ? ` \u00b7 connected: ${state.clients.join(', ')}` : '');
+  $('mcp-disconnect').disabled = !state.clients.length;
+  $('mcp-show').disabled = !state.secret;
+  const rows = $('mcp-rows');
+  const indicators = (state.indicators || []).map((s) => ({ ...s, kind: 'indicators' }));
+  mcpStrategies = Object.fromEntries([...state.strategies, ...indicators].map((s) => [s.name, s]));
+  mcpFill(rows, state.strategies);
   $('mcp-strategies').hidden = !state.strategies.length;
+  mcpFill($('mcp-indicator-rows'), indicators);
+  $('mcp-indicators').hidden = !indicators.length;
   const asked = $('mcp-request-rows');
   asked.textContent = '';
   for (const r of state.requests || []) {
@@ -426,6 +437,7 @@ function openRow(event) {
   getSelection().removeAllRanges();
 }
 $('mcp-rows').addEventListener('dblclick', openRow);
+$('mcp-indicator-rows').addEventListener('dblclick', openRow);
 $('mcp-news-rows').addEventListener('dblclick', openRow);
 
 // the buttons on a row, and the same ones in the code's dialog, which closes
@@ -465,13 +477,16 @@ async function mcpAct(event) {
       const state = await post('api/mcp/pull', JSON.stringify({ name }));
       $('source-dialog').close();
       await showMcp(state);
-      const made = state.strategies.find((x) => x.name === name);
+      const made = [...state.strategies, ...(state.indicators || [])].find((x) => x.name === name);
       mcpSay(made && made.pull ? `${name}: pull request ${made.pull.url}` : `${name}: done`);
       return;
     }
     const enabled = (mcpStrategies[name] || {}).state === 'enabled';
+    const indicator = (mcpStrategies[name] || {}).kind === 'indicators';
     let asked = {
-      enable: `Enable ${name}? It will run inside the service: in the simulations, the sets and `
+      enable: indicator ? `Enable ${name}? Strategies can take it then, and the enabled ones run it `
+        + 'inside the service. Read its code first.'
+        : `Enable ${name}? It will run inside the service: in the simulations, the sets and `
         + 'the live sessions. Read its code first.',
       disable: `Disable ${name}? It goes back to being a draft.`,
       delete: enabled ? `Delete ${name}? It is enabled: it is disabled first, then deleted. `
@@ -492,27 +507,30 @@ async function mcpAct(event) {
   }
 }
 $('mcp-rows').addEventListener('click', mcpAct);
+$('mcp-indicator-rows').addEventListener('click', mcpAct);
 $('source-actions').addEventListener('click', mcpAct);
 
 // each file named as download named it, NAME@N.py: back as NAME, whose next
 // version it becomes (a browser's " (1)" for a second copy goes too)
-$('mcp-import').addEventListener('click', async () => {
-  const files = [...$('mcp-file').files];
+async function mcpImport(input, kind) {
+  const files = [...$(input).files];
   if (!files.length) { mcpSay('choose the .py files to import'); return; }
   const said = [];
   for (const file of files) {
     const name = file.name.replace(/\.py$/i, '').replace(/ \(\d+\)$/, '').replace(/[@ ]\d+$/, '');
     try {
-      await post('api/mcp/import', JSON.stringify({ name, source: await file.text() }));
+      await post('api/mcp/import', JSON.stringify({ name, source: await file.text(), kind }));
       said.push(`${name}: imported`);
     } catch (error) {
       said.push(`${name}: ${error.message || error}`);
     }
   }
-  $('mcp-file').value = '';
+  $(input).value = '';
   mcpSay(said.join('\n'));
   await showMcp();
-});
+}
+$('mcp-import').addEventListener('click', () => mcpImport('mcp-file', 'strategies'));
+$('mcp-indicator-import').addEventListener('click', () => mcpImport('mcp-indicator-file', 'indicators'));
 
 // the token in its box, with its copy button, and the button to hide it
 function mcpShowToken(secret) {

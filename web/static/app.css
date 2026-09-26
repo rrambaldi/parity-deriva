@@ -408,6 +408,26 @@ section {
   #mcp-rows td:last-child button { white-space: nowrap; margin: 2px 6px 2px 0; }
   #source-dialog .dialog-head { flex-wrap: wrap; row-gap: 8px; }
 }
+/* the indicators, under the strategies and laid out as they are */
+#mcp-indicators-box { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+#indicators-hint { color: var(--text-3); margin: 4px 0 8px; max-width: 110ch; }
+#mcp-indicator-files { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 8px 0; }
+#mcp-indicators[hidden] { display: none; }
+#mcp-indicators td:last-child { white-space: nowrap; }
+#mcp-indicators td:nth-child(5) { max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; }
+#mcp-indicators tr.open td:nth-child(5) { white-space: normal; }
+#mcp-indicator-rows td { cursor: default; }
+#mcp-indicators td:last-child button + button { margin-left: 6px; }
+@media (max-width: 600px) {
+  #mcp-indicators thead { display: none; }
+  #mcp-indicator-rows tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; border-bottom: 1px solid var(--line); padding: 4px 0; }
+  #mcp-indicator-rows td { border: 0; }
+  #mcp-indicator-rows td:nth-child(3), #mcp-indicator-rows td:nth-child(4) { display: none; }
+  #mcp-indicator-rows td:nth-child(5), #mcp-indicator-rows td:last-child { grid-column: 1 / -1; }
+  #mcp-indicator-rows td:nth-child(5) { max-width: none; width: auto; }
+  #mcp-indicator-rows td:last-child { white-space: normal; }
+  #mcp-indicator-rows td:last-child button { white-space: nowrap; margin: 2px 6px 2px 0; }
+}
 #source-dialog { width: min(980px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
 #mcp-source { margin: 0; overflow: auto; font-family: var(--font-mono); font-size: var(--fs-small); background: var(--raised); padding: 8px; border-radius: var(--radius-s); }
 /* the buttons sit on the line of the boxes, under the names of the ones that

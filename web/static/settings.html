@@ -161,6 +161,26 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
     <thead><tr><th>strategy</th><th>state</th><th>client</th><th>submitted</th><th>description</th><th></th></tr></thead>
     <tbody id="mcp-rows"></tbody>
   </table>
+  <!-- the indicators the assistants wrote (submit_indicator), in the same two
+       states as the strategies. A strategy that takes one loads only once the
+       indicator is enabled, and one an enabled strategy takes stays enabled
+       (web/mcp.py act) -->
+  <div id="mcp-indicators-box">
+    <h2 class="panel-title">indicators</h2>
+    <p id="indicators-hint">Written by the assistants, or imported from a file: a class fed one
+      candle at a time. Drawn on the candles when it gives a price, in the strip under them when
+      it gives a number of its own scale. A strategy takes one once it is enabled.</p>
+    <div id="mcp-indicator-files">
+      <label>indicator files
+        <input type="file" id="mcp-indicator-file" accept=".py,text/x-python" multiple>
+      </label>
+      <button type="button" id="mcp-indicator-import" data-icon="upload">import as drafts</button>
+    </div>
+    <table id="mcp-indicators" hidden>
+      <thead><tr><th>indicator</th><th>state</th><th>client</th><th>submitted</th><th>description</th><th></th></tr></thead>
+      <tbody id="mcp-indicator-rows"></tbody>
+    </table>
+  </div>
   <!-- what an assistant asked for instead of writing it into a strategy: an
        indicator or a function the helpers do not have (request_feature) -->
   <table id="mcp-requests" hidden>
