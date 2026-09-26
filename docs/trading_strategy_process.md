@@ -8,7 +8,8 @@ Versione corta della fase 1, una strategia alla volta. Quella completa è
 Una strategia è **codice + parametri**. Si cerca una buona combinazione in
 simulazione (sweep + correlazioni, in loop), la si prova in **demo** sullo
 stesso broker, poi va **live**. Niente paper trading. Ogni passaggio ha un
-gate scritto: se non passa, torna indietro o muore.
+gate scritto: se non passa, torna indietro. Scartarla (`DEAD`) lo decidi
+sempre tu.
 
 ---
 
@@ -20,13 +21,14 @@ gate scritto: se non passa, torna indietro o muore.
 | `DEMO` | parametri congelati, gira su un account demo |
 | `LIVE` | soldi veri: prima a size ridotta (ramp), poi piena |
 | `SUSPENDED` | fermata da una protezione, in attesa di verifica |
-| `DEAD` | scartata |
+| `DEAD` | scartata, sempre da te |
 
 ALIVE = `LIVE`.
 
 **Versioni.** Una strategia ha nome e versione (es. `M1502 v3`). In `SIM` i
 parametri cambiano liberamente. Da `DEMO` in poi sono congelati: cambiare
-codice o parametri crea una nuova versione, che riparte da `SIM`.
+codice o parametri crea una nuova versione, che riparte da `SIM`. Le
+versioni si contano, senza limite.
 
 ---
 
@@ -38,12 +40,17 @@ Lo storico si divide in due pezzi:
 - **holdout**: l'ultimo ~25% dello storico, almeno 1 anno. Nessuno lo guarda
   durante il loop.
 
-L'holdout si apre **una volta per versione**, al gate SIM → DEMO. Se la
-versione fallisce lì, muore. Dopo **3 versioni bocciate sull'holdout** la
-strategia è `DEAD`: a quel punto l'holdout è consumato.
+L'holdout si apre **una volta per versione**, al gate SIM → DEMO. Se la versione non passa,
+torna a `SIM`: riprovare con una versione nuova o scartare la strategia
+(`DEAD`) lo decidi tu. La piattaforma conta quante volte l'holdout di quello
+strumento è stato aperto e lo mostra nel gate: più aperture, meno l'holdout
+è un dato mai visto. È un'informazione, non un blocco.
 
-Si tiene il conto dei tentativi: quante combinazioni di sweep e quanti
-filtri provati. Più tentativi = più probabile che il risultato sia fortuna.
+Gli sweep sul periodo di sviluppo sono **liberi**: quanti ne servono, anche
+tanti quando i parametri spostano molto i risultati. Non si contano e non
+pesano sul giudizio. Dall'overfitting proteggono l'holdout, che nessuno sweep
+vede, e l'altopiano al gate: il punto scelto deve avere vicini buoni anche
+loro.
 
 ---
 
@@ -163,7 +170,8 @@ Da aggiungere:
 - la curva demo **mai sotto il 5° percentile** della banda Monte Carlo
 - serie di perdite ≤ la peggiore della scheda
 
-Se non passa: di nuovo `SIM` (nuova versione) o `DEAD`.
+Se non passa: resta in `DEMO`, torna a `SIM` (nuova versione) o `DEAD`.
+Decidi tu.
 
 ---
 
@@ -185,7 +193,7 @@ Per strategia (da fare):
 
 | Evento | Azione |
 |---|---|
-| drawdown > 1.5 × max drawdown della scheda | `DEAD` |
+| drawdown > 1.5 × max drawdown della scheda | `SUSPENDED`, con la proposta di scartarla |
 | curva sotto il 5° percentile della banda | `SUSPENDED` |
 | serie di perdite > 1.5 × la peggiore della scheda | `SUSPENDED` |
 
@@ -198,8 +206,9 @@ Più strategie insieme (mix) e portafoglio: fase 2 e 3, in [ROADMAP.md](ROADMAP.
 
 ### SUSPENDED
 
-La sessione si ferma. La strategia torna in `DEMO` per riverificare. Alla
-seconda sospensione è `DEAD`.
+La sessione si ferma. Poi decidi tu: riverificare in `DEMO`, tornare a
+`SIM` o `DEAD`. Dopo un DD oltre 1.5× o alla seconda sospensione la pagina
+propone `DEAD`, ma non lo applica.
 
 ---
 
@@ -210,7 +219,7 @@ seconda sospensione è `DEAD`.
 | codice + regole + ipotesi | `strategy/`, `DESCRIPTION` |
 | sweep e run | `runs/sweeps/` (c'è già), cantina S3 / Drive (c'è già) |
 | soglie della policy | `etc/settings.py`, accanto a `PROMOTE_*` e `DAILY_LOSS_PCT` |
-| scheda strategia: stato, storico, riferimento, tentativi holdout | un JSON per versione in `DATA_DIR` (da fare) |
+| scheda strategia: stato, storico, riferimento, aperture dell'holdout | un JSON per versione in `DATA_DIR` (da fare) |
 
 Storico della scheda: `[{data, da, a, perché}]`, scritto dalla piattaforma a
 ogni cambio di stato.
@@ -241,19 +250,17 @@ flowchart TD
     B --> C[Correlazioni<br/>indicatori ↔ P/L]
     C -->|filtro candidato| B
     C -->|niente di nuovo| D{Gate su holdout<br/>una volta per versione}
-    D -->|no, versione < 3| A
-    D -->|no, 3ª versione| X[DEAD]
+    D -->|no: nuova versione| A
+    D -.->|no: decidi tu| X[DEAD]
     D -->|sì + scheda| E[DEMO<br/>parametri congelati]
     E -->|allarme parità| E
     E -->|gate promote no| A
     E -->|gate promote sì| F[LIVE ramp 25%]
     F -->|30 trade dentro la banda| G[LIVE 100%]
-    F -->|sotto la banda / serie perdite| S[SUSPENDED]
-    G -->|sotto la banda / serie perdite| S
-    F -->|DD > 1.5× scheda| X
-    G -->|DD > 1.5× scheda| X
-    S -->|prima volta| E
-    S -->|seconda volta| X
+    F -->|sotto la banda / serie perdite / DD > 1.5×| S[SUSPENDED]
+    G -->|sotto la banda / serie perdite / DD > 1.5×| S
+    S -->|decidi tu: riverifica| E
+    S -.->|decidi tu| X
 
     style A fill:#fff3e0,stroke:#e65100
     style B fill:#ffe0b2,stroke:#f57c00

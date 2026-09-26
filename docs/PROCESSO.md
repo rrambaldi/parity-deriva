@@ -29,7 +29,8 @@ IDEA → STRATEGIA (codice + parametri)
      → DEMO  : stesso broker del live, parametri congelati
      → GATE  : promozione, giudicata dal server reale
      → LIVE  : prima 25% della size, poi 100%
-     → sempre sotto protezione: SUSPENDED o DEAD se qualcosa va storto
+     → sempre sotto protezione: SUSPENDED se qualcosa va storto
+     → DEAD solo quando lo decidi tu
 ```
 
 Niente paper trading: la demo gira già sul broker vero.
@@ -42,13 +43,13 @@ Niente paper trading: la demo gira già sul broker vero.
 | `DEMO` | gira su un account demo | congelati |
 | `LIVE` | soldi veri, prima in ramp (25%) poi piena | congelati |
 | `SUSPENDED` | fermata da una protezione, da riverificare | congelati |
-| `DEAD` | scartata | – |
+| `DEAD` | scartata, sempre da te: la piattaforma non scarta mai da sola | – |
 
 ALIVE = `LIVE`.
 
 **Versioni.** Ogni strategia ha nome e versione (es. `M1502 v3`). Da `DEMO`
 in poi cambiare codice o parametri crea una nuova versione, che riparte da
-`SIM`.
+`SIM`. Le versioni si contano (`v1`, `v2`, …), senza limite.
 
 ### Chi fa cosa (ruoli dei server)
 
@@ -103,11 +104,17 @@ Lo storico si taglia in due:
 - **holdout**: l'ultimo ~25%, almeno 1 anno. Nessuno lo guarda durante il
   loop.
 
-L'holdout si apre **una volta per versione**. Dopo **3 versioni bocciate**
-la strategia è `DEAD`: l'holdout ormai è consumato.
+L'holdout si apre **una volta per versione**. Se la versione non passa,
+torna a `SIM`: riprovare con una versione nuova o scartare la strategia
+(`DEAD`) lo decidi tu. La piattaforma conta quante volte l'holdout di quello
+strumento è stato aperto e lo mostra nel gate: più aperture, meno l'holdout
+è un dato mai visto. È un'informazione, non un blocco.
 
-Si conta quante combinazioni e quanti filtri sono stati provati. Più
-tentativi = più probabile che il risultato buono sia fortuna.
+Gli sweep sul periodo di sviluppo sono **liberi**: quanti ne servono, anche
+tanti quando i parametri spostano molto i risultati. Non si contano e non
+pesano sul giudizio. Dall'overfitting proteggono l'holdout, che nessuno sweep
+vede, e l'altopiano al gate: il punto scelto deve avere vicini buoni anche
+loro.
 
 ### 3.2 Sweep ✅
 
@@ -198,7 +205,7 @@ Esce dal gate. È il metro con cui si giudicano la demo e il live:
 - PF, expectancy, win rate, max DD, peggiore serie di perdite
 - **banda Monte Carlo**: rimescolando l'ordine dei trade si ottengono il 5°
   e il 95° percentile della curva di equity, trade per trade
-- quante versioni sono già state provate sull'holdout
+- quante volte l'holdout di quello strumento era già stato aperto (informazione)
 - storico dei cambi di stato: data, da, a, perché
 
 Un JSON per versione in `DATA_DIR`, scritto dalla piattaforma.
@@ -267,9 +274,9 @@ reale**, non chi la chiede.
 | trade chiusi in demo | ≥ 30 (`PROMOTE_TRADES`) | ✅ | resta in DEMO |
 | allarmi di parità | 0 | ✅ | sistemare l'esecuzione, resta in DEMO |
 | solo account demo nel record | sì | ✅ | rifiutato |
-| net in demo | ≥ 0 | 🔧 | torna a SIM (nuova versione) o DEAD |
-| curva demo dentro la banda Monte Carlo | mai sotto il 5° percentile | 🔧 | torna a SIM o DEAD |
-| serie di perdite | ≤ la peggiore della scheda | 🔧 | torna a SIM o DEAD |
+| net in demo | ≥ 0 | 🔧 | non promossa; poi decidi tu: più demo, SIM o DEAD |
+| curva demo dentro la banda Monte Carlo | mai sotto il 5° percentile | 🔧 | non promossa; poi decidi tu |
+| serie di perdite | ≤ la peggiore della scheda | 🔧 | non promossa; poi decidi tu |
 
 **Il buco più importante oggi:** `promote()` controlla giorni, trade e
 allarmi, ma non il risultato. Il net viene calcolato e nessuno lo guarda.
@@ -303,7 +310,7 @@ Una strategia in perdita in demo può passare. Primo cantiere.
 | server | perdita del giorno ≥ 3% | stop di tutte le sessioni fino al giorno dopo | ✅ |
 | server | a mano | stop all | ✅ |
 | sessione | live diverso dalla simulazione | allarme di parità (warn / halt) | ✅ |
-| strategia | DD > 1.5 × max DD della scheda | `DEAD` | 🔧 |
+| strategia | DD > 1.5 × max DD della scheda | `SUSPENDED`, con la proposta di scartarla | 🔧 |
 | strategia | curva sotto il 5° percentile della banda | `SUSPENDED` | 🔧 |
 | strategia | serie di perdite > 1.5 × la peggiore della scheda | `SUSPENDED` | 🔧 |
 
@@ -315,8 +322,10 @@ Una strategia in perdita in demo può passare. Primo cantiere.
 
 ### 7.4 SUSPENDED
 
-La sessione si ferma e la strategia torna in DEMO per riverificare. Alla
-seconda sospensione è `DEAD`.
+La sessione si ferma subito: ordini annullati, trade chiusi. Poi decidi tu:
+riverificare in DEMO, tornare a SIM con una versione nuova, o `DEAD`. La
+pagina propone `DEAD` dopo un DD oltre 1.5× quello della scheda o alla
+seconda sospensione, ma non lo applica.
 
 ---
 
@@ -328,8 +337,8 @@ seconda sospensione è `DEAD`.
 | SIM → DEMO | ≥ 100 trade; PF bootstrap basso > 1; altopiano; PF senza i 3 migliori > 1; batte la baseline casuale; holdout: net > 0, PF ≥ 0.7×, DD ≤ 1.5× | la piattaforma 🔧 (oggi a occhio) |
 | DEMO → LIVE | ≥ 20 giorni; ≥ 30 trade; 0 allarmi; solo demo ✅; net ≥ 0; dentro la banda; serie di perdite ok 🔧 | il server reale |
 | ramp → 100% | 30 trade dentro la banda | la piattaforma 🔧 |
-| LIVE → SUSPENDED | sotto la banda; serie di perdite oltre 1.5× | la piattaforma 🔧 |
-| LIVE → DEAD | DD oltre 1.5×; seconda sospensione | la piattaforma 🔧 |
+| LIVE → SUSPENDED | sotto la banda; serie di perdite oltre 1.5×; DD oltre 1.5× | la piattaforma 🔧 |
+| qualunque stato → DEAD | quando vuoi; la pagina lo propone dopo un DD oltre 1.5× o una seconda sospensione | tu |
 
 ---
 
@@ -380,9 +389,9 @@ Freccia verso l'Archivio etichettata "record demo", poi verso la corsia REAL eti
 7. Rombo giallo "Gate promozione (giudicato dal server reale)"
 8. Riquadro verde "LIVE ramp 25%" → freccia "30 trade dentro la banda" → riquadro verde scuro "LIVE 100%"
 
-In basso a destra due riquadri: "SUSPENDED" (ambra) e "DEAD" (rosso), con frecce tratteggiate che arrivano da gate e LIVE, etichettate "fuori banda / serie di perdite" e "DD oltre 1.5×".
+In basso a destra due riquadri: "SUSPENDED" (ambra) e "DEAD" (rosso). Verso SUSPENDED frecce tratteggiate dai riquadri LIVE, etichettate "fuori banda / serie di perdite / DD oltre 1.5×". Verso DEAD frecce tratteggiate dal Gate holdout e da SUSPENDED, con l'icona di una persona e l'etichetta "decidi tu".
 
-Una freccia di ritorno dal Gate holdout alla Strategia etichettata "bocciata: nuova versione (max 3)". Una freccia da SUSPENDED a DEMO etichettata "prima volta"; da SUSPENDED a DEAD "seconda volta".
+Una freccia di ritorno dal Gate holdout alla Strategia etichettata "bocciata: nuova versione, se vuoi". Una freccia da SUSPENDED a DEMO etichettata "riverifica, se vuoi".
 
 Legenda in basso: linea piena = c'è già, linea tratteggiata = da fare.
 orientation is landscape
@@ -393,14 +402,14 @@ render_generated_image
 prompt is Diagramma circolare "SIM – il loop di simulazione" di parity-deriva. Stile tecnico pulito, sfondo bianco.
 
 Al centro un grande cerchio con quattro tappe in senso orario, frecce arancioni:
-1. "Sweep" – sotto in piccolo: "parametri + ore (session) + news + stop/target + strumento, fino a 500 combinazioni"
+1. "Sweep" – sotto in piccolo: "parametri + ore (session) + news + stop/target + strumento; fino a 500 combinazioni per set, set quanti ne servono"
 2. "Leggi i risultati" – sotto: "paramEffects, score, altopiano non picco"
 3. "Correlazioni indicatori ↔ profit/loss" (bordo tratteggiato, etichetta "da fare") – sotto: "indicatori sulla barra prima del segnale, 5 fasce, bootstrap"
 4. "Filtro candidato → nuovo parametro dello sweep"
 
 Dal cerchio esce una freccia verso destra etichettata "niente migliora più" che porta a un rombo giallo "Gate holdout" con sotto in piccolo: "≥100 trade, PF bootstrap >1, batte la baseline casuale, holdout: net >0, PF ≥0.7×, DD ≤1.5×".
 
-Dal rombo: freccia verde "passa → scheda di riferimento → DEMO"; freccia rossa "bocciata → nuova versione (dopo 3: DEAD)".
+Dal rombo: freccia verde "passa → scheda di riferimento → DEMO"; freccia rossa "bocciata → nuova versione o DEAD, decidi tu".
 
 Nota a lato: "un filtro candidato non è mai una regola: deve superare l'holdout".
 orientation is landscape
@@ -415,12 +424,12 @@ Una barra lunga che rappresenta tutto lo storico di uno strumento, da sinistra (
 I primi tre quarti della barra in azzurro, etichetta "SVILUPPO – sweep e correlazioni vedono solo questo".
 L'ultimo quarto in grigio scuro con un lucchetto, etichetta "HOLDOUT – almeno 1 anno, aperto una volta per versione".
 
-Sopra la parte azzurra tante piccole frecce che vanno e vengono, etichetta "loop: prova, correggi, riprova".
+Sopra la parte azzurra tante piccole frecce che vanno e vengono, etichetta "loop: prova, correggi, riprova – sweep liberi, quanti ne servono".
 Sopra la parte grigia una sola freccia con un occhio, etichetta "si guarda una volta".
 
 A destra della barra, fuori dallo storico, un riquadro verde "DEMO – dati nuovi, mai visti".
 
-Sotto, tre contatori: "versione 1 ✗", "versione 2 ✗", "versione 3 ✗ → DEAD", con la scritta "dopo 3 bocciature l'holdout è consumato".
+Sotto la parte grigia un contatore "holdout aperto: 2 volte", con la scritta "si vede nel gate: più aperture, meno è un dato mai visto".
 orientation is landscape
 layout is block
 
@@ -469,13 +478,13 @@ Transizioni come frecce etichettate:
 - DEMO → LIVE ramp: "promozione"
 - LIVE ramp → LIVE 100%: "30 trade dentro la banda"
 - LIVE ramp → SUSPENDED e LIVE 100% → SUSPENDED: "sotto il 5° percentile della banda" oppure "serie di perdite > 1.5× la peggiore"
-- LIVE ramp → DEAD e LIVE 100% → DEAD: "drawdown > 1.5× max DD della scheda"
-- SUSPENDED → DEMO: "prima volta: si riverifica"
-- SUSPENDED → DEAD: "seconda volta"
+- LIVE ramp → SUSPENDED e LIVE 100% → SUSPENDED anche per "drawdown > 1.5× max DD della scheda"
+- SUSPENDED → DEMO: "decidi tu: si riverifica"
+- SUSPENDED → DEAD: "decidi tu", con l'icona di una persona; accanto in piccolo "proposto dopo DD > 1.5× o seconda sospensione"
 
 In alto una fascia orizzontale sopra tutti gli stati live: "livello server (c'è già): loss limit 3% al giorno · stop all · allarme di parità".
 
-Tutte le frecce verso SUSPENDED e DEAD tratteggiate con etichetta "da fare".
+Tutte le frecce verso SUSPENDED e DEAD tratteggiate con etichetta "da fare". Nessuna freccia porta a DEAD senza la persona.
 orientation is landscape
 layout is block
 

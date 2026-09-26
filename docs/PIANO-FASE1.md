@@ -24,6 +24,10 @@ Per ogni cantiere: obiettivo, scelte, file, dati, pagine/API/MCP, test,
   dopo ogni modifica ad `app.js` o `menu.js`. Screenshot con Chrome headless
   per le pagine toccate.
 - **Deploy**: solo con `deploy-prod.sh`, dopo la suite verde su dev.
+- **`DEAD` lo decide l'utente.** La piattaforma blocca un passaggio, ferma
+  una sessione e propone; non scarta mai una strategia da sola.
+- **Gli sweep in SIM sono liberi**: nessun limite al numero di set e nessun
+  conteggio che pesi sul giudizio.
 
 ---
 
@@ -34,7 +38,7 @@ proposta.
 
 | # | Domanda | Proposta | Serve a |
 |---|---|---|---|
-| D1 | Quando nasce una **versione** nuova? | Al gate SIM → DEMO. La versione è l'impronta del codice (hash del sorgente della strategia e degli indicatori che usa) più i parametri congelati (`groupKey` dei campi del form). In SIM i parametri cambiano senza creare versioni. Etichetta leggibile: `M1502 v3`, contata per strategia + strumento + granularità. | C2, C3 |
+| D1 | Quando nasce una **versione** nuova? | Al gate SIM → DEMO. La versione è l'impronta del codice (hash del sorgente della strategia e degli indicatori che usa, senza commenti e righe vuote) più i parametri congelati (`groupKey` dei campi del form). In SIM i parametri cambiano senza creare versioni. Etichetta leggibile: `M1502 v3`, contata per strategia + strumento + granularità. Nessun limite al numero di versioni. | C2, C3 |
 | D2 | Il **ramp** dal 25% al 100%: automatico o con un click? | Con un click. Dopo 30 trade dentro la banda la pagina live dice "ready for full size" e un pulsante riavvia il form al 100%, con la stessa conferma del capitale di oggi. Sono soldi veri: decide una persona. | C6 |
 | D3 | Che **canale** usano gli avvisi? | Sempre nella pagina (banner su live e logs) e nel log. In più l'email con `smtplib` (stdlib) se in `.env` ci sono i campi `SMTP_*`. Telegram eventualmente dopo. | C6 |
 | D4 | L'holdout è **per strumento** o **per strategia**? | Per strumento + granularità: una data di taglio sola, uguale per tutte le strategie su quello strumento. È più semplice e più severo: nessuna strategia viene provata su quel pezzo di storico. | C3 |
@@ -113,9 +117,12 @@ viene, con che numeri va giudicata e cosa le è successo.
 - **Scelte.**
   - Identità (D1): `id = sha1(codeHash + groupKey(fields))[:16]`. L'etichetta
     `M1502 v3` è contata per strategia + strumento + granularità.
+    `codeHash` è lo sha1 dei sorgenti senza commenti e righe vuote
+    (`tokenize` della stdlib): un commento non crea una versione.
   - Un modulo solo cambia lo stato: `cards.move(id, to, why, by)`. Aggiunge
     una riga allo storico e rifiuta i passaggi che non esistono (la tabella
-    di PROCESSO.md § 8).
+    di PROCESSO.md § 8). `DEAD` lo accetta solo da un utente (pulsante
+    "discard" sulla scheda), mai da un controllo automatico.
   - La scheda viaggia con la strategia: PC → archivio con `sync.py push`,
     archivio → server di trade con il push del form. I server di trade
     aggiornano lo stato (promozione, SUSPENDED, DEAD); l'archivio lo legge
@@ -138,8 +145,7 @@ viene, con che numeri va giudicata e cosa le è successo.
       "band": {"p5": [], "p50": [], "p95": []},
       "sample": {"from": "2015-01-01", "to": "2024-03-01"}
     },
-    "holdout": {"cut": "2024-03-01", "opened": true, "verdict": {}, "attempt": 1},
-    "tries": {"combos": 1840, "filters": 12}
+    "holdout": {"cut": "2024-03-01", "opened": true, "verdict": {}, "openings": 2}
   }
   ```
 
@@ -169,15 +175,14 @@ e scrive il verdetto nella scheda.
 
 - **Scelte.**
   - Registro `DATA_DIR/holdout.json`: per strumento + granularità (D4), la
-    data di taglio e i tentativi.
+    data di taglio e quante volte è stato aperto.
   - Taglio di default: `min(fine − 25% della durata, fine − 365 giorni)`,
     scritto alla prima scheda di quello strumento e poi fisso. I dati nuovi
     che arrivano dopo allungano l'holdout, non lo spostano.
   - Ogni backtest e ogni sweep con `to` oltre il taglio viene **tagliato**, con
     un avviso sulla pagina: `holdout starts 2024-03-01: the run stops there`.
     Solo il gate può leggere oltre.
-  - Il conteggio delle combinazioni provate (somma dei set) va nel registro e
-    poi nella scheda.
+  - Gli sweep sul periodo di sviluppo non hanno limiti e non si contano.
   - **Il gate**, pulsante sulla pagina di un run preferito. In ordine:
     1. controlli sullo sviluppo: ≥ 100 trade; limite basso del bootstrap del
        PF > 1; altopiano (i vicini nella griglia del set, cioè le righe che
@@ -185,11 +190,12 @@ e scrive il verdetto nella scheda.
        i 3 trade migliori > 1; baseline casuale (C5) sopra il 95° percentile;
     2. solo se passano tutti: lo stesso form sull'holdout, una volta. Net > 0,
        PF ≥ 0.7 × sviluppo, DD ≤ 1.5 × sviluppo;
-    3. il verdetto va nella scheda (`holdout.opened = true`). Se passa, la
-       scheda riceve il riferimento (C5) ed è pronta per la demo; se no conta
-       un tentativo;
-    4. al terzo tentativo fallito per strategia + strumento + granularità,
-       nuove schede rifiutate: `DEAD`.
+    3. il verdetto va nella scheda (`holdout.opened = true`) e il registro
+       conta un'apertura in più. Se passa, la scheda riceve il riferimento
+       (C5) ed è pronta per la demo; se no torna a `SIM`;
+    4. il dialog del verdetto mostra quante volte l'holdout di quello
+       strumento è già stato aperto. Nessun limite: riprovare o scartare
+       (`DEAD`) lo decide l'utente.
   - Il push a un server demo (`servers.push`) rifiuta un form senza una
     scheda che ha passato il gate (`GATE_REQUIRED`, default `1`).
 - **File.** Nuovo `performance/gate.py` (controlli puri, senza HTTP);
@@ -198,10 +204,11 @@ e scrive il verdetto nella scheda.
   `web/static/sim.js` e `app.js` (taglio disegnato sul grafico e nel form,
   pulsante del gate, dialog con il verdetto riga per riga); `etc/settings.py`
   (`HOLDOUT_SHARE=0.25`, `HOLDOUT_MIN_DAYS=365`, `GATE_MIN_TRADES=100`,
-  `GATE_PF_LOW=1.0`, `GATE_HOLDOUT_PF_RATIO=0.7`, `GATE_HOLDOUT_DD_RATIO=1.5`,
-  `GATE_MAX_VERSIONS=3`); `i18n/it.json`.
+  `GATE_PF_LOW=1.0`, `GATE_HOLDOUT_PF_RATIO=0.7`, `GATE_HOLDOUT_DD_RATIO=1.5`);
+  `i18n/it.json`.
 - **Test.** Nuovo `tests/gate_test.py`: ogni controllo che passa e che non
-  passa; holdout aperto una volta sola; terzo tentativo = DEAD. In
+  passa; holdout aperto una volta sola per versione; il contatore delle aperture
+  cresce; nessun `DEAD` automatico. In
   `tests/sweep_test.py`: uno sweep oltre il taglio viene tagliato.
 - **Fatto quando.** Nessuno sweep legge oltre il taglio; il gate gira una
   volta per versione e il verdetto sta nella scheda; il push in demo lo esige.
@@ -333,14 +340,16 @@ quando esce da quello che la simulazione permetteva.
 
   | Condizione | Azione |
   |---|---|
-  | DD della sessione > `LIVE_DD_RATIO` (1.5) × `maxDDpct` della scheda | `stop(session)` + scheda `DEAD` |
+  | DD della sessione > `LIVE_DD_RATIO` (1.5) × `maxDDpct` della scheda | `stop(session)` + `SUSPENDED`, con la proposta di scartarla |
   | curva sotto il 5° percentile della banda | `stop(session)` + `SUSPENDED` |
   | serie di perdite > `LIVE_STREAK_RATIO` (1.5) × `worstStreak` | `stop(session)` + `SUSPENDED` |
-  | seconda sospensione | `DEAD` |
 
   `stop(session)` annulla già gli ordini della sessione e chiude i suoi trade.
-- **SUSPENDED → DEMO.** Il form si rimanda in demo. Per una nuova promozione
-  contano solo le sessioni demo dopo la sospensione.
+- **Da SUSPENDED decide l'utente**, con tre pulsanti sulla pagina live:
+  rimanda in demo (per una nuova promozione contano solo le sessioni demo
+  dopo la sospensione), torna a SIM, scarta (`DEAD`). Dopo un DD oltre
+  `LIVE_DD_RATIO` o alla seconda sospensione la pagina propone di scartarla,
+  senza farlo.
 - **Monitoraggio.** Nella pagina live, per ogni form, un pannello "vs card":
   ultimi 50 trade (PF, expectancy, win rate) contro la scheda, la curva con
   la banda, il DD di adesso. Si calcola quando si apre la pagina: nessun cron.
@@ -355,8 +364,8 @@ quando esce da quello che la simulazione permetteva.
   `RAMP_TRADES=30`, `LIVE_DD_RATIO=1.5`, `LIVE_STREAK_RATIO=1.5`, `SMTP_*`);
   `web/static/live.js`, `live.html`, `logs.js`; `i18n/it.json`.
 - **Test.** `tests/real_money_test.py` e `tests/livesessions_test.py`: una
-  sessione finta che supera ogni soglia viene fermata con lo stato giusto; la
-  seconda sospensione dà DEAD; il ramp propone il 25%. Nuovo
+  sessione finta che supera ogni soglia viene fermata e va in `SUSPENDED`;
+  nessuna soglia mette `DEAD` da sola; il ramp propone il 25%. Nuovo
   `tests/notify_test.py`: banner scritto sempre, email solo se configurata
   (SMTP finto).
 - **Fatto quando.** Ogni soglia ferma la sessione con lo stato giusto nella
