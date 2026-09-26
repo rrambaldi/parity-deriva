@@ -6,12 +6,15 @@ the strategies and indicators enabled on it, to simulate them here.
 
     python scripts/sync.py push --to https://host/parity/mcp --token <a pc token>
     python scripts/sync.py push --to ... --mix 0123456789abcdef --dry-run
+    python scripts/sync.py push --run 20260926-120000-abcdef/3     # a run, no mix
+    python scripts/sync.py push --favourites                       # every starred run of a set
     python scripts/sync.py pull --from https://host/parity/mcp --token <a pc token>
     python scripts/sync.py pull     # PARITY_DERIVA_ARCHIVE_URL and PARITY_DERIVA_SYNC_TOKEN
 
 A mix goes with what it needs: the uploaded strategies its sets trade and the
 indicators those take (submit_strategy, submit_indicator: drafts there,
-enabled by hand), its sets and the runs in it. What was sent is kept in
+enabled by hand), its sets and the runs in it. A run goes the same way without
+a mix (--run, --favourites): verify it on the archive's run page. What was sent is kept in
 DATA_DIR/sync.json, and a file that has not changed since is not sent again.
 A pull brings each enabled version this server does not hold as a draft here,
 enabled on this server's settings page like any other. The token is a "pc"
@@ -182,6 +185,9 @@ def main(argv=None, report=print):
     parser.add_argument('--token', default=os.environ.get('PARITY_DERIVA_SYNC_TOKEN', ''),
                         help='a pc token of that server (default: PARITY_DERIVA_SYNC_TOKEN)')
     parser.add_argument('--mix', action='append', help='only this mix (its id); again for more')
+    parser.add_argument('--run', action='append', metavar='SET/N',
+                        help='a run of a set, without a mix; again for more')
+    parser.add_argument('--favourites', action='store_true', help='every starred run of a set, without a mix')
     parser.add_argument('--dry-run', action='store_true', help='say what would go, send nothing')
     args = parser.parse_args(argv)
     if not args.token or not args.to:
@@ -208,6 +214,30 @@ def main(argv=None, report=print):
     here = commit()
     codes = {}
     status = 0
+    items = []
+    for text in args.run or []:
+        sweep, _, n = text.partition('/')
+        if not n.isdigit():
+            report("--run %s: a run is SET/N, e.g. 20260926-120000-abcdef/3" % text)
+            return 2
+        items.append({'sweep': sweep, 'n': int(n)})
+    if args.favourites:
+        items += [{'sweep': f['source']['id'], 'n': f['source']['n']} for f in service.favourites()
+                  if (f.get('source') or {}).get('kind') == 'sweep']
+    if args.run or args.favourites:
+        missing = [i for i in items if service.sweepPayload(i['sweep'], i['n']) is None]
+        if missing:
+            report("runs %s have no saved trades - open them on the run page, then push again"
+                   % ', '.join('%s/%s' % (i['sweep'], i['n']) for i in missing))
+            return 1
+        pushRuns(upstream, service, items, codes, sent, report, args.dry_run, here)
+        if not args.dry_run:
+            report("%d run%s pushed - verify each on the other server's run page"
+                   % (len(items), '' if len(items) == 1 else 's'))
+        with open(kept + '.part', 'w') as handle:
+            json.dump(state, handle)
+        os.replace(kept + '.part', kept)
+        return 0
     for mix in service.mixes():
         if args.mix and mix['id'] not in args.mix:
             continue

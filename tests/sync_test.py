@@ -105,6 +105,32 @@ class SyncTest(unittest.TestCase):
         self.assertEqual([r['ok'] for r in results], [True, False])
         self.assertEqual(results[1]['first']['trade'], 1)
 
+    def test_a_run_goes_without_a_mix_and_is_checked_on_its_own(self):
+        fields = {'instrument': 'EUR_USD', 'granularity': 'H1', 'strategy': 'AG01',
+                  'from': T0.strftime('%Y-%m-%d'),
+                  'to': (T0 + datetime.timedelta(hours=199)).strftime('%Y-%m-%d')}
+        self.pc.startSweep(fields, {'risk': '1, 2'})
+        sweep = self.wait(self.pc.sweepStatus)['id']
+        self.wait(lambda: {'running': not any(s['id'] == sweep for s in self.pc.sweeps())})
+        lines = self.push('--run', '%s/2' % sweep)
+        self.assertIn('1 run pushed', lines[-1])
+        self.assertEqual(self.cloud.mixes(), [])
+        self.assertIsNone(self.cloud.sweepPayload(sweep, 1))
+        told = self.cloud.verify(sweep, 2)
+        self.assertTrue(told['ok'], told)
+        self.assertGreater(told['here']['trades'], 0)
+        # the starred runs, the ones already there not again
+        self.pc.addFavourite({'kind': 'sweep', 'id': sweep, 'n': 1})
+        self.pc.addFavourite({'kind': 'sweep', 'id': sweep, 'n': 2})
+        del self.calls[:]
+        self.push('--favourites')
+        self.assertEqual(sorted(set(c[2] for c in self.calls if c[0] == 'push_sweep' and c[2] is not None)), [1])
+        self.assertIsNotNone(self.cloud.sweepPayload(sweep, 1))
+        lines = []
+        self.assertEqual(sync.main(['push', '--to', 'https://cloud/mcp', '--token', 't', '--run', sweep],
+                                   report=lines.append), 2)
+        self.assertIn('a run is SET/N', lines[-1])
+
     def test_an_uploaded_strategy_is_the_version_the_cloud_gave_it(self):
         from parity_deriva.strategy import uploaded
         where = os.path.join(uploaded.root(self.pc.setup.DATA_DIR, 'strategies'), 'drafts')

@@ -2726,10 +2726,12 @@ class Service(object):
 			return {'cached': False}
 		try:
 			with open(self.sweepPath(sweep, '.meta.json')) as handle:
-				leverage = json.load(handle).get('leverage')
+				meta = json.load(handle)
 		except (OSError, ValueError):
-			leverage = None
-		return self.withMargin(payload, parseLeverage(_text(leverage)))
+			meta = {}
+		out = self.withMargin(payload, parseLeverage(_text(meta.get('leverage'))))
+		# who pushed its set here: the run page offers to verify it
+		return dict(out, pushed=meta['origin']) if out and meta.get('origin') else out
 
 	def sweepExcursions(self, sweep, n, bars=None):
 		"""
@@ -3965,6 +3967,15 @@ class Handler(BaseHTTPRequestHandler):
 			if route == '/api/live/stop-all':
 				# the kill switch: every session running, stopped and closed
 				return self.sendJSON(self.service.live.stopAll())
+			if route == '/api/verify/run':
+				# {"sweep", "n"}: a run pushed without a mix, done again here
+				length = int(self.headers.get('Content-Length') or 0)
+				try:
+					body = json.loads(self.rfile.read(length) or b'{}')
+				except ValueError:
+					body = {}
+				self.service.need('archive', 'test')
+				return self.sendJSON(self.service.verify(str(body.get('sweep') or ''), body.get('n')))
 			if route in ('/api/gate', '/api/holdout'):
 				# {"sweep", "n"}: the gate of a run of a set; {"instrument", "cut",
 				# "strategy"}: a holdout cut moved by hand (web/holdout.py)

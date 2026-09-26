@@ -1434,11 +1434,14 @@ cloud), and takes from it what was enabled there:
 
 ```
 python scripts/sync.py push --to https://host/parity/mcp --token <a pc token>
+python scripts/sync.py push --run 20260926-120000-abcdef/3    # one run, without a mix
+python scripts/sync.py push --favourites                      # every starred run of a set
 python scripts/sync.py pull --from https://host/parity/mcp --token <a pc token>
 python scripts/sync.py pull      # PARITY_DERIVA_ARCHIVE_URL, PARITY_DERIVA_SYNC_TOKEN
 ```
 
-A push sends each mix with the uploaded strategies its sets trade and the
+A run pushed without a mix is checked again on the archive from its run
+page ("verify here"). A push sends each mix with the uploaded strategies its sets trade and the
 indicators those take (drafts on the archive, to enable by hand; a strategy
 goes under the codes the archive gave its indicators), its sets and its
 runs, a chunk a call under nginx's 4 MB, marked "from" the PC;

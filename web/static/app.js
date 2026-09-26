@@ -2588,6 +2588,7 @@ function show(data) {
   state.runId = data.runId || null;
   state.sweepRef = where.get('sweep')
     ? { sweep: where.get('sweep'), run: Number(where.get('run')) } : null;
+  state.pushed = data.pushed || null;
   renderStar();
   loadBand();
   $('holdout-note').hidden = !data.holdout;
@@ -3034,7 +3035,25 @@ function renderStar() {
   if (source) paintStar($('fav-star'), !!favouriteOf(source));
   // the gate is for a starred run of a set: its neighbours are the plateau
   $('gate-run').hidden = !(state.sweepRef && source && favouriteOf(source));
+  // verify, for a run another server pushed here (scripts/sync.py push --run)
+  $('verify-run').hidden = !(state.sweepRef && state.pushed);
 }
+
+$('verify-run').addEventListener('click', async () => {
+  const ref = state.sweepRef;
+  if (!ref) return;
+  $('verify-run').disabled = true;
+  message('verifying\u2026');
+  try {
+    const told = await post('api/verify/run', JSON.stringify({ sweep: ref.sweep, n: ref.run }));
+    message(told.ok ? `verify: the same ${told.here.trades} trades here`
+      : `verify: trade ${told.first.trade} is not the same here`);
+  } catch (error) {
+    message(String(error.message || error));
+  } finally {
+    $('verify-run').disabled = false;
+  }
+});
 
 /*
  * The gate SIM -> DEMO of the run on show (api/gate, performance/gate.py):

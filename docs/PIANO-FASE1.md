@@ -65,8 +65,8 @@ C8   avvisi + pagina per il telefono      fatto (21cc77b)
 C2   diario + scheda                      fatto (e21e911)
 C5   banda Monte Carlo + baseline         fatto (0cc433b)
 C3   holdout + gate SIM → DEMO            fatto (f3208a0)
-C1b  banda e serie di perdite in promote  fatto
-C7d  push e verify senza mix              prima della prima demo vera
+C1b  banda e serie di perdite in promote  fatto (6e69885)
+C7d  push e verify senza mix              fatto
 C4   motore correlazioni + filtri         usa C3 (solo periodo di sviluppo)
 C6   live: ramp, protezioni               usa C2, C5, C8
 C7a  giorno della settimana               quando si vuole
