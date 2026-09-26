@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>parity-deriva logs</title>
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="static/fonts.css">
+<link rel="stylesheet" href="static/tokens.css">
+<link rel="stylesheet" href="static/app.css">
+<link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="static/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="static/apple-touch-icon.png">
+<!-- the theme the switch forced, before the first paint: see settings.html -->
+<script>
+  try {
+    const theme = localStorage.getItem('parity-deriva.theme');
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  } catch (error) { /* nothing kept: the system's theme */ }
+</script>
+<style>
+  #log-bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: end; }
+  #log-bar label { display: flex; flex-direction: column; gap: 4px; }
+  #log-bar label.inline { flex-direction: row; align-items: center; }
+  #log-pick { min-width: min(34em, 100%); max-width: 100%; }
+  #log-filter { width: 14em; }
+  #log-about { margin: 12px 0 0; font-family: var(--font-mono); font-size: var(--fs-small); color: var(--text-3);
+               white-space: pre-wrap; overflow-wrap: anywhere; }
+  #log-text { margin: 12px 0 0; padding: 8px; min-height: 12em; max-height: 72vh; overflow: auto;
+              font-family: var(--font-mono); font-size: var(--fs-small); line-height: 1.45;
+              background: var(--raised); border-radius: var(--radius-s); white-space: pre; tab-size: 4; }
+</style>
+</head>
+<body>
+
+<header>
+  <div id="brand">
+    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="179" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="179" height="28"></h1>
+    <span id="page-name" class="page-title">logs</span>
+    <span id="env-badge" class="badge">offline &middot; no orders</span>
+  </div>
+</header>
+
+<!--
+  The logs this server can read (web/logs.py): the files the crontab's jobs
+  write to, this service's web.log, and each live session's console. The
+  list comes from the service; a file not on it is not served.
+-->
+<section id="logs-panel">
+  <div id="log-bar">
+    <label>log <select id="log-pick"></select></label>
+    <label>lines
+      <select id="log-lines">
+        <option>200</option><option selected>500</option><option>2000</option><option>5000</option>
+      </select></label>
+    <label>filter <input type="search" id="log-filter" spellcheck="false" placeholder="text in the line"></label>
+    <label class="inline"><input type="checkbox" id="log-follow"> follow, every 5 s</label>
+    <button type="button" id="log-refresh" data-icon="rerun">refresh</button>
+  </div>
+  <p id="log-about" role="status"></p>
+  <pre id="log-text" tabindex="0" aria-label="the log's last lines"></pre>
+</section>
+
+<script src="static/i18n.js"></script>
+<script src="static/menu.js"></script>
+<script src="static/logs.js"></script>
+</body>
+</html>

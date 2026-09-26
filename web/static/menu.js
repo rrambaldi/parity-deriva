@@ -170,6 +170,7 @@ function marginText(m) {
     mix: svg('<path d="m12 2 10 5-10 5L2 7l10-5z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/>'),
     live: svg('<circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7'
       + 'M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/>'),
+    logs: svg('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>'),
     settings: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1'
       + 'a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3'
       + 'l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0'
@@ -184,7 +185,7 @@ function marginText(m) {
     dark: svg('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'),
   };
   // the home page is the simulation, at / and at the older /sim
-  const page = { '': 'simulate', sim: 'simulate', mix: 'mix', live: 'live', settings: 'settings', docs: 'docs' }[
+  const page = { '': 'simulate', sim: 'simulate', mix: 'mix', live: 'live', logs: 'logs', settings: 'settings', docs: 'docs' }[
     location.pathname.split('/').pop()];
 
   const nav = document.createElement('nav');
@@ -202,6 +203,7 @@ function marginText(m) {
   item('simulate', './', "one run, or every combination of a strategy's parameters");
   item('mix', 'mix', 'runs of different sets traded side by side: their capitals added up');
   item('live', 'live', 'the sessions trading on the accounts, as they go');
+  item('logs', 'logs', 'what the cron jobs, the live sessions and this service write');
   item('settings', 'settings', 'data: stores and imports; AI assistants (MCP)');
   item('docs', 'docs', 'how a strategy is written, and the helpers it is built from');
   const brand = document.getElementById('brand');

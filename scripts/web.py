@@ -30,6 +30,7 @@ sudo. A backtest running at that moment is lost, as with any restart.
 
 import argparse
 import logging
+import logging.handlers
 import os
 import signal
 import sys
@@ -37,6 +38,7 @@ import sys
 from parity_deriva.data import market
 from parity_deriva.etc import settings
 from parity_deriva.lib.utils import getLogger
+from parity_deriva.web.logs import servicePath
 from parity_deriva.web.service import LOGGER, MAX_CANDLES, serve
 
 
@@ -77,6 +79,14 @@ def main(argv=None):
     logger.setLevel(logging.INFO)
     logging.getLogger('parity_deriva.trading.trading').setLevel(
         logging.DEBUG if args.verbose else logging.WARNING)
+    # and in a file too, for the logs page (web/logs.py): the journal keeps
+    # it as well, but a page cannot read the journal
+    path = servicePath(settings)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    handler = logging.handlers.RotatingFileHandler(path, maxBytes=5 * 1024 * 1024,
+                                                   backupCount=3)
+    handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+    logger.addHandler(handler)
 
     server = serve(host=args.host, port=args.port, setup=settings,
                    max_candles=args.max_candles)

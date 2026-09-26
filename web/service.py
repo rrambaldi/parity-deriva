@@ -83,6 +83,7 @@ from parity_deriva.lib import news as news_module
 from parity_deriva.performance import report as report_module
 from parity_deriva.strategy import plugins, uploaded
 from parity_deriva.web import livesessions, mcp, oauth
+from parity_deriva.web import logs as logs_page
 
 
 def strategies():
@@ -3058,6 +3059,8 @@ class Handler(BaseHTTPRequestHandler):
 
 		try:
 			if mcp.route(self, 'GET', route, query):
+				return
+			if logs_page.route(self, 'GET', route, query):
 				return
 			# the simulation is the home page: one run is a set of one. /sim
 			# is kept for the links made before it was

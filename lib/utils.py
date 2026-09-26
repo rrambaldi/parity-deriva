@@ -163,6 +163,8 @@ def getLogger(config=None,confstr='parity_deriva.trading.trading'):
 		else:
 			print("Missing logger config")
 			os._exit(-1)
-	logging.config.fileConfig(config)
+	# not disable_existing_loggers: a module's logger made at import - the
+	# service's own, data/sources.py's - would go silent, journal and all
+	logging.config.fileConfig(config, disable_existing_loggers=False)
 	logger = logging.getLogger(confstr)
 	return logger
