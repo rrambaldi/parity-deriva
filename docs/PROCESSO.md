@@ -117,8 +117,11 @@ Lo storico si taglia in due:
 - **holdout**: l'ultimo ~25%, almeno 1 anno. Nessuno lo guarda durante il
   loop.
 
-Il taglio resta fisso finché non lo sposti tu: solo in avanti, lasciando
-almeno 1 anno di holdout. Lo spostamento va nel diario. 🔧
+Di default il taglio è **uno per strumento**: la stessa data per tutte le
+granularità e tutte le strategie, così nessuno sweep guarda lì. Lo sposti tu
+quando vuoi, e a una strategia puoi dare il suo taglio; resta sempre almeno
+1 anno di holdout, e ogni spostamento va nel diario. Se il nuovo holdout
+contiene dati già letti da qualche sweep, il gate lo dice. 🔧
 
 L'holdout si apre **una volta per versione**. Se la versione non passa,
 torna a `SIM`: riprovare con una versione nuova o scartare la strategia

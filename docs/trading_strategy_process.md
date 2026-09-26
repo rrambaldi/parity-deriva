@@ -38,8 +38,9 @@ Lo storico si divide in due pezzi:
 
 - **sviluppo**: la parte vecchia. Sweep e correlazioni vedono solo questa.
 - **holdout**: l'ultimo ~25% dello storico, almeno 1 anno. Nessuno lo guarda
-  durante il loop. Il taglio resta fisso finché non lo sposti tu: solo in
-  avanti, lasciando almeno 1 anno.
+  durante il loop. Di default un taglio per strumento, uguale per tutte le
+  granularità e le strategie; lo sposti tu, e una strategia può avere il
+  suo. Resta sempre almeno 1 anno.
 
 L'holdout si apre **una volta per versione**, al gate SIM → DEMO. Se la versione non passa,
 torna a `SIM`: riprovare con una versione nuova o scartare la strategia

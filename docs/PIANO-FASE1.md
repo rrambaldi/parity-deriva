@@ -46,10 +46,10 @@ per le altre c'è la mia proposta.
 | D1 | Quando nasce una **versione** nuova? | **Deciso il 2026-09-26.** Al gate SIM → DEMO. La versione è l'impronta del codice (hash del sorgente della strategia e degli indicatori che usa, senza commenti e righe vuote) più i parametri congelati (`groupKey` dei campi del form). In SIM i parametri cambiano senza creare versioni. Etichetta leggibile: `M1502 v3`, contata per strategia + strumento + granularità. Nessun limite al numero di versioni. | C2, C3 |
 | D2 | Il **ramp**: chi lo sceglie, quanto dura, chi passa al 100%? | **Deciso il 2026-09-26.** Lo sceglie l'utente all'avvio del live, con la casella "ramp" accesa di default: accesa, il capitale proposto è il 25%; spenta, il 100%. Finisce al primo tra `RAMP_TRADES` (30) trade chiusi e `RAMP_DAYS` (60) giorni, tutti e due modificabili all'avvio: su D1 30 trade sarebbero un anno. Il 100% è un clic dell'utente, possibile in qualsiasi momento purché la sessione non abbia trade aperti; prima della fine del ramp chiede conferma e mostra a che punto è. | C6 |
 | D3 | Che **canali** usano gli avvisi? | **Deciso il 2026-09-26.** Banner nelle pagine e riga nel log, sempre e per tutti gli eventi. In più, solo per gli urgenti: email (`SMTP_*`), Telegram (`TELEGRAM_*`) e notifiche sul telefono, abbinato con un QR code, con una pagina che mostra i trade in corso. Ognuno si accende se configurato. Vale per il server demo e per il reale. | C8 |
-| D4 | L'holdout è **per strumento** o **per strategia**? | Per strumento + granularità: una data di taglio sola, uguale per tutte le strategie su quello strumento. È più semplice e più severo: nessuna strategia viene provata su quel pezzo di storico. | C3 |
+| D4 | L'holdout è **per strumento** o **per strategia**? | **Deciso il 2026-09-26.** Di default un taglio per strumento, uguale per tutte le granularità (il mercato è lo stesso) e per tutte le strategie: nessuno sweep guarda lì. L'utente può dare a una strategia il suo taglio, dalla pagina del diario. | C3 |
 | D5 | Un diario per **strategia** o per strategia + strumento? | **Deciso il 2026-09-26.** Per strategia, cioè per nome del codice. Ogni voce dice strumento e granularità e la pagina filtra: "va su FX, non sulle azioni" si legge nello stesso posto. Le versioni restano per strategia + strumento + granularità (D1). | C2 |
 | D6 | La **demo** esige il gate? | **Deciso il 2026-09-26.** No: un form va in demo anche senza gate, con l'avviso "no gate" nella pagina live e nel diario. La promozione al server reale esige la scheda, e una scheda nasce solo dal gate: una demo senza gate non arriva al live. | C3, C1b |
-| D7 | Il **taglio dell'holdout** si sposta? | **Deciso il 2026-09-26.** Resta fisso finché non lo sposti tu dalla pagina settings. Si sposta solo in avanti e lascia almeno `HOLDOUT_MIN_DAYS` di holdout. Lo spostamento va nel diario di ogni strategia con una scheda su quello strumento. | C3 |
+| D7 | Il **taglio dell'holdout** si sposta? | **Deciso il 2026-09-26.** Resta fisso finché non lo sposti tu: quello dello strumento dalla pagina settings, quello di una strategia dal suo diario. Avanti o indietro, ma lasciando sempre almeno `HOLDOUT_MIN_DAYS` di holdout. Ogni spostamento va nel diario. Se il nuovo holdout contiene dati già letti da sweep o gate, il gate lo dice: è un'informazione, non un blocco. | C3 |
 | D8 | Il minimo di trade in demo sui **timeframe lenti** | **Deciso il 2026-09-26.** Il record basta con `PROMOTE_TRADES` (30) trade chiusi, oppure dopo `PROMOTE_SLOW_DAYS` (90) giorni se ne ha almeno `PROMOTE_MIN_TRADES` (10). `PROMOTE_DAYS` (20) resta. Su D1, con circa 30 trade l'anno, la demo dura circa 4 mesi invece di un anno. | C1a |
 
 ---
@@ -174,7 +174,7 @@ con cui va giudicata.
   | verify: uguale, o il primo trade diverso | tappa | `verify` |
   | gate: verdetto riga per riga | tappa | gate (C3) |
   | nuova versione, cambio di stato | tappa | `cards.move` |
-  | taglio dell'holdout spostato | tappa | pagina settings (D7) |
+  | taglio dell'holdout spostato, o taglio proprio della strategia | tappa | pagina settings, pagina del diario (D4, D7) |
   | push a un server di trade, verdetto della promozione | tappa | `servers.push`, `servers.record` |
   | sessione avviata o fermata, con account e capitale | tappa | `livesessions.start`, `stop`, `stopAll` |
   | protezione scattata, loss limit, allarme di parità | tappa | `guard`, `watch`, monitor di parità, protezioni (C6) |
@@ -280,16 +280,30 @@ volta per versione, al gate. Il gate è un pulsante che fa tutti i controlli
 e scrive il verdetto nella scheda.
 
 - **Scelte.**
-  - Registro `DATA_DIR/holdout.json`: per strumento + granularità (D4), la
-    data di taglio e quante volte è stato aperto.
+  - Registro `DATA_DIR/holdout.json` (D4): per strumento il taglio e le sue
+    aperture, più i tagli propri delle strategie che ne hanno uno:
+
+    ```json
+    {"EUR_USD": {"cut": "2023-09-01", "openings": 3,
+                 "strategies": {"M1502": {"cut": "2024-06-01", "openings": 1}}}}
+    ```
+
   - Taglio di default: `min(fine − 25% della durata, fine − 365 giorni)`,
-    scritto alla prima scheda di quello strumento. I dati nuovi che
-    arrivano dopo allungano l'holdout, non lo spostano.
-  - Il taglio lo sposta solo l'utente (D7), dalla pagina settings: solo in
-    avanti, e lasciando almeno `HOLDOUT_MIN_DAYS` di holdout. Se il nuovo
-    taglio è dopo l'ultima data letta da un gate, l'holdout torna mai visto
-    e il contatore delle aperture riparte da zero; se no il contatore
-    continua.
+    calcolato sulla granularità del primo backtest o sweep sullo strumento
+    e fissato in quel momento, prima che uno sweep legga qualcosa. Da lì
+    vale per tutte le granularità. I dati nuovi che arrivano dopo allungano
+    l'holdout, non lo spostano.
+  - Vale il taglio della strategia, se ne ha uno; se no quello dello
+    strumento.
+  - I tagli li sposta solo l'utente (D7): quello dello strumento dalla pagina
+    settings, quello di una strategia dal suo diario. Avanti o indietro,
+    lasciando sempre almeno `HOLDOUT_MIN_DAYS` di holdout. Un taglio nuovo
+    parte con zero aperture.
+  - **Holdout già letto.** Il gate guarda i set e i run salvati su quello
+    strumento, di tutte le strategie: se qualcuno ha letto oltre il taglio
+    (set fatti prima di C3, un taglio spostato indietro, il taglio proprio di
+    un'altra strategia), il dialog lo dice: `holdout read by 4 sets, up to
+    2025-01-10`. È un'informazione, non un blocco.
   - Ogni backtest e ogni sweep con `to` oltre il taglio viene **tagliato**, con
     un avviso sulla pagina: `holdout starts 2024-03-01: the run stops there`.
     Solo il gate può leggere oltre.
@@ -304,9 +318,9 @@ e scrive il verdetto nella scheda.
     3. il verdetto va nella scheda (`holdout.opened = true`) e il registro
        conta un'apertura in più. Se passa, la scheda riceve il riferimento
        (C5) ed è pronta per la demo; se no torna a `SIM`;
-    4. il dialog del verdetto mostra quante volte l'holdout di quello
-       strumento è già stato aperto. Nessun limite: riprovare o scartare
-       (`DEAD`) lo decide l'utente.
+    4. il dialog del verdetto mostra quante volte quel taglio è già stato
+       aperto e se l'holdout era già stato letto. Nessun limite: riprovare o
+       scartare (`DEAD`) lo decide l'utente.
   - Il push a un server demo (`servers.push`) accetta anche un form senza
     gate (D6): la pagina live mostra "no gate" e il diario lo scrive. Al
     server reale arriva solo con una scheda (C1b).
@@ -315,16 +329,19 @@ e scrive il verdetto nella scheda.
   `/api/gate`); `web/cards.py`; `web/servers.py` ("no gate" nel push);
   `web/static/sim.js` e `app.js` (taglio disegnato sul grafico e nel form,
   pulsante del gate, dialog con il verdetto riga per riga); `settings.js`
-  (spostare il taglio, D7); `etc/settings.py`
+  (il taglio dello strumento), `journal.js` (il taglio della strategia);
+  `etc/settings.py`
   (`HOLDOUT_SHARE=0.25`, `HOLDOUT_MIN_DAYS=365`, `GATE_MIN_TRADES=100`,
   `GATE_PF_LOW=1.0`, `GATE_HOLDOUT_PF_RATIO=0.7`, `GATE_HOLDOUT_DD_RATIO=1.5`);
   `i18n/it.json`.
 - **Test.** Nuovo `tests/gate_test.py`: ogni controllo che passa e che non
   passa; holdout aperto una volta sola per versione; il contatore delle aperture
   cresce; nessun `DEAD` automatico. In
-  `tests/sweep_test.py`: uno sweep oltre il taglio viene tagliato. Il taglio
-  si sposta solo in avanti e lascia almeno `HOLDOUT_MIN_DAYS`; un push in
-  demo senza gate passa con l'avviso.
+  `tests/sweep_test.py`: uno sweep oltre il taglio viene tagliato, M15 e H4
+  dello stesso strumento con lo stesso taglio. Il taglio proprio di una
+  strategia vale solo per lei; nessun taglio lascia meno di
+  `HOLDOUT_MIN_DAYS`; un set salvato che ha letto oltre il taglio compare
+  nel dialog del gate; un push in demo senza gate passa con l'avviso.
 - **Fatto quando.** Nessuno sweep legge oltre il taglio; il gate gira una
   volta per versione e il verdetto sta nella scheda; una demo senza gate si
   può fare, ma senza scheda non arriva al live.
