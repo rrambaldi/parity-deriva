@@ -610,6 +610,12 @@ class LiveSessions(object):
             if errors > seen:
                 many = '' if errors - seen == 1 else 's'
                 problems['errors'] = '%d broker error%s or rejected order%s' % (errors - seen, many, many)
+            if s.get('running') and serverAccounts() == 'real':
+                try:
+                    self.protect(setup, s)
+                except Exception:
+                    import logging
+                    logging.getLogger('parity_deriva.web').exception("the protections of %s" % sid)
             for kind in SESSION_ALERTS:
                 if kind in problems:
                     sent = notify.notify(setup, 'urgent', kind, sid, '%s · %s' % (label(s), problems[kind]))
@@ -716,10 +722,78 @@ class LiveSessions(object):
             for trade in state['closed']:
                 if trade.get('pl') is not None:
                     out['curve'].append([trade['time'], out['curve'][-1][1] + trade['pl']])
+        out['ramp'] = rampState(out)
         if detail:
             out['events'] = events[-400:]
             out['console'] = self.console(session)
+            card = self.cardOf(meta.get('fields'))
+            if card is not None:
+                out['versus'] = versus(out, card)
         return out
+
+    def cardOf(self, fields):
+        """
+        The card of a session's version (web/cards.py): the one its promotion
+        brought on a real money server, else the one of its form as the code
+        is now. None without one.
+        """
+        if self.setup is None:
+            return None
+        from parity_deriva.web import cards
+        try:
+            promotion = self.promoted(fields) if serverAccounts() == 'real' else None
+            held = (promotion or {}).get('card') or cards.forFields(self.setup, fields)
+            return cards.get(self.setup, held['id']) if held else None
+        except (cards.CardError, OSError, ValueError, KeyError, TypeError):
+            return None
+
+    def fullSize(self, session, confirm, early=False):
+        """
+        A session in ramp restarted at the full capital: only with no trade
+        open, the full capital confirmed, and before the ramp's end only when
+        asked to (`early`). The same account, the same form.
+        """
+        s = self.summary(session)
+        ramp = s.get('ramp')
+        if not ramp:
+            raise LiveError("this session is not in ramp: it trades its full capital")
+        if s.get('open'):
+            raise LiveError("a trade is open: full size once the session has none")
+        if not ramp['done'] and not early:
+            raise LiveError("the ramp is at %d of %d trades and %.0f of %d days: going full size before its end "
+                            "is asked for as such" % (ramp['closed'], ramp['trades'], ramp['elapsed'], ramp['days']))
+        if str(confirm or '') != ('%g' % ramp['full']):
+            raise LiveError("confirm the full capital, %g" % ramp['full'])
+        self.stop(session)
+        fields = dict((k, v) for k, v in (s.get('fields') or {}).items() if k != 'ramp')
+        fields['capital'] = '%g' % ramp['full']
+        started = self.start(fields, [{'provider': s['provider'], 'account': s['account']}], confirm=fields['capital'])
+        self.journal(started[0] if started else s, 'full-size', {'capital': fields['capital'], 'early': not ramp['done'],
+                                                                   'after': {'trades': ramp['closed'],
+                                                                             'days': round(ramp['elapsed'], 1)}})
+        return started
+
+    def protect(self, setup, s):
+        """
+        A live session judged by its card every minute (C6): stopped, and the
+        card SUSPENDED, when it breaks it - a drawdown beyond LIVE_DD_RATIO of
+        the card's, a curve under its band, a losing streak beyond
+        LIVE_STREAK_RATIO of its worst. What happens next is the user's call.
+        """
+        card = self.cardOf(s.get('fields'))
+        if not card or card.get('state') != 'LIVE' or not card.get('reference'):
+            return None
+        why = broken(s, card, setup)
+        if not why:
+            return None
+        from parity_deriva.web import cards
+        self.stop(s['id'])
+        card = cards.move(self.setup or setup, card['id'], 'SUSPENDED', why, journal.MACHINE)
+        suspended = sum(1 for e in journal.read(self.setup or setup, card['strategy'])
+                        if e['kind'] == 'state' and e['data'].get('to') == 'SUSPENDED' and e.get('version') == card['id'])
+        notify.notify(setup, 'urgent', 'protection', s['id'], '%s · %s · stopped: %s' % (card['label'], label(s), why))
+        self.journal(s, 'protection', {'why': why, 'label': card['label'], 'suspensions': suspended})
+        return why
 
 
 def versusCard(sessions, card):
@@ -746,6 +820,92 @@ def versusCard(sessions, card):
     if worst is not None and streak > worst:
         need.append("a losing streak of at most %d, the card's worst: it had %d" % (worst, streak))
     return need
+
+
+def rampState(s, now=None):
+    """
+    Where a session in ramp is: {trades, days, full, closed, elapsed, done},
+    done at the first of its trades and its days; None for one at full size.
+    The ramp is the form's 'ramp' field, TRADES/DAYS/FULL CAPITAL.
+    """
+    text = str((s.get('fields') or {}).get('ramp') or '')
+    try:
+        trades, days, full = text.split('/')
+        trades, days, full = int(trades), int(days), float(full)
+    except ValueError:
+        return None
+    closed = len([t for t in s.get('closed') or [] if t.get('pl') is not None])
+    elapsed = ((now or time.time() * 1000) - (s.get('started') or 0)) / 86400000.0
+    return {'trades': trades, 'days': days, 'full': full, 'closed': closed, 'elapsed': round(elapsed, 2),
+            'done': closed >= trades or elapsed >= days}
+
+
+def returnsOf(s):
+    """A session's closed trades as returns on its capital, in the order they closed."""
+    capital = capitalOf(s)
+    if not capital:
+        return []
+    return [t['pl'] / capital for t in sorted(s.get('closed') or [], key=lambda t: t.get('time') or 0)
+            if t.get('pl') is not None]
+
+
+def drawdownPct(values):
+    """The worst fall of the compounded curve from its peak, in %."""
+    peak, worst, total = 1.0, 0.0, 1.0
+    for value in values:
+        total *= 1.0 + value
+        peak = max(peak, total)
+        worst = max(worst, (peak - total) / peak * 100.0)
+    return worst
+
+
+def broken(s, card, setup=None):
+    """Why a live session breaks its card (LiveSessions.protect), or None."""
+    from parity_deriva.performance import montecarlo
+    ref = card.get('reference') or {}
+    values = returnsOf(s)
+    if not values:
+        return None
+    cfg = lambda name: getattr(setup, name, None) if isinstance(getattr(setup, name, None), (int, float)) \
+        else getattr(settings, name)
+    dd, limit = drawdownPct(values), ref.get('maxDDpct')
+    if limit and dd > cfg('LIVE_DD_RATIO') * limit:
+        return 'a drawdown of %.1f%%, more than %g x the card\'s %.1f%%' % (dd, cfg('LIVE_DD_RATIO'), limit)
+    first = montecarlo.below(montecarlo.compounded(values), ref['band']) if ref.get('band') else None
+    if first:
+        return "under the card's band at trade %d" % first
+    streak, worst = montecarlo.streak(values), ref.get('worstStreak')
+    if worst and streak > cfg('LIVE_STREAK_RATIO') * worst:
+        return 'a losing streak of %d, more than %g x the card\'s %d' % (streak, cfg('LIVE_STREAK_RATIO'), worst)
+    return None
+
+
+def versus(s, card, last=50):
+    """
+    The session against its card, for the live page's panel: its last `last`
+    trades' profit factor, expectancy and win rate by the card's, its drawdown
+    now, where the curve is against the band.
+    """
+    from parity_deriva.performance import montecarlo
+    ref = card.get('reference') or {}
+    closed = [t for t in sorted(s.get('closed') or [], key=lambda t: t.get('time') or 0) if t.get('pl') is not None]
+    recent = closed[-last:]
+    won = sum(t['pl'] for t in recent if t['pl'] > 0)
+    lost = -sum(t['pl'] for t in recent if t['pl'] < 0)
+    values = returnsOf(s)
+    curve = montecarlo.compounded(values)
+    return {'card': {'id': card['id'], 'label': card['label'], 'state': card['state'],
+                     'suspended': card.get('state') == 'SUSPENDED'},
+            'recent': {'trades': len(recent), 'pf': won / lost if lost else None,
+                       'expectancy': sum(t['pl'] for t in recent) / len(recent) if recent else None,
+                       'winRate': sum(1 for t in recent if t['pl'] > 0) / len(recent) if recent else None},
+            'reference': dict((k, ref.get(k)) for k in ('pf', 'expectancy', 'winRate', 'maxDDpct', 'worstStreak',
+                                                        'tradesPerMonth')),
+            'drawdownPct': drawdownPct(values), 'streak': montecarlo.streak(values),
+            'below': montecarlo.below(curve, ref['band']) if ref.get('band') else None,
+            'band': ref.get('band') and {'p5': ref['band']['p5'][:len(curve)], 'p50': ref['band']['p50'][:len(curve)],
+                                         'p95': ref['band']['p95'][:len(curve)]},
+            'curve': curve}
 
 
 #: the alerts of one session, keyed by its id (LiveSessions.alerts)
@@ -933,8 +1093,8 @@ def read(events, paper=False):
 # ------------------------------------------------------------------- skew
 
 #: the form fields that make two sessions the same run: not the window it
-#: was backtested on, not the capital, not the confirmation tick
-GROUP_SKIP = frozenset(['from', 'to', 'balance', 'capital', 'confirmed'])
+#: was backtested on, not the capital, not the confirmation tick, not the ramp
+GROUP_SKIP = frozenset(['from', 'to', 'balance', 'capital', 'confirmed', 'ramp'])
 
 
 def groupKey(fields):

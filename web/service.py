@@ -685,6 +685,9 @@ class Service(object):
 				'promoteMinTrades': getattr(self.setup, 'PROMOTE_MIN_TRADES', settings.PROMOTE_MIN_TRADES),
 				'promoteMinNet': getattr(self.setup, 'PROMOTE_MIN_NET', settings.PROMOTE_MIN_NET),
 				'dailyLossPct': getattr(self.setup, 'DAILY_LOSS_PCT', settings.DAILY_LOSS_PCT),
+				'rampShare': getattr(self.setup, 'RAMP_SHARE', settings.RAMP_SHARE),
+				'rampTrades': getattr(self.setup, 'RAMP_TRADES', settings.RAMP_TRADES),
+				'rampDays': getattr(self.setup, 'RAMP_DAYS', settings.RAMP_DAYS),
 				'halted': self.live.halted(), 'bucket': storage.bucket(self.setup) is not None}
 
 	def setRoles(self, body):
@@ -4110,6 +4113,16 @@ class Handler(BaseHTTPRequestHandler):
 					return self.sendJSON(self.service.live.stop(session))
 				if action == 'delete':
 					return self.sendJSON(self.service.live.delete(session))
+				if action == 'full':
+					# {"confirm": the full capital, "early": before the ramp's end}
+					length = int(self.headers.get('Content-Length') or 0)
+					try:
+						body = json.loads(self.rfile.read(length) or b'{}')
+					except ValueError:
+						body = {}
+					self.service.need('trade')
+					return self.sendJSON({'started': self.service.live.fullSize(
+						session, body.get('confirm'), bool(body.get('early')))})
 				return self.sendError("no route %s" % route, 404)
 			if route == '/api/calendar':
 				length = int(self.headers.get('Content-Length') or 0)

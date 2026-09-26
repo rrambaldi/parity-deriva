@@ -67,8 +67,8 @@ C5   banda Monte Carlo + baseline         fatto (0cc433b)
 C3   holdout + gate SIM → DEMO            fatto (f3208a0)
 C1b  banda e serie di perdite in promote  fatto (6e69885)
 C7d  push e verify senza mix              fatto (96668e1)
-C4   motore correlazioni + filtri         fatto
-C6   live: ramp, protezioni               usa C2, C5, C8
+C4   motore correlazioni + filtri         fatto (352bec2)
+C6   live: ramp, protezioni               fatto
 C7a  giorno della settimana               quando si vuole
 C7b  commissioni e financing              quando si vuole
 ```
@@ -533,6 +533,15 @@ quando esce da quello che la simulazione permetteva.
   con trade aperti; ogni soglia chiama `notify()`.
 - **Fatto quando.** Ogni soglia ferma la sessione con lo stato giusto nella
   scheda e un avviso visibile; il ramp propone il 25% e poi il 100%.
+- **Com'è stato fatto.** Il ramp è un campo della form, `ramp:
+  TRADE/GIORNI/CAPITALE PIENO`, fuori dal `groupKey`: la sessione in ramp e
+  quella piena sono la stessa form per il record e la promozione. La stima di
+  quando finisce sta nel dettaglio della sessione, dai trade al mese della
+  scheda. Le protezioni girano sul server dei soldi veri, sulle sessioni
+  la cui scheda è `LIVE`. Resta da fare: "per una nuova promozione contano
+  solo le sessioni demo dopo la sospensione" chiede che l'archivio sappia
+  della sospensione, che è sul server reale - va con il diario su più server
+  ([ROADMAP.md](ROADMAP.md#il-diario-su-più-server)).
 - **Dipende da.** C2, C5, C8, D2.
 
 ---

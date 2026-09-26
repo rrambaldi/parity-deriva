@@ -149,6 +149,13 @@
       <label title="the same number on every account: an account in USD (eToro) takes it 1:1">capital
         <input type="number" id="new-capital" min="1" step="any" required></label>
       <fieldset id="new-accounts"><legend>accounts</legend><p class="hint">reading the accounts&hellip;</p></fieldset>
+      <!-- real money only: the ramp (web/livesessions.py rampState) -->
+      <fieldset id="new-ramp" hidden><legend>ramp</legend>
+        <label><input type="checkbox" id="new-ramp-on" checked> start in ramp</label>
+        <label>until <input type="number" id="new-ramp-trades" min="1" step="1"> trades</label>
+        <label>or <input type="number" id="new-ramp-days" min="1" step="1"> days</label>
+        <p id="new-ramp-say" class="hint"></p>
+      </fieldset>
       <button type="submit" id="new-start" class="primary" data-icon="play">start</button>
     </form>
     <aside id="new-summary"><p class="hint">choose a strategy: the summary of its simulation shows here</p></aside>
@@ -184,6 +191,14 @@
 <section id="live-detail" hidden>
   <div id="detail-head"><strong id="detail-title"></strong> <span id="detail-params" class="hint"></span>
     <a id="journal-link" href="journal" title="everything done with this strategy">journal</a></div>
+  <!-- the session against its version's card: the ramp, the last trades by
+       the card's numbers, and a suspended card's three ways on -->
+  <div id="detail-card" hidden>
+    <p id="card-ramp"></p>
+    <p id="card-state"></p>
+    <table class="live-small" id="card-table"></table>
+    <p id="card-say" class="hint"></p>
+  </div>
   <canvas id="live-equity" height="220"></canvas>
   <div id="detail-grid">
     <div>

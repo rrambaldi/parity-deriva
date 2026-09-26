@@ -55,6 +55,9 @@ COMPOSED = {
     'margin: n/a, {n} runs have no saved trades - simulate together runs them again',
     'recording {n} feed every {every} min', 'recording {n} feeds every {every} min',
     '{name} · {share}% translated', '{n} live session running', '{n} live sessions running',
+    # the ramp's words go in the middle of the real money question (live.js)
+    'REAL MONEY: {n} session, each risking {risk}% a trade of a capital of {capital} - in ramp, until {t} trades or {d} days. Start?',
+    'REAL MONEY: {n} sessions, each risking {risk}% a trade of a capital of {capital} - in ramp, until {t} trades or {d} days. Start?',
 }
 
 

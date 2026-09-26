@@ -260,7 +260,87 @@ function renderDetail() {
   const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4;
   pre.textContent = (d.console || []).join('\n');
   if (atBottom) pre.scrollTop = pre.scrollHeight;
+  renderCard(d);
   drawEquity(d);
+}
+
+/*
+ * The session by its version's card (web/livesessions.py versus, rampState):
+ * where its ramp is and the full size button, its last trades by the card's
+ * numbers, and - the card suspended by a protection - the three ways on,
+ * which are the user's: back to demo, back to SIM, discard.
+ */
+const fix = (v, places = 2) => (v === null || v === undefined ? 'n/a' : Number(v).toFixed(places));
+
+function renderCard(d) {
+  const v = d.versus;
+  const r = d.ramp;
+  $('detail-card').hidden = !v && !r;
+  $('card-ramp').textContent = '';
+  if (r) {
+    $('card-ramp').append(r.done ? `ramp done: ${r.closed} trades, ${fix(r.elapsed, 0)} days \u00b7 ready for full size`
+      : `ramp: ${r.closed} of ${r.trades} trades, ${fix(r.elapsed, 0)} of ${r.days} days`);
+    const perMonth = v && v.reference.tradesPerMonth;
+    if (!r.done && perMonth) {
+      const byDays = perMonth * r.days / 30.44;
+      $('card-ramp').append(byDays < r.trades
+        ? ` \u00b7 ${fix(perMonth, 1)} trades a month: it ends by days, after about ${Math.round(byDays)} trades`
+        : ` \u00b7 ${fix(perMonth, 1)} trades a month: it ends by trades, in about ${Math.round(r.trades / perMonth * 30.44)} days`);
+    }
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.dataset.icon = 'play';
+    go.textContent = 'full size';
+    go.disabled = !!(d.open && d.open.length) || !d.running;
+    go.title = go.disabled ? 'once the session has no trade open' : `restart it at ${r.full}`;
+    go.addEventListener('click', async () => {
+      const early = !r.done;
+      if (!await askUser(early
+        ? `The ramp is at ${r.closed} of ${r.trades} trades and ${fix(r.elapsed, 0)} of ${r.days} days. Go full size now, at a capital of ${r.full}?`
+        : `REAL MONEY: restart this session at its full capital, ${r.full}?`)) return;
+      try {
+        const { started } = await post(`api/live/${d.id}/full`, { confirm: String(r.full), early });
+        if (started.length) state.pick = started[0].id;
+        await refresh();
+        await refreshDetail();
+      } catch (error) { $('card-say').textContent = String(error.message || error); }
+    });
+    $('card-ramp').append(' ', go);
+  }
+  const table = $('card-table');
+  table.textContent = '';
+  $('card-state').textContent = '';
+  if (!v) return;
+  $('card-state').textContent = `${v.card.label} \u00b7 ${v.card.state} \u00b7 drawdown now ${fix(v.drawdownPct, 1)}%`
+    + (v.below ? ` \u00b7 under the card's band since trade ${v.below}` : '');
+  const head = table.insertRow();
+  for (const text of ['', `last ${v.recent.trades} trades`, 'card']) head.insertCell().textContent = text;
+  for (const [name, mine, card] of [['profit factor', fix(v.recent.pf), fix(v.reference.pf)],
+    ['expectancy', fix(v.recent.expectancy), fix(v.reference.expectancy)],
+    ['win rate', v.recent.winRate === null ? 'n/a' : `${fix(v.recent.winRate * 100, 0)}%`,
+      v.reference.winRate === null || v.reference.winRate === undefined ? 'n/a' : `${fix(v.reference.winRate * 100, 0)}%`],
+    ['losing streak', String(v.streak), String(v.reference.worstStreak ?? 'n/a')]]) {
+    const row = table.insertRow();
+    for (const text of [name, mine, card]) row.insertCell().textContent = text;
+  }
+  if (v.card.suspended) {
+    const box = $('card-state');
+    box.append(' \u00b7 suspended: its session stopped, what next is your call ');
+    for (const [to, text] of [['DEMO', 'back to demo'], ['SIM', 'back to SIM'], ['DEAD', 'discard']]) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = text;
+      b.dataset.icon = to === 'DEAD' ? 'delete' : 'rerun';
+      b.addEventListener('click', async () => {
+        if (to === 'DEAD' && !await askUser(`Discard ${v.card.label}? It stays in its journal.`)) return;
+        try {
+          await post('api/cards/move', { id: v.card.id, to, why: 'from the live page, after a suspension' });
+          await refreshDetail();
+        } catch (error) { $('card-say').textContent = String(error.message || error); }
+      });
+      box.append(b, ' ');
+    }
+  }
 }
 
 function drawEquity(d) {
@@ -981,8 +1061,17 @@ $('new-form').addEventListener('submit', async (event) => {
   let confirm;
   if (state.server.accounts === 'real') {
     if (!fields.capital) { newSay('real money: give the capital at risk'); return; }
+    // in ramp, a share of the capital until so many trades or days
+    // (web/livesessions.py rampState): the full one is kept for full size
+    if ($('new-ramp-on').checked) {
+      const full = Number(fields.capital);
+      fields.capital = String(Math.round(full * state.server.rampShare * 100) / 100);
+      fields.ramp = `${$('new-ramp-trades').value}/${$('new-ramp-days').value}/${full}`;
+    }
     if (!await askUser(`REAL MONEY: ${ticked.length} session${ticked.length === 1 ? '' : 's'}, `
-      + `each risking ${fields.risk || '?'}% a trade of a capital of ${fields.capital}. Start?`)) return;
+      + `each risking ${fields.risk || '?'}% a trade of a capital of ${fields.capital}`
+      + (fields.ramp ? ` - in ramp, until ${$('new-ramp-trades').value} trades or ${$('new-ramp-days').value} days` : '')
+      + '. Start?')) return;
     confirm = fields.capital;
   }
   $('new-start').disabled = true;
@@ -1121,6 +1210,11 @@ setupNew().then(renderRemote);
 ask('api/server').then((server) => {
   state.server = server;
   $('new-live').hidden = !server.roles.includes('trade');
+  $('new-ramp').hidden = server.accounts !== 'real';
+  $('new-ramp-trades').value = server.rampTrades;
+  $('new-ramp-days').value = server.rampDays;
+  $('new-ramp-say').textContent = `${Math.round(server.rampShare * 100)}% of the capital until the first of the two; `
+    + 'full size is your click, with no trade open';
   refreshRemote();
   setInterval(refreshRemote, 60000);
   if (server.halted) {

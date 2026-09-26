@@ -87,6 +87,17 @@ PROMOTE_MIN_NET = float(dotenv('PARITY_DERIVA_PROMOTE_MIN_NET', '0'))
 # whose worst losing streak it does not pass (web/livesessions.py versusCard);
 # 0 promotes without one, as before the cards
 PROMOTE_NEEDS_CARD = dotenv('PARITY_DERIVA_PROMOTE_NEEDS_CARD', '1') != '0'
+# live on real money (web/livesessions.py): a session starts in ramp - the
+# page's box, on by default - at RAMP_SHARE of the card's capital until
+# RAMP_TRADES trades or RAMP_DAYS days, the first; full size is the user's
+# click. A session of a version with a card is stopped, and the card
+# SUSPENDED, at a drawdown of LIVE_DD_RATIO x the card's, a curve under its
+# band, or a losing streak of LIVE_STREAK_RATIO x its worst
+RAMP_SHARE = float(dotenv('PARITY_DERIVA_RAMP_SHARE', '0.25'))
+RAMP_TRADES = int(dotenv('PARITY_DERIVA_RAMP_TRADES', '30'))
+RAMP_DAYS = int(dotenv('PARITY_DERIVA_RAMP_DAYS', '60'))
+LIVE_DD_RATIO = float(dotenv('PARITY_DERIVA_LIVE_DD_RATIO', '1.5'))
+LIVE_STREAK_RATIO = float(dotenv('PARITY_DERIVA_LIVE_STREAK_RATIO', '1.5'))
 DAILY_LOSS_PCT = float(dotenv('PARITY_DERIVA_DAILY_LOSS_PCT', '3'))
 # The alerts of the live sessions (web/notify.py): a banner on the pages
 # always, and an urgent one also by email and by Telegram, each once it is

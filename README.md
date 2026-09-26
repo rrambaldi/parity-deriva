@@ -1509,6 +1509,23 @@ archive and on every demo server - which that server judges (`push_record`);
 its verdict is the answer. A trade server takes its market data from the
 archive like the PC does: a mirror token there, the archive as upstream.
 
+## Live on real money: the ramp and the protections
+
+A session on a real money server starts in ramp unless its box is unticked:
+at 25% of the capital typed (`PARITY_DERIVA_RAMP_SHARE`), until 30 trades or
+60 days, the first (`RAMP_TRADES`, `RAMP_DAYS`, both on the page too). The
+session's detail says where the ramp is and, from its card, when it should
+end; "full size" restarts it at the full capital, only with no trade open and,
+before the ramp's end, only when confirmed as such.
+
+Every minute each live session whose version's card is LIVE is judged by the
+card: a drawdown beyond 1.5 times the card's (`LIVE_DD_RATIO`), a curve under
+its band, a losing streak beyond 1.5 times its worst (`LIVE_STREAK_RATIO`)
+stops the session - its orders cancelled, its trades closed - and suspends the
+card, with an urgent alert. What next is the user's: back to demo, back to
+SIM, or discard, on the live page or in the journal. The detail shows the
+session's last 50 trades by the card's numbers.
+
 ## Alerts, and a phone paired with a trade server
 
 Every minute a server with live sessions looks at them (`web/livesessions.py`
