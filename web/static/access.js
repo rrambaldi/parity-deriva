@@ -97,16 +97,24 @@ function accessRow(entry) {
 
 function showAccess(access) {
   const mode = access.mode || '';
-  for (const radio of document.querySelectorAll('input[name="access-mode"]')) radio.checked = radio.value === mode;
+  // nothing chosen here, and yet a certificate comes through: the proxy in
+  // front asks for one, and that is what lets people in now
+  const proxied = !mode && !!access.certificate;
+  const shown = mode || (proxied ? 'cert' : '');
+  for (const radio of document.querySelectorAll('input[name="access-mode"]')) radio.checked = radio.value === shown;
   $('access-legacy').hidden = !!mode;
+  $('access-legacy').textContent = proxied
+    ? t('Now the proxy in front asks for a client certificate, and this server checks nothing yet: change makes it check too, with the list.')
+    : t('Left to the proxy in front of this server: nothing is checked here yet.');
   accessNeeds();
   if (!accessOpened) {
     // the first load only: afterwards what the user opened and closed stays
-    accessOpen(mode);
+    accessOpen(shown);
     if (!mode && access.ca) $('access-certs').open = true;
     accessOpened = true;
   }
-  $('access-how-now').textContent = ACCESS_MODES[mode] ? t(ACCESS_MODES[mode]) : t('left to the proxy');
+  $('access-how-now').textContent = ACCESS_MODES[mode] ? t(ACCESS_MODES[mode])
+    : t(proxied ? 'a client certificate, asked by the proxy' : 'left to the proxy');
   const set = ACCESS_PROVIDERS.filter(([key]) => ((access.providers || {})[key] || {}).secret).map(([, label]) => label);
   $('access-accounts-now').textContent = set.length ? set.join(', ') : t('none set up');
   $('access-who-now').textContent = t('{n} on the list', { n: (access.allow || []).length });
