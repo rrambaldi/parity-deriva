@@ -4,7 +4,7 @@
 # entry that points a session at it. A terminal holds one login at a time,
 # so every account needs its own - see lib/mt5.terminals.
 #
-#     scripts/mt5_add_account.sh acc2 18813 /home/rrambaldi/mq2.txt
+#     scripts/mt5_add_account.sh acc2 18813 $PARITY_DERIVA_DATA_DIR/mt5/mq2.txt
 #
 # then paste the entry it prints into MT5_TERMINALS (etc/settings.py) and
 # start its bridge: scripts/mt5_bridge.sh 18813
@@ -15,7 +15,7 @@ if [ -z "$NAME" ] || [ -z "$PORT" ] || [ -z "$CREDENTIALS" ]; then
 	exit 2
 fi
 case "$NAME" in *[!A-Za-z0-9_-]*) echo "name: letters, digits, - and _ only" >&2; exit 2;; esac
-MT5_WINE_DIR=${MT5_WINE_DIR:-/mnt/HC_Volume_37718599/rrambaldi/mt5}
+MT5_WINE_DIR=${MT5_WINE_DIR:-${PARITY_DERIVA_DATA_DIR:-$HOME/DATA-dev}/mt5}
 C="$MT5_WINE_DIR/prefix/drive_c"
 SOURCE="$C/Program Files/MetaTrader 5"
 TARGET="$C/MT5/$NAME"

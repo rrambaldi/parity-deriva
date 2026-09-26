@@ -1303,7 +1303,7 @@ of them writes it. `DATA_DIR/market.json` says which, and the settings page
 writes it (`/api/market`, `data/market.py`):
 
 ```
-{"dir": "/mnt/HC_Volume_37718599/rrambaldi/MARKET", "writer": true}
+{"dir": "/srv/market", "writer": true}
 ```
 
 Without it the market folder is `DATA_DIR` and the server writes it, as

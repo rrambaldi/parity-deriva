@@ -6,7 +6,7 @@ Two servers on one host, prod and dev, read the same folder and only one of
 them writes it: two writers merging the same store lose each other's bars.
 DATA_DIR/market.json says which, and the settings page writes it:
 
-	{"dir": "/mnt/HC_Volume_37718599/rrambaldi/MARKET", "writer": true,
+	{"dir": "/srv/market", "writer": true,
 	 "candles": {"source": "upstream", "every": 60},
 	 "calendar": {"source": "manual", "every": 60},
 	 "upstream": {"url": "https://host/parity/mcp", "token": "<its mirror token>"},

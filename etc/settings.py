@@ -3,26 +3,33 @@ import os
 import shlex
 
 
+# Everything that is not code lives under this one folder - Docker's /data:
+# the runs, the market data, the .env, the files to import, MetaTrader's Wine.
+DATA_DIR = os.environ.get('PARITY_DERIVA_DATA_DIR', os.path.expanduser('~/DATA-dev'))
+
+
 def dotenv(key, default=None):
     """
-    key from the environment, else from parity_deriva/.env, else default.
+    key from the environment, else from DATA_DIR/.env, else from the older
+    parity_deriva/.env, else default.
 
     The .env is written to be sourced by a shell (`export KEY='value'`),
     which systemd's EnvironmentFile ignores, so a service reads it here.
     """
     if key in os.environ:
         return os.environ[key]
-    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
-    try:
-        with open(path) as handle:
-            for line in handle:
-                words = shlex.split(line, comments=True)
-                if words[:1] == ['export']:
-                    words = words[1:]
-                if words and words[0].startswith(key + '='):
-                    return words[0][len(key) + 1:]
-    except (OSError, ValueError):
-        pass
+    for path in (os.path.join(DATA_DIR, '.env'),
+                 os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')):
+        try:
+            with open(path) as handle:
+                for line in handle:
+                    words = shlex.split(line, comments=True)
+                    if words[:1] == ['export']:
+                        words = words[1:]
+                    if words and words[0].startswith(key + '='):
+                        return words[0][len(key) + 1:]
+        except (OSError, ValueError):
+            pass
     return default
 
 
@@ -85,12 +92,11 @@ ACCESS_TOKEN = os.environ.get('OANDA_API_ACCESS_TOKEN', '')
 ACCOUNT_ID = os.environ.get('OANDA_API_ACCOUNT_ID', '')
 API_VERSION = '3'
 
-DATA_DIR = os.environ.get('PARITY_DERIVA_DATA_DIR', "/home/rrambaldi/DATA")
-LOG_DIR = os.environ.get('PARITY_DERIVA_LOG_DIR', "/home/rrambaldi/DATA")
+LOG_DIR = os.environ.get('PARITY_DERIVA_LOG_DIR', DATA_DIR)
 # Where candle CSV exports wait to be imported into the stores - the viewer's
 # data dialog uploads into it and runs scripts/import_csv.py over it. Set in
 # .env (PARITY_DERIVA_IMPORT_DIR) or the environment.
-IMPORT_DIR = dotenv('PARITY_DERIVA_IMPORT_DIR', '/mnt/HC_Volume_37718599/rrambaldi/parity-deriva/data')
+IMPORT_DIR = dotenv('PARITY_DERIVA_IMPORT_DIR', os.path.join(DATA_DIR, 'import'))
 BASE_CURRENCY = "EUR"
 EQUITY = Decimal("100000.00")
 # the leverage a simulation's account trades on, when the form does not say:
@@ -405,16 +411,18 @@ CANDLE_DB = dotenv('PARITY_DERIVA_CANDLE_DB', os.path.join(DATA_DIR, 'live', 'ca
 MT5_LOGIN = dotenv('MT5_LOGIN', '')
 MT5_PASSWORD = dotenv('MT5_PASSWORD', '')
 MT5_SERVER = dotenv('MT5_SERVER', '')
-MT5_CREDENTIALS = dotenv('MT5_CREDENTIALS', '/home/rrambaldi/mq.txt')
+# MetaTrader and its Wine (scripts/mt5_bridge.sh) are in DATA_DIR/mt5, and
+# the credential files beside them
+MT5_CREDENTIALS = dotenv('MT5_CREDENTIALS', os.path.join(DATA_DIR, 'mt5', 'mq.txt'))
 MT5_BRIDGE = dotenv('MT5_BRIDGE', '127.0.0.1:18812')
 MT5_TERMINAL = 'C:\\Program Files\\MetaTrader 5\\terminal64.exe'
 # More than one account: one terminal each, each behind its own bridge
 # (scripts/mt5_add_account.sh makes the terminal and prints the entry).
 # Set, this replaces the single terminal the four settings above describe:
 #     MT5_TERMINALS = [
-#         {'credentials': '/home/rrambaldi/mq.txt', 'bridge': '127.0.0.1:18812',
+#         {'credentials': DATA_DIR + '/mt5/mq.txt', 'bridge': '127.0.0.1:18812',
 #          'terminal': MT5_TERMINAL},
-#         {'credentials': '/home/rrambaldi/mq2.txt', 'bridge': '127.0.0.1:18813',
+#         {'credentials': DATA_DIR + '/mt5/mq2.txt', 'bridge': '127.0.0.1:18813',
 #          'terminal': 'C:\\MT5\\acc2\\terminal64.exe', 'portable': True},
 #     ]
 # 'suffix' is what that broker adds to every symbol (OANDA TMS: EURUSD.pro).
@@ -423,7 +431,7 @@ MT5_TERMINALS = [
     # OANDA TMS (EU): MT5 only, no v20 REST API. Its clock is UTC+2 in
     # summer, not MetaQuotes' +3: Friday's last EURUSD tick is at 22:59
     # server time and FX shuts at 21:00 UTC (measured 2026-09-26).
-    {'credentials': '/home/rrambaldi/oanda-mt5.txt', 'bridge': '127.0.0.1:18813',
+    {'credentials': os.path.join(DATA_DIR, 'mt5', 'oanda-mt5.txt'), 'bridge': '127.0.0.1:18813',
      'terminal': 'C:\\MT5\\oanda\\terminal64.exe', 'portable': True, 'suffix': '.pro',
      'utc_offset': 2},
 ]

@@ -65,24 +65,25 @@ def today():
     return int(now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
 
 
-def dotenv(path=os.path.join(ROOT, '.env')):
+def dotenv():
     """
-    parity_deriva/.env as variables. The service reads it key by key
-    (etc/settings.dotenv); the broker modules read os.environ only, so a
-    session is handed the whole file in its environment.
+    The .env as variables: the older parity_deriva/.env, then DATA_DIR/.env
+    over it. The service reads them key by key (etc/settings.dotenv); the
+    broker modules read os.environ only, so a session is handed them whole.
     """
     out = {}
-    try:
-        with open(path) as handle:
-            for line in handle:
-                words = shlex.split(line, comments=True)
-                if words[:1] == ['export']:
-                    words = words[1:]
-                if words and '=' in words[0]:
-                    key, _, value = words[0].partition('=')
-                    out[key] = value
-    except (OSError, ValueError):
-        pass
+    for path in (os.path.join(ROOT, '.env'), os.path.join(settings.DATA_DIR, '.env')):
+        try:
+            with open(path) as handle:
+                for line in handle:
+                    words = shlex.split(line, comments=True)
+                    if words[:1] == ['export']:
+                        words = words[1:]
+                    if words and '=' in words[0]:
+                        key, _, value = words[0].partition('=')
+                        out[key] = value
+        except (OSError, ValueError):
+            pass
     return out
 
 

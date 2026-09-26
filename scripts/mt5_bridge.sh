@@ -15,7 +15,7 @@
 # MT5_WINE_DIR holds wine-*/ , prefix/ (Python 3.12 + MetaTrader5 + rpyc) and
 # the terminals under prefix/drive_c.
 set -e
-MT5_WINE_DIR=${MT5_WINE_DIR:-/mnt/HC_Volume_37718599/rrambaldi/mt5}
+MT5_WINE_DIR=${MT5_WINE_DIR:-${PARITY_DERIVA_DATA_DIR:-$HOME/DATA-dev}/mt5}
 MT5_BRIDGE_PORT=${1:-${MT5_BRIDGE_PORT:-18812}}
 export WINEPREFIX="$MT5_WINE_DIR/prefix" WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml="
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/tmp/$(id -u)-runtime}
