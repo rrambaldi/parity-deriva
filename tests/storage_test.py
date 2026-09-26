@@ -172,14 +172,19 @@ class RcloneTest(unittest.TestCase):
     """rclone itself, on a local folder standing for the Drive."""
 
     def setUp(self):
-        self.service = server(self)
         self.drive = tempfile.mkdtemp(prefix='parity-deriva-drive-')
         self.addCleanup(shutil.rmtree, self.drive, True)
-        data = self.service.setup.DATA_DIR
+        self.service = self.server()
+
+    def server(self):
+        """A server whose storage is the folder standing for the Drive."""
+        service = server(self)
+        data = service.setup.DATA_DIR
         with open(os.path.join(data, 'rclone.conf'), 'w') as handle:
             handle.write('[cold]\ntype = local\n')
         with open(os.path.join(data, 'storage.json'), 'w') as handle:
             json.dump({'kind': 'gdrive', 'folder': self.drive}, handle)
+        return service
 
     def test_the_calls_of_a_bucket(self):
         where = storage.bucket(self.service.setup)
@@ -206,6 +211,38 @@ class RcloneTest(unittest.TestCase):
         self.service.deleteSweep(SWEEP)
         self.assertFalse(os.path.exists(os.path.join(self.drive, 'sweeps', SWEEP)))
         self.assertEqual(self.service.sweeps(), [])
+
+    def test_what_is_there_is_seen_downloaded_and_taken_by_another_server(self):
+        import zipfile
+        saveSet(self.service)
+        self.service.freeze(SWEEP)
+        row = self.service.storageFiles()['sets'][0]
+        self.assertEqual((row['id'], row['known'], row['here'], row['files'], row['away'], row['table']),
+                         (SWEEP, True, 0, 2, 2, True))
+        # the whole set in a zip, its runs from the storage, nothing brought here for it
+        path = self.service.sweepZip(SWEEP)
+        with zipfile.ZipFile(path) as bundle:
+            self.assertEqual(sorted(bundle.namelist()), ['sweeps/%s.json.gz' % SWEEP, 'sweeps/%s.meta.json' % SWEEP,
+                                                         'sweeps/%s/1.json.gz' % SWEEP, 'sweeps/%s/2.json.gz' % SWEEP])
+        os.remove(path)
+        self.assertFalse(os.path.exists(self.service.sweepPath(SWEEP, '')))
+        # another server on the same storage sees a set it does not know, and takes it
+        other = self.server()
+        row = other.storageFiles()['sets'][0]
+        self.assertEqual((row['id'], row['known'], row['away']), (SWEEP, False, 2))
+        told = other.thaw(SWEEP)
+        self.assertEqual((told['files'], told['known']), (2, False))
+        self.assertEqual(other.sweeps()[0]['id'], SWEEP)
+        self.assertEqual(other.sweepPayload(SWEEP, 1)['trades'][0]['pl'], 5.0)
+        self.assertEqual(other.storageFiles()['sets'][0]['away'], 0)
+        # brought back here, then deleted: the storage forgets it too
+        self.service.thaw(SWEEP)
+        self.assertNotIn('cold', self.service.sweeps()[0])
+        self.service.deleteSweep(SWEEP)
+        self.assertEqual(os.listdir(os.path.join(self.drive, 'sweeps')), [])
+        with self.assertRaises(ServiceError) as caught:
+            self.service.thaw(SWEEP)
+        self.assertIn('not in the storage', str(caught.exception))
 
     def test_a_missing_rclone_is_said(self):
         where = storage.Remote(None, 'x.conf', 'f')

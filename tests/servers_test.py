@@ -288,6 +288,10 @@ class FakeBucket(object):
             raise s3.S3Error('503 SlowDown', status=503)
         self.held.pop(key, None)
 
+    def list(self, prefix=''):
+        return [{'key': k, 'size': len(v), 'time': '2026-09-26T12:00:00Z'}
+                for k, v in sorted(self.held.items()) if k.startswith(prefix)]
+
 
 class ColdStorageTest(unittest.TestCase):
 
@@ -309,7 +313,9 @@ class ColdStorageTest(unittest.TestCase):
             told = self.service.freeze(SWEEP)
             self.assertEqual((told['files'], told['freed'] > 0), (2, True))
             self.assertFalse(os.path.exists(folder))
-            self.assertEqual(sorted(self.bucket.held), ['sweeps/%s/1.json.gz' % SWEEP, 'sweeps/%s/2.json.gz' % SWEEP])
+            # the runs, and a copy of the set's own files: the set whole there
+            self.assertEqual(sorted(self.bucket.held), ['sweeps/%s.json.gz' % SWEEP, 'sweeps/%s.meta.json' % SWEEP,
+                                                        'sweeps/%s/1.json.gz' % SWEEP, 'sweeps/%s/2.json.gz' % SWEEP])
             # the set's table stays: the list says where its runs are
             listed = self.service.sweeps()[0]
             self.assertEqual((listed['id'], listed['cold']['bytes']), (SWEEP, told['bytes']))
@@ -347,7 +353,7 @@ class ColdStorageTest(unittest.TestCase):
                 cold.main(['--older-than', '1'], report=lines.append)
                 self.assertEqual(self.bucket.held, {})
                 cold.main(['--older-than', '0'], report=lines.append)
-        self.assertEqual(sorted(set(k.split('/')[1] for k in self.bucket.held)), [SWEEP])
+        self.assertEqual(sorted(set(k.split('/')[1][:len(SWEEP)] for k in self.bucket.held)), [SWEEP])
         self.assertTrue(os.path.isdir(self.service.sweepPath(starred, '')))
 
 

@@ -123,6 +123,16 @@ class Remote(object):
 			if exc.status != 404:
 				raise
 
+	def list(self, prefix=''):
+		"""Every file under `prefix`, [{'key', 'size', 'time'}], as lib/s3.Bucket lists them."""
+		try:
+			found = json.loads(self.run('lsjson', '-R', '--files-only', self.path(prefix)) or b'[]')
+		except s3.S3Error as exc:
+			if exc.status == 404:
+				return []
+			raise
+		return [{'key': prefix + f['Path'], 'size': f['Size'], 'time': f['ModTime']} for f in found]
+
 	def sendAll(self, folder, prefix):
 		"""Every file of `folder` under `prefix`, several at once, each checked by rclone."""
 		self.run('copy', '--exclude', '*.part', folder, self.path(prefix))

@@ -18,6 +18,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from xml.etree import ElementTree
 
 #: generous - a cold-storage file can be large and the network is not local
 TIMEOUT = 120
@@ -113,16 +114,19 @@ class Bucket(object):
 		full = '%s/%s' % (self.prefix, key) if self.prefix else key
 		return '/%s/%s' % (self.bucket, full)
 
-	def _request(self, method, key, data=None):
+	def _request(self, method, key, data=None, query=None):
+		# key None: the bucket itself, for a listing
 		parsed = urllib.parse.urlparse(self.endpoint)
-		path = self._path(key)
+		path = self._path(key) if key is not None else '/%s' % self.bucket
 		url = '%s://%s%s' % (parsed.scheme, parsed.netloc, uriEncode(path, safe='/~'))
+		if query:
+			url += '?' + canonicalQueryString(query)
 		payloadHash = hashlib.sha256(data or b'').hexdigest()
 		when = datetime.datetime.now(datetime.timezone.utc)
 		headers = {'x-amz-content-sha256': payloadHash,
 				  'x-amz-date': when.strftime('%Y%m%dT%H%M%SZ')}
 		headers['Authorization'] = authorization(
-			method, parsed.netloc, path, None, headers, payloadHash,
+			method, parsed.netloc, path, query, headers, payloadHash,
 			self.access_key, self.secret_key, self.region, when)
 		request = urllib.request.Request(url, data=data, headers=headers, method=method)
 		try:
@@ -151,6 +155,33 @@ class Bucket(object):
 		"""The bytes at `key`. S3Error.status == 404 when there is nothing there."""
 		status, body, headers = self._request('GET', key)
 		return body
+
+	def list(self, prefix=''):
+		"""
+		Every object under `prefix`, [{'key', 'size', 'time'}] - the key
+		without the bucket's own prefix - a page of a thousand a request
+		(ListObjectsV2) until the last.
+		"""
+		full = '%s/%s' % (self.prefix, prefix) if self.prefix else prefix
+		out, token = [], None
+		while True:
+			query = {'list-type': '2', 'prefix': full}
+			if token:
+				query['continuation-token'] = token
+			status, body, headers = self._request('GET', None, query=query)
+			try:
+				root = ElementTree.fromstring(body)
+			except ElementTree.ParseError as exc:
+				raise S3Error("the listing is not XML: %s" % exc, status=status)
+			space = root.tag[:root.tag.index('}') + 1] if root.tag.startswith('{') else ''
+			for item in root.iter(space + 'Contents'):
+				key = item.findtext(space + 'Key') or ''
+				out.append({'key': key[len(self.prefix) + 1:] if self.prefix else key,
+							'size': int(item.findtext(space + 'Size') or 0),
+							'time': item.findtext(space + 'LastModified')})
+			token = root.findtext(space + 'NextContinuationToken')
+			if root.findtext(space + 'IsTruncated') != 'true' or not token:
+				return out
 
 	def exists(self, key):
 		try:

@@ -477,6 +477,14 @@ section {
 #drive-token-box { flex: 1 1 28em; }
 #drive-token { width: 100%; font-family: var(--font-mono, monospace); font-size: var(--fs-small); }
 #s3-endpoint, #drive-client-id { width: min(26em, 80vw); }
+#storage-sets-box[hidden] { display: none; }
+#storage-sets-box { margin-top: 14px; overflow-x: auto; }
+#storage-sets-box h4 { margin: 0; align-self: center; }
+#storage-sets { border-collapse: collapse; width: 100%; font-size: var(--fs-small); }
+#storage-sets th, #storage-sets td { padding: 3px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+#storage-sets th { color: var(--text-3); font-weight: normal; }
+#storage-sets .num { text-align: right; }
+#storage-sets td:last-child { white-space: nowrap; }
 #market-box { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 #market-box .market-row { margin-top: 10px; }
 #market-box [hidden] { display: none; }

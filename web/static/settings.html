@@ -145,6 +145,18 @@
       </div>
     </div>
     <button type="button" id="storage-save" data-icon="yes">test and save</button>
+    <!-- every set, here and there (api/storage/sets): sent, brought here, downloaded whole -->
+    <div id="storage-sets-box" hidden>
+      <div class="market-row">
+        <h4>what is there</h4>
+        <button type="button" id="storage-read" data-icon="rerun">read again</button>
+      </div>
+      <table id="storage-sets">
+        <thead><tr><th>set</th><th>strategy</th><th>saved</th><th class="num">here</th>
+          <th class="num">there</th><th></th></tr></thead>
+        <tbody id="storage-rows"></tbody>
+      </table>
+    </div>
   </div>
   <p id="server-note" role="status"></p>
 </section>

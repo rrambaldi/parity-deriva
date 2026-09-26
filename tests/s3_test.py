@@ -61,7 +61,7 @@ class FakeS3Case(unittest.TestCase):
 				errors.append('missing x-amz-date')
 			if not handler.headers.get('x-amz-content-sha256'):
 				errors.append('missing x-amz-content-sha256')
-			if not handler.path.startswith('/%s/%s/' % (bucket, prefix)):
+			if not handler.path.startswith(('/%s/%s/' % (bucket, prefix), '/%s?' % bucket)):
 				errors.append('unexpected path %r' % handler.path)
 
 		class Handler(BaseHTTPRequestHandler):
@@ -78,6 +78,9 @@ class FakeS3Case(unittest.TestCase):
 
 			def do_GET(self):
 				check(self)
+				if self.path.startswith('/%s?' % bucket):
+					self._list()
+					return
 				data = store.get(self.path)
 				if data is None:
 					self._notfound(body=True)
@@ -100,6 +103,26 @@ class FakeS3Case(unittest.TestCase):
 				store.pop(self.path, None)
 				self.send_response(204)
 				self.end_headers()
+
+			def _list(self):
+				# two keys a page, so that a listing takes several requests
+				import urllib.parse
+				asked = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(self.path).query))
+				keys = sorted(urllib.parse.unquote(p[len('/%s/' % bucket):]) for p in store)
+				keys = [k for k in keys if k.startswith(asked.get('prefix', ''))]
+				start = int(asked.get('continuation-token', 0))
+				page, more = keys[start:start + 2], start + 2 < len(keys)
+				body = ('<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+						'<IsTruncated>%s</IsTruncated>%s%s</ListBucketResult>' % (
+							'true' if more else 'false',
+							'<NextContinuationToken>%d</NextContinuationToken>' % (start + 2) if more else '',
+							''.join('<Contents><Key>%s</Key><Size>%d</Size><LastModified>2026-09-26T12:00:00.000Z'
+									'</LastModified></Contents>' % (k, len(store['/%s/%s' % (bucket, urllib.parse.quote(k))]))
+									for k in page))).encode()
+				self.send_response(200)
+				self.send_header('Content-Length', str(len(body)))
+				self.end_headers()
+				self.wfile.write(body)
 
 			def _notfound(self, body):
 				payload = b'<Error><Code>NoSuchKey</Code><Message>no such key</Message></Error>'
@@ -149,6 +172,16 @@ class FakeS3Case(unittest.TestCase):
 		self.state['bad_etag'] = True
 		with self.assertRaises(s3.S3Error):
 			self.bucket.put('sweeps/x/1.json.gz', b'data')
+
+	def test_a_listing_goes_page_by_page(self):
+		for key, data in (('sweeps/x/1.json.gz', b'one'), ('sweeps/x/2.json.gz', b'two!'),
+						  ('sweeps/x.json.gz', b'table'), ('probe-1.txt', b'p')):
+			self.bucket.put(key, data)
+		self.assertEqual([(f['key'], f['size']) for f in self.bucket.list('sweeps/')],
+						 [('sweeps/x.json.gz', 5), ('sweeps/x/1.json.gz', 3), ('sweeps/x/2.json.gz', 4)])
+		self.assertEqual(len(self.bucket.list()), 4)
+		self.assertEqual(self.bucket.list('nothing/'), [])
+		self.assertEqual(self.errors, [])
 
 	def test_the_prefix_and_bucket_are_in_every_path(self):
 		self.bucket.put('sweeps/x/1.json.gz', b'data')

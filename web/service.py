@@ -2114,10 +2114,12 @@ class Service(object):
 								json.dumps(meta).encode())
 				except (ServiceError, OSError, ValueError, KeyError):
 					self.logger.exception("cannot score the set %s" % name)
-			# its runs in the bucket (freeze): said by the list, not kept in the summary
-			cold = self.cold(meta['id'])
-			if cold:
-				meta['cold'] = {'at': cold.get('at'), 'bytes': sum(cold['files'].values())}
+			# runs of it only in the storage (freeze): said by the list, not kept
+			# in the summary
+			cold = self.cold(meta['id']) or {'files': {}}
+			away = [n for n in cold['files'] if not os.path.exists(os.path.join(self.sweepPath(meta['id'], ''), n))]
+			if away:
+				meta['cold'] = {'at': cold.get('at'), 'bytes': sum(cold['files'][n] for n in away)}
 			out.append(meta)
 		return sorted(out, key=lambda row: row.get('saved', 0), reverse=True)
 
@@ -2185,6 +2187,8 @@ class Service(object):
 				else:
 					for name in cold['files']:
 						bucket.delete(self.coldKey(sweep, name))
+				for suffix in self.TABLE:
+					bucket.delete(self.tableKey(sweep, suffix))
 			except s3.S3Error as exc:
 				raise ServiceError("the set's runs in the bucket: %s - it is kept, try again" % exc)
 		for suffix in ('.json.gz', '.meta.json', '.cold.json'):
@@ -2214,9 +2218,17 @@ class Service(object):
 		except storage.StorageError as exc:
 			raise ServiceError(str(exc))
 
+	#: a set's own files, its table and its summary: copies of them go to the
+	#: storage with its runs, so the set is whole there
+	TABLE = ('.json.gz', '.meta.json')
+
 	@staticmethod
 	def coldKey(sweep, name):
 		return 'sweeps/%s/%s' % (sweep, name)
+
+	@staticmethod
+	def tableKey(sweep, suffix):
+		return 'sweeps/%s%s' % (sweep, suffix)
 
 	def cold(self, sweep):
 		"""What of a set is in the bucket, {at, files: {name: bytes}}, or None."""
@@ -2229,12 +2241,13 @@ class Service(object):
 
 	def freeze(self, sweep):
 		"""
-		A set's runs into the bucket and off this disk: the file of each run
-		the run page draws, which is what weighs - the set's own file, its
-		table, stays, and the lists, the mixes and the favourites read that.
-		A file goes from here once the bucket has it (its ETag is its MD5); a
-		run opened later comes back by itself (warmFile), and thaw() brings
-		them all back.
+		A set's runs into the storage and off this disk: the file of each run
+		the run page draws, which is what weighs. The set's own files, its
+		table, stay here - the lists, the mixes and the favourites read them -
+		and a copy of them goes too, so the storage holds the whole set, for
+		a download or another server (thaw). A file goes from here once the
+		storage has it (an S3 ETag is its MD5, rclone checks its own); a run
+		opened later comes back by itself (warmFile), thaw() brings them all.
 		"""
 		live = getattr(self, '_sweep', None)
 		if live and live.get('id') == sweep and live.get('running'):
@@ -2244,9 +2257,20 @@ class Service(object):
 		bucket = self.bucket()
 		folder = self.sweepPath(sweep, '')
 		held = self.cold(sweep) or {'files': {}}
+		try:
+			for suffix in self.TABLE:
+				with open(self.sweepPath(sweep, suffix), 'rb') as handle:
+					bucket.put(self.tableKey(sweep, suffix), handle.read())
+		except s3.S3Error as exc:
+			raise ServiceError("set %s: %s" % (sweep, exc))
 		names = [n for n in sorted(os.listdir(folder)) if not n.endswith('.part')
 				 and os.path.isfile(os.path.join(folder, n))] if os.path.isdir(folder) else []
 		freed = 0
+		# one there already - brought back, or opened - goes from here unsent
+		for name in [n for n in names if held['files'].get(n) == os.path.getsize(os.path.join(folder, n))]:
+			freed += os.path.getsize(os.path.join(folder, name))
+			os.remove(os.path.join(folder, name))
+			names.remove(name)
 		if names and hasattr(bucket, 'sendAll'):
 			# a Drive, through rclone: the folder in one call, each file checked
 			# on the way; ponytail: a set of hundreds of MB may outlast a
@@ -2284,14 +2308,108 @@ class Service(object):
 				'bytes': sum(held['files'].values())}
 
 	def thaw(self, sweep):
-		"""Every run of a set back from the bucket, which keeps its copies until the set is deleted."""
-		held = self.cold(sweep)
-		if not held:
-			raise ServiceError("set %s has nothing in the bucket" % sweep)
-		for name in held['files']:
+		"""
+		What of a set is in the storage and not here, brought here: its runs,
+		and its table for a set this server does not know - one another
+		server sent there. The storage keeps its copies until the set is
+		deleted.
+		"""
+		folder = self.sweepPath(sweep, '')
+		bucket = self.bucket()
+		try:
+			runs = dict((f['key'][len(self.coldKey(sweep, '')):], f['size'])
+						for f in bucket.list(self.coldKey(sweep, '')))
+			table = dict((suffix, bucket.get(self.tableKey(sweep, suffix))) for suffix in self.TABLE
+						 if not os.path.exists(self.sweepPath(sweep, suffix)))
+		except s3.S3Error as exc:
+			raise ServiceError("set %s %s" % (sweep, 'is not in the storage' if exc.status == 404
+											   else 'in the storage: %s' % exc))
+		held = self.cold(sweep) or {'files': {}, 'at': int(time.time() * 1000)}
+		held['files'].update(runs)
+		os.makedirs(self.sweepsDir(), exist_ok=True)
+		self._write(self.sweepPath(sweep, '.cold.json'), json.dumps(held).encode())
+		# the summary last: the lists show a set once its table is here
+		for suffix in sorted(table, key=lambda s: s == '.meta.json'):
+			self._write(self.sweepPath(sweep, suffix), table[suffix])
+		fetched = [name for name in runs if not os.path.exists(os.path.join(folder, name))]
+		for name in fetched:
 			self.warmFile(sweep, name)
-		os.remove(self.sweepPath(sweep, '.cold.json'))
-		return {'sweep': sweep, 'files': len(held['files'])}
+		return {'sweep': sweep, 'files': len(fetched), 'known': not table}
+
+	def storageFiles(self):
+		"""
+		What is in the storage, set by set, beside what is here: the bytes of
+		each set's runs there and here, how many are there only, and whether
+		this server knows the set - another server may have sent it.
+		"""
+		bucket = self.bucket()
+		try:
+			found = bucket.list('sweeps/')
+		except s3.S3Error as exc:
+			raise ServiceError("the storage did not answer: %s" % exc)
+		there = {}
+		for f in found:
+			m = re.fullmatch(r'sweeps/(\d{8}-\d{6}-[0-9a-f]{6})(?:/(.+)|(\.json\.gz|\.meta\.json))', f['key'])
+			if not m:
+				continue
+			row = there.setdefault(m.group(1), {'runs': {}, 'table': False, 'time': ''})
+			if m.group(2):
+				row['runs'][m.group(2)] = f['size']
+				row['time'] = max(row['time'], str(f.get('time') or ''))
+			elif m.group(3) == '.json.gz':
+				row['table'] = True
+		here = dict((s['id'], s) for s in self.sweeps())
+		rows = []
+		for sweep in sorted(set(here) | set(there), reverse=True):
+			folder = self.sweepPath(sweep, '')
+			local = dict((n, os.path.getsize(os.path.join(folder, n))) for n in os.listdir(folder)
+						 if not n.endswith('.part')) if os.path.isdir(folder) else {}
+			meta, got = here.get(sweep) or {}, there.get(sweep) or {'runs': {}, 'table': False, 'time': ''}
+			rows.append({'id': sweep, 'known': sweep in here, 'name': meta.get('name') or '',
+						 'strategy': meta.get('strategy'), 'instrument': meta.get('instrument'),
+						 'granularity': meta.get('granularity'), 'saved': meta.get('saved'),
+						 'here': sum(local.values()), 'there': sum(got['runs'].values()),
+						 'files': len(got['runs']), 'table': got['table'], 'sent': got['time'] or None,
+						 'away': len([n for n in got['runs'] if n not in local])})
+		return {'sets': rows}
+
+	def sweepZip(self, sweep):
+		"""
+		A set whole in one zip - its table and every run, laid out as the runs
+		folder keeps them, each from here or from the storage - for the user
+		to keep: the path of the zip, which the caller removes.
+		"""
+		import zipfile
+		folder = self.sweepPath(sweep, '')
+		bucket = storage.bucket(self.setup)
+		local = [n for n in os.listdir(folder) if not n.endswith('.part')] if os.path.isdir(folder) else []
+		os.makedirs(self.sweepsDir(), exist_ok=True)
+		handle, path = tempfile.mkstemp(suffix='.zip', dir=self.sweepsDir())
+		os.close(handle)
+		try:
+			there = [f['key'][len(self.coldKey(sweep, '')):] for f in bucket.list(self.coldKey(sweep, ''))] \
+				if bucket is not None else []
+			with zipfile.ZipFile(path, 'w', zipfile.ZIP_STORED) as bundle:
+				for suffix in self.TABLE:
+					if os.path.exists(self.sweepPath(sweep, suffix)):
+						bundle.write(self.sweepPath(sweep, suffix), 'sweeps/%s%s' % (sweep, suffix))
+					elif bucket is not None:
+						bundle.writestr('sweeps/%s%s' % (sweep, suffix), bucket.get(self.tableKey(sweep, suffix)))
+					else:
+						raise ServiceError("no such sweep")
+				for name in sorted(set(local) | set(there)):
+					if name in local:
+						bundle.write(os.path.join(folder, name), 'sweeps/%s/%s' % (sweep, name))
+					else:
+						bundle.writestr('sweeps/%s/%s' % (sweep, name), bucket.get(self.coldKey(sweep, name)))
+		except s3.S3Error as exc:
+			os.remove(path)
+			raise ServiceError("set %s %s" % (sweep, 'is not in the storage' if exc.status == 404
+											   else 'in the storage: %s' % exc))
+		except BaseException:
+			os.remove(path)
+			raise
+		return path
 
 	def warmFile(self, sweep, name):
 		"""
@@ -3171,6 +3289,19 @@ class Handler(BaseHTTPRequestHandler):
 		self.end_headers()
 		self.wfile.write(body)
 
+	def sendDownload(self, path, name):
+		"""A file made for this answer, sent as an attachment, then removed."""
+		try:
+			self.send_response(200)
+			self.send_header('Content-Type', 'application/zip')
+			self.send_header('Content-Length', str(os.path.getsize(path)))
+			self.send_header('Content-Disposition', 'attachment; filename="%s"' % name)
+			self.end_headers()
+			with open(path, 'rb') as handle:
+				shutil.copyfileobj(handle, self.wfile, 1 << 20)
+		finally:
+			os.remove(path)
+
 	# -------------------------------------------------------------- routing
 
 	def do_GET(self):
@@ -3245,6 +3376,9 @@ class Handler(BaseHTTPRequestHandler):
 				# <id> is the set, <id>/<n> one run of it, whole, and
 				# <id>/<n>/excursions where price went after its entries
 				sweep, _, n = route[len('/api/sweeps/'):].partition('/')
+				if n == 'zip':
+					# the set whole, from here and from the storage, to keep
+					return self.sendDownload(self.service.sweepZip(sweep), sweep + '.zip')
 				if n:
 					n, _, what = n.partition('/')
 					if not n.isdigit() or what not in ('', 'excursions'):
@@ -3323,6 +3457,8 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendJSON(self.service.tradeServers())
 			if route == '/api/storage':
 				return self.sendJSON(self.service.storageData())
+			if route == '/api/storage/sets':
+				return self.sendJSON(self.service.storageFiles())
 			if route == '/api/imports/status':
 				return self.sendJSON(self.service.importStatus())
 			if route == '/api/runs':

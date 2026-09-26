@@ -396,7 +396,93 @@ function showStorage(s) {
   $('drive-token').value = '';
   $('drive-token').placeholder = s.token ? 'logged in: paste a new one only to log in again' : '';
   showStorageKind();
+  $('storage-sets-box').hidden = !s.kind;
+  if (s.kind) readStorageSets();
 }
+
+const megabytes = (n) => (n ? `${(n / 1e6).toFixed(1)} MB` : '\u2014');
+
+// what is in the storage, read there now, beside what is here
+async function readStorageSets() {
+  const body = $('storage-rows');
+  body.textContent = '';
+  const wait = body.insertRow().insertCell();
+  wait.colSpan = 6;
+  wait.textContent = 'reading what is there…';
+  try { showStorageSets(await ask('api/storage/sets')); }
+  catch (error) { wait.textContent = String(error.message || error); }
+}
+
+function showStorageSets({ sets }) {
+  const body = $('storage-rows');
+  body.textContent = '';
+  if (!sets.length) {
+    const td = body.insertRow().insertCell();
+    td.colSpan = 6;
+    td.textContent = 'no set saved yet';
+    return;
+  }
+  for (const set of sets) {
+    const tr = body.insertRow();
+    tr.dataset.id = set.id;
+    tr.insertCell().textContent = set.id + (set.name ? ` \u00b7 ${set.name}` : '');
+    tr.insertCell().textContent = set.known ? `${set.strategy} \u00b7 ${set.instrument} ${set.granularity}`
+      : 'not known here: another server sent it';
+    tr.insertCell().textContent = set.saved ? day(set.saved) : '';
+    const here = tr.insertCell();
+    here.textContent = megabytes(set.here);
+    here.className = 'num';
+    const there = tr.insertCell();
+    there.textContent = megabytes(set.there);
+    there.className = 'num';
+    if (set.away) there.title = `${set.away} runs there only`;
+    const cell = tr.insertCell();
+    for (const [label, icon, act, show, title] of [
+      ['send', 'upload', 'send', set.known && set.here > 0, 'its runs there and off this disk: one opened comes back by itself'],
+      ['bring here', 'import', 'bring', set.away > 0, 'what of it is there only, brought to this disk'],
+      ['download', 'import', 'zip', set.known || set.table, 'the set whole in a zip, its runs from here or from there']]) {
+      if (!show) continue;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.title = title;
+      Object.assign(button.dataset, { icon, act });
+      cell.append(button, ' ');
+    }
+  }
+}
+
+$('storage-read').addEventListener('click', readStorageSets);
+$('storage-rows').addEventListener('click', async (event) => {
+  const button = event.target.closest('button');
+  const row = event.target.closest('tr[data-id]');
+  if (!button || !row) return;
+  const id = row.dataset.id;
+  if (button.dataset.act === 'zip') {
+    // made on the service first, then saved by the browser; a refusal stays on this page
+    $('server-note').textContent = `making the zip of ${id}…`;
+    try {
+      const response = await fetch(`api/sweeps/${id}/zip`);
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || response.statusText);
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(await response.blob());
+      link.download = `${id}.zip`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+      $('server-note').textContent = `${id}.zip saved by the browser`;
+    } catch (error) { serverSay(error); }
+    return;
+  }
+  button.disabled = true;
+  const send = button.dataset.act === 'send';
+  $('server-note').textContent = send ? `sending ${id}…` : `bringing ${id} here…`;
+  try {
+    const told = await post(`api/sweeps/${id}`, JSON.stringify(send ? { cold: true } : { warm: true }));
+    $('server-note').textContent = send ? `${id}: ${told.files} runs there, ${megabytes(told.freed)} freed here`
+      : `${id}: ${told.files} runs brought here`;
+  } catch (error) { serverSay(error); }
+  readStorageSets();
+});
 
 // the command the user runs on a PC: rclone's own, for access to the files it makes only
 function driveCommand() {
