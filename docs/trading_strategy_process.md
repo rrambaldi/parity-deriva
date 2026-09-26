@@ -208,7 +208,9 @@ Più strategie insieme (mix) e portafoglio: fase 2 e 3, in [ROADMAP.md](ROADMAP.
 ### Monitoraggio
 
 - Ogni settimana: ultimi 50 trade contro la scheda.
-- Avviso a ogni cambio di stato (oggi non c'è nessun canale di notifica).
+- Avvisi (oggi non c'è nessun canale di notifica): banner sempre; per gli
+  urgenti anche email, Telegram e notifiche sul telefono, abbinato con un QR
+  code, con una pagina che mostra i trade in corso. Demo e live.
 
 ### SUSPENDED
 
@@ -241,10 +243,11 @@ Lo storico dei cambi di stato va nel diario.
    volta per versione. Medio.
 4. **Motore correlazioni** (1.3). Medio-grande.
 5. **Banda Monte Carlo + baseline casuale**. Medio.
-6. **Live**: protezioni per strategia, ramp al 25%, ultimi 50 trade, avvisi.
+6. **Live**: protezioni per strategia, ramp al 25%, ultimi 50 trade.
    Medio.
 7. Piccoli: giorno della settimana come opzione dello sweep (le ore ci sono
    già con `session`), commissioni e financing, colonna R nei trade.
+8. **Avvisi e telefono**. Medio.
 
 ---
 

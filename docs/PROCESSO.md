@@ -340,7 +340,13 @@ Una strategia in perdita in demo può passare. Primo cantiere.
 
 - Curva del capitale per sessione sulla pagina live. ✅
 - Ogni settimana: ultimi 50 trade contro la scheda. 🔧
-- Avviso a ogni cambio di stato. 🔧 Oggi non c'è nessun canale di notifica.
+- Avvisi 🔧, oggi non c'è nessun canale di notifica:
+  - banner nelle pagine e nel log, sempre;
+  - per gli urgenti (sessione morta, candele ferme, ordini rifiutati,
+    protezioni, loss limit, parità in halt) anche email, Telegram e
+    notifiche sul telefono;
+  - il telefono si abbina con un QR code dalla pagina settings; la sua
+    pagina mostra i trade in corso. Vale per demo e live.
 
 ### 7.4 SUSPENDED
 
@@ -372,10 +378,12 @@ seconda sospensione, ma non lo applica.
 3. **Holdout nello sweep**, aperto una volta per versione. Medio.
 4. **Motore correlazioni** indicatori ↔ P/L. Medio-grande.
 5. **Banda Monte Carlo + baseline casuale**. Medio.
-6. **Live**: ramp al 25%, protezioni per strategia, ultimi 50 trade, avvisi.
+6. **Live**: ramp al 25%, protezioni per strategia, ultimi 50 trade.
    Medio.
 7. Piccoli: giorno della settimana nello sweep, commissioni e financing,
    colonna R nei trade, push e verify di un run senza mix.
+8. **Avvisi e telefono**: banner, email, Telegram, notifiche sul telefono
+   abbinato con un QR, pagina con i trade in corso; demo e live. Medio.
 
 Come si fa ogni cantiere, con file, dati, test e ordine di lavoro:
 [PIANO-FASE1.md](PIANO-FASE1.md). Il mix e quello che viene dopo:

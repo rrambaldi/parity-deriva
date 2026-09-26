@@ -19,7 +19,9 @@ Per ogni cantiere: obiettivo, scelte, file, dati, pagine/API/MCP, test,
   `dotenv()` come `PROMOTE_DAYS`. Nessun numero scritto nel codice.
 - **Testi delle pagine in inglese**, con la traduzione in
   `web/static/i18n/it.json`.
-- **Nessuna dipendenza nuova**: stdlib, numpy e pandas che ci sono già.
+- **Nessuna dipendenza nuova**: stdlib, numpy e pandas che ci sono già, e i
+  comandi che l'immagine Docker ha già (`openssl`). Una sola eccezione, piccola:
+  la libreria MIT per il QR, copiata in `web/static/vendor/` (C8).
 - **Test**: `unittest` in `tests/`, uno per cantiere almeno; `tests/app_check.js`
   dopo ogni modifica ad `app.js` o `menu.js`. Screenshot con Chrome headless
   per le pagine toccate.
@@ -43,7 +45,7 @@ per le altre c'è la mia proposta.
 |---|---|---|---|
 | D1 | Quando nasce una **versione** nuova? | **Deciso il 2026-09-26.** Al gate SIM → DEMO. La versione è l'impronta del codice (hash del sorgente della strategia e degli indicatori che usa, senza commenti e righe vuote) più i parametri congelati (`groupKey` dei campi del form). In SIM i parametri cambiano senza creare versioni. Etichetta leggibile: `M1502 v3`, contata per strategia + strumento + granularità. Nessun limite al numero di versioni. | C2, C3 |
 | D2 | Il **ramp**: chi lo sceglie, quanto dura, chi passa al 100%? | **Deciso il 2026-09-26.** Lo sceglie l'utente all'avvio del live, con la casella "ramp" accesa di default: accesa, il capitale proposto è il 25%; spenta, il 100%. Finisce al primo tra `RAMP_TRADES` (30) trade chiusi e `RAMP_DAYS` (60) giorni, tutti e due modificabili all'avvio: su D1 30 trade sarebbero un anno. Il 100% è un clic dell'utente, possibile in qualsiasi momento purché la sessione non abbia trade aperti; prima della fine del ramp chiede conferma e mostra a che punto è. | C6 |
-| D3 | Che **canale** usano gli avvisi? | Sempre nella pagina (banner su live e logs) e nel log. In più l'email con `smtplib` (stdlib) se in `.env` ci sono i campi `SMTP_*`. Telegram eventualmente dopo. | C6 |
+| D3 | Che **canali** usano gli avvisi? | **Deciso il 2026-09-26.** Banner nelle pagine e riga nel log, sempre e per tutti gli eventi. In più, solo per gli urgenti: email (`SMTP_*`), Telegram (`TELEGRAM_*`) e notifiche sul telefono, abbinato con un QR code, con una pagina che mostra i trade in corso. Ognuno si accende se configurato. Vale per il server demo e per il reale. | C8 |
 | D4 | L'holdout è **per strumento** o **per strategia**? | Per strumento + granularità: una data di taglio sola, uguale per tutte le strategie su quello strumento. È più semplice e più severo: nessuna strategia viene provata su quel pezzo di storico. | C3 |
 | D5 | Un diario per **strategia** o per strategia + strumento? | **Deciso il 2026-09-26.** Per strategia, cioè per nome del codice. Ogni voce dice strumento e granularità e la pagina filtra: "va su FX, non sulle azioni" si legge nello stesso posto. Le versioni restano per strategia + strumento + granularità (D1). | C2 |
 | D6 | La **demo** esige il gate? | **Deciso il 2026-09-26.** No: un form va in demo anche senza gate, con l'avviso "no gate" nella pagina live e nel diario. La promozione al server reale esige la scheda, e una scheda nasce solo dal gate: una demo senza gate non arriva al live. | C3, C1b |
@@ -59,13 +61,14 @@ L'ordine segue le dipendenze, non il numero del cantiere:
 ```text
 C1a  net ≥ 0 e trade minimi in promote()  subito, non dipende da niente
 C7c  colonna R nei trade                  serve a C4 e C5
+C8   avvisi + pagina per il telefono      utile subito: le demo girano già
 C2   diario + scheda                      serve a C1b, C3, C6
 C5   banda Monte Carlo + baseline         serve a C1b, C3, C6
 C3   holdout + gate SIM → DEMO            usa C2 e C5
 C1b  banda e serie di perdite in promote  usa C2 e C5
 C7d  push e verify senza mix              prima della prima demo vera
 C4   motore correlazioni + filtri         usa C3 (solo periodo di sviluppo)
-C6   live: ramp, protezioni, avvisi       usa C2, C5
+C6   live: ramp, protezioni               usa C2, C5, C8
 C7a  giorno della settimana               quando si vuole
 C7b  commissioni e financing              quando si vuole
 ```
@@ -436,7 +439,7 @@ il caso (la baseline).
 
 ---
 
-## C6. Live: ramp, protezioni per strategia, monitoraggio, avvisi (M)
+## C6. Live: ramp, protezioni per strategia, monitoraggio (M)
 
 **Obiettivo.** Soldi veri a piccoli passi, con una strategia fermata da sola
 quando esce da quello che la simulazione permetteva.
@@ -474,26 +477,20 @@ quando esce da quello che la simulazione permetteva.
 - **Monitoraggio.** Nella pagina live, per ogni form, un pannello "vs card":
   ultimi 50 trade (PF, expectancy, win rate) contro la scheda, la curva con
   la banda, il DD di adesso. Si calcola quando si apre la pagina: nessun cron.
-- **Avvisi (D3).** Nuovo `web/notify.py`:
-  - `notify(kind, text)` scrive sempre nel log del servizio e in
-    `DATA_DIR/alerts.json`, che le pagine live e logs mostrano come banner;
-  - email con `smtplib` se `.env` ha `SMTP_HOST`, `SMTP_USER`, `SMTP_TO`;
-  - eventi: cambio di stato, protezione scattata, loss limit, allarme di
-    parità.
+- **Avvisi.** Ogni protezione scattata e ogni cambio di stato chiamano
+  `notify()` (C8).
 - **File.** `web/livesessions.py` (`watch`, `guard`, `start`, `record`);
-  `web/cards.py`; `web/notify.py`; `etc/settings.py` (`RAMP_SHARE=0.25`,
-  `RAMP_TRADES=30`, `RAMP_DAYS=60`, `LIVE_DD_RATIO=1.5`, `LIVE_STREAK_RATIO=1.5`, `SMTP_*`);
-  `web/static/live.js`, `live.html`, `logs.js`; `i18n/it.json`.
+  `web/cards.py`; `etc/settings.py` (`RAMP_SHARE=0.25`, `RAMP_TRADES=30`,
+  `RAMP_DAYS=60`, `LIVE_DD_RATIO=1.5`, `LIVE_STREAK_RATIO=1.5`);
+  `web/static/live.js`, `live.html`; `i18n/it.json`.
 - **Test.** `tests/real_money_test.py` e `tests/livesessions_test.py`: una
   sessione finta che supera ogni soglia viene fermata e va in `SUSPENDED`;
   nessuna soglia mette `DEAD` da sola; il ramp propone il 25%, o il 100% se
   è spento; finisce al primo tra trade e giorni; "full size" non si preme
-  con trade aperti. Nuovo
-  `tests/notify_test.py`: banner scritto sempre, email solo se configurata
-  (SMTP finto).
+  con trade aperti; ogni soglia chiama `notify()`.
 - **Fatto quando.** Ogni soglia ferma la sessione con lo stato giusto nella
   scheda e un avviso visibile; il ramp propone il 25% e poi il 100%.
-- **Dipende da.** C2, C5, D2, D3.
+- **Dipende da.** C2, C5, C8, D2.
 
 ---
 
@@ -539,6 +536,116 @@ quando esce da quello che la simulazione permetteva.
 - File: `scripts/sync.py`, `web/service.py` (route), `web/static/app.js`.
   Test: in `tests/sync_test.py`, un run spinto da solo arriva con la sua
   strategia e i suoi indicatori.
+
+---
+
+## C8. Avvisi e pagina per il telefono (M)
+
+**Obiettivo.** Sapere subito, anche lontano dal computer, quando una sessione
+demo o live ha un problema, e vedere dal telefono i trade in corso. Vale per
+il server demo e per quello reale.
+
+- **Eventi e livelli.**
+
+  | evento | livello | da dove |
+  |---|---|---|
+  | sessione fermata da sola: il processo è morto e non l'ha fermata l'utente | urgente | `summary()` lo sa già (`exited`) |
+  | nessuna candela nuova da 3 intervalli, a mercato aperto | urgente | `lastBar` della sessione |
+  | ordini rifiutati, errori del broker | urgente | `errors` e `ORDER_REJECT` negli eventi della sessione |
+  | loss limit del giorno | urgente | `guard` |
+  | allarme di parità: `halt` urgente, `warn` informativo | – | monitor di parità |
+  | protezione scattata (C6) | urgente | il giro di ogni minuto |
+  | cambio di stato, "ready for full size", verdetto della promozione | informativo | `cards.move`, ramp (C6), `servers.record` |
+
+- **Scelte.**
+  - Nuovo `web/notify.py`, una funzione sola: `notify(level, kind, key, data)`.
+    - Scrive sempre nel log del servizio e in `DATA_DIR/alerts.json`: le
+      pagine live e logs lo mostrano come banner.
+    - Gli urgenti vanno anche su email, Telegram e telefono, quelli
+      configurati.
+  - **Una volta sola per evento.** La chiave `(sessione, tipo)` resta aperta
+    finché il problema c'è: il giro di ogni minuto non rimanda niente. Quando
+    si risolve (candele ripartite, sessione riavviata) parte un "resolved".
+  - Il giro di ogni minuto oggi parte solo sul server reale, per il loss
+    limit (`scripts/web.py` → `watch`). Parte su ogni server con sessioni
+    live e controlla anche gli eventi della tabella. Il loss limit resta solo
+    sul reale.
+  - `ponytail:` "mercato aperto" = non sabato e domenica UTC; gli orari di
+    borsa delle azioni quando servono.
+  - Il testo porta etichetta, evento e numeri
+    (`M1502 v3 · EUR_USD M15 · stopped: DD 12% > 1.5× card`), mai account,
+    token o chiavi.
+- **Email.** `smtplib` (stdlib), con `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
+  `SMTP_PASSWORD`, `SMTP_TO` in `.env`.
+- **Telegram.** Un POST alla Bot API con `urllib` (stdlib), con
+  `TELEGRAM_TOKEN` (il bot si crea con BotFather) e `TELEGRAM_CHAT` in `.env`.
+- **Il telefono.**
+  - **Abbinamento con un QR.** Pagina settings, tab "Phones", "Pair a
+    phone": il server crea un codice monouso valido 10 minuti e mostra il QR
+    di `<PUBLIC_URL>/phone?pair=<codice>`. Il telefono lo apre e il codice
+    diventa un token del dispositivo, in un cookie `HttpOnly`, `Secure`,
+    `SameSite=Strict`. Sul server se ne tiene solo lo sha256, in
+    `DATA_DIR/phones.json`, con nome, data e ultimo accesso. Dalla stessa tab
+    si vedono i telefoni abbinati e si revocano.
+  - **Notifiche.** La pagina del telefono ha il pulsante "Enable
+    notifications": il browser chiede il permesso, e vuole un clic. Si usa
+    Web Push, lo standard dei browser, con le chiavi VAPID del server.
+    - Il push parte **vuoto**: sveglia il telefono e basta. Il service worker
+      legge l'avviso da `/api/phone/alerts` con il suo cookie e mostra la
+      notifica. I servizi push di Google e Apple, da cui il messaggio passa,
+      non vedono né trade né numeri, e il contenuto non va cifrato.
+    - La firma VAPID (ES256) la fa il comando `openssl`, che l'immagine
+      Docker ha già (il setup lo usa per i certificati): nessuna dipendenza
+      Python nuova. Le chiavi nascono al primo abbinamento, in
+      `DATA_DIR/vapid.pem`. `ponytail:` un processo `openssl` per push; se i
+      push diventano tanti, una libreria.
+  - **La pagina `/phone`.** In cima "demo", o "REAL MONEY" in rosso come le
+    altre pagine. Sotto: le sessioni aperte con il P&L di oggi e quello
+    totale, i trade aperti (strumento, direzione, entrata, stop), gli ultimi
+    avvisi. Si aggiorna ogni 30 secondi mentre è aperta. Solo lettura:
+    nessun pulsante che avvia o ferma.
+  - **Come un'app.** Un manifest e un'icona: sul telefono si aggiunge alla
+    schermata home, con il nome del ruolo del server ("parity demo",
+    "parity REAL"). Un telefono si abbina a ogni server che vuole: demo e
+    reale sono due icone.
+  - **Accesso.** `/phone`, `/phone/sw.js` e `/api/phone/*` entrano nelle rotte
+    pubbliche di `web/access.py` (`PUBLIC`), come `/mcp`, perché il telefono
+    non ha il certificato client; il manifest sta sotto `/static/`, che è già
+    pubblico. Tutte tranne l'abbinamento vogliono il token del dispositivo.
+    Dove nginx chiede il certificato, serve la stessa eccezione di `/mcp`.
+  - **Limiti.**
+    - Serve un indirizzo pubblico in https (`PARITY_DERIVA_PUBLIC_URL`): un
+      server sul PC di casa senza indirizzo pubblico non ha il telefono.
+    - iPhone: le notifiche web funzionano da iOS 16.4, e solo dopo
+      "Aggiungi a schermata Home". Android: da Chrome, anche senza.
+- **QR.** Lo disegna il browser, con una piccola libreria MIT copiata in
+  `web/static/vendor/qrcode.js` (qrcode-generator, circa 20 KB): nessuna CDN,
+  le pagine funzionano anche offline.
+- **File.** Nuovi `web/notify.py`, `web/phone.py` (abbinamento, token, VAPID,
+  push), `web/static/phone.html`, `phone.js`, `sw.js`, `manifest-phone.json`,
+  `web/static/vendor/qrcode.js`. Da toccare: `web/livesessions.py` (il giro
+  di ogni minuto, gli eventi), `scripts/web.py` (lo fa partire su ogni
+  server), `web/access.py` (rotte pubbliche), `web/service.py` (route),
+  `web/static/settings.js` (tab "Phones", "send a test alert"), `live.js` e
+  `logs.js` (banner), `etc/settings.py` (`SMTP_*`, `TELEGRAM_*`,
+  `ALERT_STALE_BARS=3`), `i18n/it.json`.
+- **Test.**
+  - Nuovo `tests/notify_test.py`: un evento parte una volta sola, e
+    "resolved" una volta; banner sempre; email e Telegram solo se
+    configurati (SMTP e HTTP finti); il testo non contiene account né token;
+    una sessione finta con il processo morto e una con le candele ferme
+    fanno partire l'urgente giusto.
+  - Nuovo `tests/phone_test.py`: il codice è monouso e scade; il token è
+    salvato solo come hash; la revoca funziona; senza token le rotte del
+    telefono rispondono 401; la firma VAPID si verifica con `openssl`.
+  - Il pulsante "send a test alert" nella tab, per provarlo davvero sul
+    telefono.
+- **Fatto quando.** Abbini il telefono con il QR e accetti le notifiche; una
+  sessione demo che muore ti arriva sul telefono entro un minuto; la pagina
+  mostra i trade aperti. Lo stesso sul server reale.
+- **Dipende da.** Niente, per gli eventi che ci sono già: sessione morta,
+  candele ferme, ordini rifiutati, loss limit, parità. Protezioni e cambi di
+  stato si aggiungono con C6 e C2.
 
 ---
 
