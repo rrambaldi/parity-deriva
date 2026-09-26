@@ -81,7 +81,19 @@ The image is built from a clone of this repository: `docker compose up -d`
 builds it the first time (`--build` after a `git pull`). No image is published
 yet: `.github/workflows/docker.yml` pushes one to ghcr.io only when run by hand.
 
-**On a PC.** `docker compose up -d`, then open http://localhost:8731/setup. The
+**On a PC.** On Windows, `docker/pc.ps1` does it all, with Docker Desktop
+running and Git for Windows:
+
+    powershell -ExecutionPolicy Bypass -File pc.ps1
+
+It keeps everything under one folder, `%USERPROFILE%\parity-deriva`: the code
+cloned in `app`, and all the data in `data` - bind-mounted as `/data` by a
+`docker-compose.override.yml` it writes, so it is a folder of the PC to back up
+rather than a Docker volume. It builds and starts the image and opens the setup
+with its code already in. Run it again to update: pull, build, start on the
+same data (`-Root` another folder, `-Branch` another branch).
+
+By hand: `docker compose up -d`, then open http://localhost:8731/setup. The
 setup asks for a code, which is in the container's log:
 `docker compose logs parity`. The port is published on `127.0.0.1` only.
 
@@ -92,8 +104,11 @@ The `https` profile adds Caddy in front: it gets the certificate from Let's
 Encrypt and reads its configuration from a file the service writes.
 
 The setup asks three things: how people get in, what the server is for
-(archive, test, trade on demo accounts or with real money), and where its
-market data comes from (the archive, or your own files). Then the service
+(archive, test, trade on demo accounts or with real money), and the other
+servers. One that is not the archive connects to the archive already running,
+with a token made there, and takes everything from it: the candles and the
+calendar on a timer, the spread set, and for a test server the strategies and
+indicators, as drafts to enable on the settings page. Then the service
 restarts on what you chose. A profile (`etc/profiles/*.json`, or one downloaded
 from another server's settings) fills the answers in, secrets aside.
 
