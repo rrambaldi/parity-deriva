@@ -209,6 +209,7 @@ function renderDetail() {
   $('live-detail').hidden = !d;
   if (!d) return;
   const f = d.fields || {};
+  $('journal-link').href = 'journal?strategy=' + encodeURIComponent(f.strategy || '');
   $('detail-title').textContent = `${d.id} · ${f.strategy} on ${f.instrument} ${f.granularity}`
     + ` · ${d.provider} ${d.account} (${d.accountName || ''})`
     + (f.capital ? ` · capital ${money(Number(f.capital))} (account balance ${money(d.balance)} ${d.currency || ''})`

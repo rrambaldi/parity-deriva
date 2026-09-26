@@ -32,7 +32,7 @@ import threading
 import time
 
 from parity_deriva.data import sources
-from parity_deriva.web import livesessions
+from parity_deriva.web import cards, journal, livesessions
 
 ROLES = ('archive', 'test', 'trade')
 
@@ -255,7 +255,15 @@ def push(service, name, fields):
 					  codes, {}, lines.append)
 	else:
 		lines.append("no starred run of a set with this form: the strategy went, the form did not")
+	# the version's card, the gate's: a demo takes a form without one (D6), a
+	# real money server judges it by it (web/livesessions.py promote)
+	card = cards.forFields(service.setup, fields)
 	verdict = None
 	if kind == 'real':
-		verdict = sources.rpc(target, 'push_record', {'record': dict(record(service, fields), fields=sent)})
-	return {'server': name, 'accounts': kind, 'lines': lines, 'verdict': verdict}
+		verdict = sources.rpc(target, 'push_record', {'record': dict(record(service, fields), fields=sent,
+																	  card=card and dict(card, fields=sent))})
+	journal.record(service.setup, code, 'push', 'milestone',
+				   {'server': name, 'accounts': kind, 'card': card and card['label'], 'gate': bool(card),
+					'verdict': verdict and {'ok': verdict.get('ok'), 'need': verdict.get('need')}},
+				   fields, version=card and card['id'])
+	return {'server': name, 'accounts': kind, 'lines': lines, 'verdict': verdict, 'gate': bool(card)}

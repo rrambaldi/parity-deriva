@@ -36,7 +36,7 @@ from zoneinfo import ZoneInfo
 from parity_deriva.trading import providers
 from parity_deriva.etc import settings
 from parity_deriva.lib.utils import granularityToTimedelta
-from parity_deriva.web import notify
+from parity_deriva.web import journal, notify
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(ROOT, 'scripts', 'live.py')
@@ -117,7 +117,9 @@ def sessionSettings():
 
 class LiveSessions(object):
 
-    def __init__(self, root):
+    def __init__(self, root, setup=None):
+        #: where the journals are (web/journal.py): None writes none
+        self.setup = setup
         #: the errors each session had when its last alert went out (alerts)
         # ponytail: in memory - after a restart the count starts again from
         # what the sessions have, so errors made while the service was down
@@ -279,7 +281,18 @@ class LiveSessions(object):
         for target in targets:
             account = known[(target['provider'], target['account'])]
             started.append(self.spawn(fields, target['provider'], account))
+            self.journal(started[-1], 'session-start', {'capital': fields.get('capital')})
         return started
+
+    def journal(self, s, kind, data=None):
+        """A session's entry in its strategy's journal (web/journal.py)."""
+        if self.setup is None or not isinstance(s, dict):
+            return
+        fields = s.get('fields') or {}
+        journal.record(self.setup, fields.get('strategy'), kind, 'milestone',
+                       dict({'id': s.get('id'), 'provider': s.get('provider'), 'account': s.get('account'),
+                             'demo': s.get('demo')}, **(data or {})),
+                       fields, link={'kind': 'session', 'id': s.get('id')})
 
     def spawn(self, fields, provider, account):
         session = time.strftime('%Y%m%d-%H%M%S-') + secrets.token_hex(3)
@@ -359,10 +372,14 @@ class LiveSessions(object):
         meta = self.meta(session)
         if self.alive(meta):
             os.killpg(meta['pid'], signal.SIGTERM)
-        if meta.get('stopped') is None:
+        first = meta.get('stopped') is None
+        if first:
             meta['stopped'] = int(time.time() * 1000)
             self.writeMeta(session, meta)
-        return self.summary(session)
+        out = self.summary(session)
+        if first:
+            self.journal(out, 'session-stop', {'trades': len(out.get('closed') or []), 'net': out.get('net')})
+        return out
 
     def stopAll(self):
         """The kill switch: every session that is running, stopped and closed."""
@@ -436,7 +453,16 @@ class LiveSessions(object):
             need.append("no parity alarm, it has %d" % verdict['alarms'])
         if any(s.get('demo') is False for s in sessions):
             need.append("a record of demo accounts only")
-        kept = {'fields': record['fields'], 'sessions': sessions, 'origin': origin,
+        # the version's card, a copy of it kept here: what C1b and the live
+        # protections judge it by (web/cards.py)
+        card = record.get('card')
+        if card is not None and self.setup is not None:
+            from parity_deriva.web import cards
+            try:
+                card = cards.receive(self.setup, card)
+            except cards.CardError as exc:
+                need.append(str(exc))
+        kept = {'fields': record['fields'], 'sessions': sessions, 'origin': origin, 'card': card,
                 'received': int(time.time() * 1000), 'ok': not need, 'need': need, **verdict}
         path = self.promotionPath(record['fields'])
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -554,8 +580,10 @@ class LiveSessions(object):
                 problems['errors'] = '%d broker error%s or rejected order%s' % (errors - seen, many, many)
             for kind in SESSION_ALERTS:
                 if kind in problems:
-                    if notify.notify(setup, 'urgent', kind, sid, '%s · %s' % (label(s), problems[kind])) \
-                            and kind == 'errors':
+                    sent = notify.notify(setup, 'urgent', kind, sid, '%s · %s' % (label(s), problems[kind]))
+                    if sent:
+                        self.journal(s, 'alert', {'kind': kind, 'text': problems[kind]})
+                    if sent and kind == 'errors':
                         self._errors[sid] = errors
                 elif kind != 'errors' and '%s:%s' % (kind, sid) in opened:
                     notify.resolve(setup, kind, sid)

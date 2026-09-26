@@ -416,6 +416,9 @@ function follow(job) {
   $('stop').hidden = $('pause').hidden = !running;
   $('rerun').hidden = running || !job.total;
   $('delete').hidden = running || !job.id;
+  const strategy = (job.fields || {}).strategy;
+  $('journal-link').hidden = !strategy;
+  if (strategy) $('journal-link').href = 'journal?strategy=' + encodeURIComponent(strategy);
   if (running) {
     $('stop').disabled = $('pause').disabled = !!job.cancel;
     showPaused(job.paused);

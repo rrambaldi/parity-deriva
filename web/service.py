@@ -83,7 +83,7 @@ from parity_deriva.lib import s3
 from parity_deriva.lib import news as news_module
 from parity_deriva.performance import report as report_module
 from parity_deriva.strategy import plugins, uploaded
-from parity_deriva.web import access, i18n, livesessions, mcp, notify, oauth, phone, servers, storage
+from parity_deriva.web import access, cards, i18n, journal, livesessions, mcp, notify, oauth, phone, servers, storage
 from parity_deriva.web import logs as logs_page
 
 
@@ -352,7 +352,7 @@ class Service(object):
 			pass
 		# the live sessions: a backtest's form trading on an account
 		self.live = livesessions.LiveSessions(
-			os.path.join(getattr(self.setup, 'DATA_DIR', '') or '.', 'live'))
+			os.path.join(getattr(self.setup, 'DATA_DIR', '') or '.', 'live'), self.setup)
 		# every bar every session saw, one row per provider and bar
 		# (data/candledb.py). Opened per request, like sessions.db
 		self.candles = CandleDB(getattr(self.setup, 'CANDLE_DB', None) or os.path.join(
@@ -840,6 +840,12 @@ class Service(object):
 			with open(part, 'wb') as handle:
 				handle.write(body)
 			os.replace(part, os.path.join(where, name))
+		cards.codeSeen(self.setup, fields)
+		report = payload.get('report') or {}
+		journal.record(self.setup, fields.get('strategy'), 'run', 'experiment',
+					   {'trades': report.get('closedTrades'), 'net': report.get('net'),
+						'pf': report.get('profitFactor'), 'from': payload.get('from'), 'to': payload.get('to')},
+					   fields, link={'kind': 'run', 'fields': fields})
 		for old in self.runs()[self.RUNS_KEEP:]:
 			for name in (old['id'] + '.json.gz', old['id'] + '.meta.json'):
 				try:
@@ -983,12 +989,27 @@ class Service(object):
 				entry['note'] = old.get('note') or ''
 			rows.append(entry)
 			self._writeFavourites(rows)
+		journal.record(self.setup, fields.get('strategy'), 'favourite', 'experiment',
+					   {'trades': summary.get('trades'), 'net': summary.get('net'),
+						'pf': summary.get('profitFactor'), 'note': entry['note']},
+					   fields, link=self.favouriteLink(entry))
 		return entry
+
+	@staticmethod
+	def favouriteLink(entry):
+		source = entry.get('source') or {}
+		if source.get('kind') == 'sweep':
+			return {'kind': 'sweep-run', 'id': source.get('id'), 'n': source.get('n'), 'fields': entry['fields']}
+		return {'kind': 'run', 'fields': entry['fields']}
 
 	def dropFavourite(self, favourite):
 		with self._jobLock:
+			held = next((r for r in self.favourites() if r.get('id') == favourite), None)
 			rows = [r for r in self.favourites() if r.get('id') != favourite]
 			self._writeFavourites(rows)
+		if held:
+			journal.record(self.setup, held['fields'].get('strategy'), 'unfavourite', 'experiment', {},
+						   held['fields'], link=self.favouriteLink(held))
 
 	def noteFavourite(self, favourite, note):
 		with self._jobLock:
@@ -998,6 +1019,8 @@ class Service(object):
 				raise ServiceError("no such favourite")
 			row['note'] = (note or '').strip()
 			self._writeFavourites(rows)
+		journal.record(self.setup, row['fields'].get('strategy'), 'favourite-note', 'experiment',
+					   {'note': row['note']}, row['fields'], link=self.favouriteLink(row))
 
 	# ----------------------------------------------------------------- mixes
 
@@ -1046,11 +1069,35 @@ class Service(object):
 			entry['origin'] = origin
 		with self._jobLock:
 			self._writeMixes([r for r in self.mixes() if r.get('id') != mix_id] + [entry])
+		self.mixJournal(entry, 'mix', held)
 		return entry
 
+	def mixForms(self, mix):
+		"""{(strategy, instrument, granularity): fields} of the runs of a mix."""
+		out = {}
+		for item in (mix or {}).get('items') or []:
+			try:
+				fields, _, _ = self.simulated({'kind': 'sweep', 'id': item['sweep'], 'n': item['n']})
+			except ServiceError:
+				continue
+			out.setdefault((fields.get('strategy'), fields.get('instrument'), fields.get('granularity')), fields)
+		return out
+
+	def mixJournal(self, mix, kind, before=None):
+		"""An entry in the journal of each strategy a mix took in (not in `before`), or of all when it went."""
+		had = self.mixForms(before)
+		for key, fields in self.mixForms(mix).items():
+			if key not in had:
+				journal.record(self.setup, fields.get('strategy'), kind, 'milestone',
+							   {'id': mix['id'], 'name': mix.get('name'), 'runs': len(mix.get('items') or [])},
+							   fields, link={'kind': 'mix', 'id': mix['id']})
+
 	def dropMix(self, mix):
+		held = next((r for r in self.mixes() if r.get('id') == mix), None)
 		with self._jobLock:
 			self._writeMixes([r for r in self.mixes() if r.get('id') != mix])
+		if held:
+			self.mixJournal(held, 'mix-deleted')
 
 	def mix(self, mix):
 		"""
@@ -1292,6 +1339,10 @@ class Service(object):
 				   'here': here['rows'][first] if first < len(here['rows']) else None,
 				   'pushed': there['rows'][first] if first < len(there['rows']) else None}}
 		self._write(self.verifyPath(sweep, n), json.dumps(out).encode())
+		journal.record(self.setup, fields.get('strategy'), 'verify', 'milestone',
+					   {'ok': out['ok'], 'trades': here['trades'], 'net': here['net'],
+						'first': out['first'] and out['first']['trade']},
+					   fields, link={'kind': 'sweep-run', 'id': sweep, 'n': int(n), 'fields': fields})
 		return out
 
 	def startVerify(self, mix):
@@ -1980,6 +2031,7 @@ class Service(object):
 			runs.append((combo, backtestArgs(lambda name: _text(merged.get(name)))))
 		self.check(runs[0][1]['instrument'], runs[0][1]['granularity'],
 				   runs[0][1]['strategy'])
+		cards.codeSeen(self.setup, fields)
 		with self._jobLock:
 			if getattr(self, '_sweep', {}).get('running'):
 				raise ServiceError("a sweep is already running")
@@ -2044,6 +2096,19 @@ class Service(object):
 					self.saveSweep(job)
 				except Exception:
 					self.logger.exception("cannot save sweep %s" % job['id'])
+				self.sweepJournal(job)
+
+	def sweepJournal(self, job):
+		"""A set finished or stopped, in its strategy's journal: its size and its best run."""
+		meta = self.sweepSummary(job)
+		ok = [row for row in job['done'] if not row.get('error')]
+		best = max(ok, key=lambda row: (row.get('kpi') or {}).get('score') or 0) if ok else None
+		journal.record(self.setup, meta['strategy'], 'sweep', 'experiment',
+					   {'id': job['id'], 'name': meta['name'], 'runs': meta['runs'], 'total': meta['total'],
+						'stopped': meta['stopped'], 'varied': meta['varied'], 'bestScore': meta['bestScore'],
+						'bestParams': best and best.get('params'),
+						'pf': best and (best.get('report') or {}).get('profitFactor')},
+					   job.get('fields'), link={'kind': 'sweep', 'id': job['id']})
 
 	# ------------------------------------------------------ saved sweeps
 
@@ -2179,6 +2244,11 @@ class Service(object):
 			if live.get('running'):
 				raise ServiceError("the set is still running: stop it first")
 			self._sweep = None
+		try:
+			with open(self.sweepPath(sweep, '.meta.json')) as handle:
+				meta = json.load(handle)
+		except (OSError, ValueError):
+			meta = None
 		# its runs in the bucket go first: a bucket that does not answer keeps
 		# the set here, rather than leave files there nothing points to
 		cold = self.cold(sweep)
@@ -2200,6 +2270,9 @@ class Service(object):
 			except FileNotFoundError:
 				pass
 		shutil.rmtree(self.sweepPath(sweep, ''), ignore_errors=True)
+		if meta:
+			journal.record(self.setup, meta.get('strategy'), 'sweep-deleted', 'experiment',
+						   {'id': sweep, 'name': meta.get('name'), 'runs': meta.get('runs')}, meta)
 		return {'deleted': sweep}
 
 	# ----------------------------------------------------- cold storage
@@ -3338,6 +3411,8 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendFile('live.html')
 			if route == '/mix':
 				return self.sendFile('mix.html')
+			if route == '/journal':
+				return self.sendFile('journal.html')
 			if route == '/api/live':
 				return self.sendJSON({'sessions': self.service.live.sessions()})
 			if route == '/api/alerts':
@@ -3347,6 +3422,23 @@ class Handler(BaseHTTPRequestHandler):
 									  'recent': held['recent'][:30]})
 			if route == '/api/phones':
 				return self.sendJSON(phone.settings(self.service, self))
+			# the strategies' journals and the versions' cards (web/journal.py, cards.py)
+			setup = self.service.setup
+			if route == '/api/journals':
+				return self.sendJSON({'journals': journal.journals(setup)})
+			if route == '/api/journals/search':
+				return self.sendJSON({'entries': journal.search(setup, self.one(query, 'q'))})
+			if route == '/api/journal':
+				strategy = self.one(query, 'strategy') or ''
+				return self.sendJSON({'strategy': strategy, 'entries': journal.read(setup, strategy),
+									  'cards': cards.cards(setup, strategy)})
+			if route == '/api/cards':
+				return self.sendJSON({'cards': cards.cards(setup, self.one(query, 'strategy'))})
+			if route.startswith('/api/cards/'):
+				try:
+					return self.sendJSON(cards.get(setup, route[len('/api/cards/'):]))
+				except cards.CardError as exc:
+					return self.sendError(str(exc), 404)
 			if route == '/api/live/targets':
 				return self.sendJSON({'targets': self.service.live.targets(
 					fresh=bool(self.one(query, 'fresh')))})
@@ -3648,6 +3740,26 @@ class Handler(BaseHTTPRequestHandler):
 			if route == '/api/live/stop-all':
 				# the kill switch: every session running, stopped and closed
 				return self.sendJSON(self.service.live.stopAll())
+			if route in ('/api/journal/note', '/api/cards/move'):
+				# {"strategy", "text", "about", "mark"} a note; {"id", "to", "why"} a
+				# version to another state, by whoever is signed in (DEAD only so)
+				length = int(self.headers.get('Content-Length') or 0)
+				try:
+					body = json.loads(self.rfile.read(length) or b'{}')
+				except ValueError:
+					body = None
+				if not isinstance(body, dict):
+					raise ServiceError('the body is a JSON object')
+				by = access.user(self) or 'user'
+				try:
+					if route == '/api/journal/note':
+						return self.sendJSON(journal.note(self.service.setup, str(body.get('strategy') or ''),
+														  body.get('text'), body.get('about') or None,
+														  body.get('mark') or None, by))
+					return self.sendJSON(cards.move(self.service.setup, str(body.get('id') or ''),
+													str(body.get('to') or ''), str(body.get('why') or '')[:300], by))
+				except (ValueError, cards.CardError) as exc:
+					raise ServiceError(str(exc))
 			if route in ('/api/alerts/dismiss', '/api/alerts/test', '/api/phones/pair', '/api/phones/revoke'):
 				# {"id"} a banner dismissed or a phone revoked; a test alert on
 				# every channel; a pairing code for a phone (web/notify.py, phone.py)

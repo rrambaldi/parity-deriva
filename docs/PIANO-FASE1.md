@@ -61,8 +61,8 @@ L'ordine segue le dipendenze, non il numero del cantiere:
 ```text
 C1a  net ≥ 0 e trade minimi in promote()  fatto (7d93728)
 C7c  colonna R nei trade                  fatto (0ca8c06)
-C8   avvisi + pagina per il telefono      fatto
-C2   diario + scheda                      serve a C1b, C3, C6
+C8   avvisi + pagina per il telefono      fatto (21cc77b)
+C2   diario + scheda                      fatto
 C5   banda Monte Carlo + baseline         serve a C1b, C3, C6
 C3   holdout + gate SIM → DEMO            usa C2 e C5
 C1b  banda e serie di perdite in promote  usa C2 e C5
@@ -142,7 +142,9 @@ con cui va giudicata.
     succede sull'altro server resta nel diario di quello. Unire i diari di
     più server è nella [roadmap](ROADMAP.md#il-diario-su-più-server).
   - **Un diario per strategia** (D5), cioè per nome del codice: `M1502`. Ogni
-    voce dice strumento e granularità; la pagina filtra.
+    voce dice strumento e granularità; la pagina filtra. Le versioni di una
+    strategia caricata da un assistente (`MY-EMA 1`, `MY-EMA 2`) scrivono
+    nello stesso diario, `MY-EMA`, e ogni voce dice quale versione era.
   - **Lo scrive parity-deriva.** L'utente non deve scrivere niente. Le note
     sono facoltative: attaccate a una voce o libere, con un segno facoltativo
     👍 / 👎 / ➖.
@@ -182,18 +184,21 @@ con cui va giudicata.
 
 - **La scheda della versione.**
   - Nasce al gate (D1). Identità: `id = sha1(codeHash + groupKey(fields))[:16]`.
-    `codeHash` è lo sha1 del sorgente della strategia e degli indicatori che
-    importa (trovati con `ast`), senza commenti e righe vuote (`tokenize`):
-    un commento non crea una versione. L'etichetta `M1502 v3` è contata per
+    `codeHash` è lo sha1 del sorgente della strategia, dei moduli di
+    `parity_deriva.strategy` e degli indicatori che importa (trovati con
+    `ast`), letti come albero sintattico (`ast.dump`, senza docstring): un
+    commento, una riga vuota o una docstring non creano una versione. L'etichetta `M1502 v3` è contata per
     strategia + strumento + granularità.
   - Un modulo solo cambia lo stato: `cards.move(id, to, why, by)`. Rifiuta i
     passaggi che non esistono (la tabella di PROCESSO.md § 8), accetta `DEAD`
     solo da un utente (pulsante "discard"), mai da un controllo automatico,
     e scrive ogni cambio nel diario. Lo storico sta nel diario, non nella
     scheda.
-  - La scheda va con il push al server di trade, come riferimento: C1b e C6
-    la leggono lì. Ogni server tiene lo stato della sua copia; allinearli è
-    nella roadmap, insieme al diario.
+  - La scheda va con il record al server reale (`push_record`), come
+    riferimento: `promote()` ne tiene una copia (`cards.receive`), e C1b e C6
+    la leggono lì. Un server demo la scheda non la riceve: la demo non la
+    usa. Ogni server tiene lo stato della sua copia; allinearli è nella
+    roadmap, insieme al diario.
 - **Dati.**
   - `DATA_DIR/journal/<strategia>.jsonl`, una riga per voce:
 
@@ -236,10 +241,12 @@ con cui va giudicata.
     - il diff del codice tra due voci "codice cambiato";
     - il riassunto settimanale del live.
   - La ricerca su tutti i diari, anche quelli delle strategie `DEAD`.
-  - Un link "journal" dalle pagine di un set, di un run, di un mix e live.
-- **API.** `/api/journals`, `/api/journal/<strategia>`,
-  `/api/journal/<strategia>/note` (POST), `/api/journals/search?q=`;
-  `/api/cards`, `/api/cards/<id>`.
+  - Un link "journal" dalle pagine di un set, di un run e live. Il mix ha più
+    strategie: è il diario che rimanda al mix, con la voce "in the mix".
+- **API.** `/api/journals`, `/api/journal?strategy=`, `/api/journal/note`
+  (POST), `/api/journals/search?q=`; `/api/cards`, `/api/cards/<id>`,
+  `/api/cards/move` (POST: i pulsanti "back to SIM", "back to demo",
+  "discard" della pagina).
 - **MCP.** In lettura `list_journals`, `get_journal`, `search_journals`,
   `list_cards`, `get_card`. `add_note` su tutti i server tranne quello reale.
 - **Dati che ci sono già.** `scripts/journal_backfill.py`, da lanciare una

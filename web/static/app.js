@@ -2571,6 +2571,8 @@ function show(data) {
   state.sweepRef = where.get('sweep')
     ? { sweep: where.get('sweep'), run: Number(where.get('run')) } : null;
   renderStar();
+  $('journal-link').href = 'journal?strategy=' + encodeURIComponent(data.strategy);
+  $('journal-link').hidden = !data.strategy;
   $('chart-title').textContent = (id ? `[${id}] ` : '')
     + `${data.strategy} on ${data.instrument} ${data.granularity}`
     // which bars the orders rested on, when they were not these ones: a run

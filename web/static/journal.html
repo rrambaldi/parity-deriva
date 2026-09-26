@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>parity-deriva journal</title>
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="static/fonts.css">
+<link rel="stylesheet" href="static/tokens.css">
+<link rel="stylesheet" href="static/app.css">
+<link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="static/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="static/apple-touch-icon.png">
+<!-- the theme the switch forced, before the first paint: see settings.html -->
+<script>
+  try {
+    const theme = localStorage.getItem('parity-deriva.theme');
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  } catch (error) { /* nothing kept: the system's theme */ }
+</script>
+<style>
+  #journal-bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: end; }
+  #journal-bar label { display: flex; flex-direction: column; gap: 4px; }
+  #journal-search { width: min(24em, 100%); }
+  #journal-list td, #journal-list th { text-align: left; }
+  #journal-list tr[data-strategy] { cursor: pointer; }
+  #journal-idea { white-space: pre-wrap; color: var(--text-2); }
+  .journal-now { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+  .journal-card { border: 1px solid var(--line); border-radius: var(--radius-s); padding: 8px 10px; background: var(--raised); }
+  .journal-card .state { font-weight: 600; }
+  .journal-card .state.DEAD { color: var(--text-3); text-decoration: line-through; }
+  .journal-card .state.LIVE { color: var(--live, var(--down)); }
+  .journal-card button { margin: 6px 6px 0 0; }
+  #journal-filters { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 12px 0; }
+  #journal-history { width: 100%; table-layout: fixed; }
+  #journal-history th:nth-child(1) { width: 9.5rem; } #journal-history th:nth-child(2) { width: 7rem; }
+  #journal-history th:nth-child(4) { width: 6rem; }
+  #journal-rows td { vertical-align: top; }
+  #journal-rows td.what { white-space: normal; overflow-wrap: anywhere; }
+  #journal-rows tr.milestone td.what { font-weight: 600; }
+  #journal-rows tr.note td { color: var(--text-2); font-style: italic; }
+  #journal-rows td.when { white-space: nowrap; font-family: var(--font-mono); font-size: var(--fs-small); }
+  #journal-rows td.where { white-space: nowrap; font-size: var(--fs-small); color: var(--text-3); }
+  #journal-rows .note-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  #journal-rows .note-form textarea { flex: 1 1 18em; min-height: 3em; }
+  #journal-diff { font-family: var(--font-mono); font-size: var(--fs-small); white-space: pre; overflow: auto;
+                  max-height: 60vh; background: var(--raised); padding: 8px; border-radius: var(--radius-s); }
+  #journal-diff .add { color: var(--up); }
+  #journal-diff .del { color: var(--down); }
+  #journal-weeks td, #journal-weeks th { text-align: right; }
+  #journal-weeks td:first-child, #journal-weeks th:first-child { text-align: left; }
+  @media (max-width: 640px) {
+    #journal-history th:nth-child(2), #journal-rows td.where { display: none; }
+    #journal-history th:nth-child(1) { width: 6.5rem; }
+    #journal-rows td.when { white-space: normal; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div id="brand">
+    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="179" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="179" height="28"></h1>
+    <span id="page-name" class="page-title">journal</span>
+    <span id="env-badge" class="badge">offline &middot; no orders</span>
+  </div>
+</header>
+
+<!--
+  The journals of the strategies (web/journal.py): everything done with each,
+  written by parity-deriva as it happens - sets, runs, favourites, code, mixes,
+  versions and their states, pushes, sessions, alerts - and the notes of
+  whoever wants to add one. Nothing here has to be written by hand.
+-->
+<section id="journals-panel">
+  <div id="journal-bar">
+    <label>search every journal <input type="search" id="journal-search" spellcheck="false"
+      placeholder="a set, a parameter, a note"></label>
+  </div>
+  <table id="journal-list">
+    <thead><tr><th>strategy</th><th>instruments</th><th>entries</th><th>last</th></tr></thead>
+    <tbody id="journal-list-rows"></tbody>
+  </table>
+  <p id="journal-note" class="dim" role="status"></p>
+</section>
+
+<section id="journal-panel" hidden>
+  <button type="button" id="journal-back" data-icon="list">all journals</button>
+  <h2 class="panel-title" id="journal-title"></h2>
+  <p id="journal-idea"></p>
+  <h3 class="panel-title">now</h3>
+  <div class="journal-now" id="journal-now"></div>
+  <form id="journal-free" class="note-form">
+    <textarea id="journal-free-text" placeholder="a note on the strategy" aria-label="a note on the strategy"></textarea>
+    <select id="journal-free-mark" aria-label="mark">
+      <option value="">no mark</option><option value="up">&#128077;</option><option value="down">&#128078;</option><option value="flat">&#10134;</option>
+    </select>
+    <button type="submit" data-icon="add">add the note</button>
+  </form>
+  <div id="journal-filters">
+    <label><select id="journal-level">
+      <option value="all">everything</option>
+      <option value="milestone">milestones</option>
+      <option value="experiment">experiments</option>
+    </select></label>
+    <label>instrument <select id="journal-instrument"><option value="">all</option></select></label>
+    <button type="button" id="journal-compare" data-icon="view" disabled>compare the two code versions ticked</button>
+  </div>
+  <pre id="journal-diff" hidden></pre>
+  <table id="journal-history">
+    <thead><tr><th>when</th><th>where</th><th>what</th><th></th></tr></thead>
+    <tbody id="journal-rows"></tbody>
+  </table>
+  <h3 class="panel-title">live, week by week</h3>
+  <table id="journal-weeks">
+    <thead><tr><th>week</th><th>sessions</th><th>trades</th><th>won</th><th>net</th></tr></thead>
+    <tbody id="journal-weeks-rows"></tbody>
+  </table>
+</section>
+
+<script src="static/i18n.js"></script>
+<script src="static/menu.js"></script>
+<script src="static/journal.js"></script>
+</body>
+</html>

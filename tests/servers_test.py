@@ -77,7 +77,7 @@ class RolesTest(unittest.TestCase):
         self.assertEqual(sorted(t['name'] for t in listed), sorted([
             'list_strategies', 'submit_strategy', 'submit_indicator', 'push_calendar', 'push_candles',
             'market_status', 'pull_candles', 'pull_calendar', 'pull_spread', 'push_sweep', 'push_record',
-            'live_status']))
+            'live_status', 'list_journals', 'get_journal', 'search_journals', 'add_note', 'list_cards', 'get_card']))
         with self.assertRaises(mcp.ToolError) as caught:
             self.call('run_backtest', {'strategy': 'AG01'})
         self.assertIn('no run_backtest here: this server has no test role', str(caught.exception))

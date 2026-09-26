@@ -50,7 +50,7 @@ import pandas as pd
 from parity_deriva.backtest import ledger
 from parity_deriva.data import calendar, market
 from parity_deriva.strategy import uploaded
-from parity_deriva.web import livesessions, oauth, sandbox, servers
+from parity_deriva.web import cards, journal, livesessions, oauth, sandbox, servers
 
 PROTOCOLS = ('2025-11-25', '2025-06-18', '2025-03-26')
 
@@ -366,6 +366,37 @@ TOOLS = [
 		 'run': {'type': 'string', 'description': "a backtest's id, from list_runs"},
 		 'sweep': {'type': 'string', 'description': "a set's id, from list_runs"},
 		 'n': {'type': 'integer', 'description': "one run of that set"}}}},
+	{'name': 'list_journals',
+	 'description': "The strategies' journals: everything done with each strategy, written by the "
+					"platform as it happened - sets, runs, favourites, code changes, mixes, versions "
+					"and their states, pushes, sessions, alerts - and the user's notes. Read one with "
+					"get_journal before proposing what to try next on a strategy.",
+	 'inputSchema': {'type': 'object', 'properties': {}}},
+	{'name': 'get_journal',
+	 'description': "One strategy's journal, oldest first, with its versions' cards (state and the "
+					"numbers each is judged by). A code change carries its hash here; get_source "
+					"reads the code.",
+	 'inputSchema': {'type': 'object', 'required': ['strategy'], 'properties': {
+		 'strategy': {'type': 'string', 'description': "its code, e.g. M1502-SBR, from list_journals"},
+		 'limit': {'type': 'integer', 'description': "the last so many entries, 200 when absent"}}}},
+	{'name': 'search_journals',
+	 'description': "Every journal's entries and notes with a text in them, newest first: a "
+					"parameter, a set's name, a word of a note.",
+	 'inputSchema': {'type': 'object', 'required': ['text'], 'properties': {'text': {'type': 'string'}}}},
+	{'name': 'add_note',
+	 'description': "A note in a strategy's journal, free or on one entry (its id), with an optional "
+					"mark up, down or flat: what you learned, and why. Not on a real money server.",
+	 'inputSchema': {'type': 'object', 'required': ['strategy', 'text'], 'properties': {
+		 'strategy': {'type': 'string'}, 'text': {'type': 'string'},
+		 'about': {'type': 'string', 'description': "the id of the entry the note is on"},
+		 'mark': {'type': 'string', 'enum': list(journal.MARKS)}}}},
+	{'name': 'list_cards',
+	 'description': "The versions that reached the gate, a card each: the label (M1502-SBR v3), the "
+					"state (SIM, DEMO, LIVE, SUSPENDED, DEAD), the form, and the reference numbers.",
+	 'inputSchema': {'type': 'object', 'properties': {'strategy': {'type': 'string'}}}},
+	{'name': 'get_card',
+	 'description': "One version's card, by its id from list_cards.",
+	 'inputSchema': {'type': 'object', 'required': ['id'], 'properties': {'id': {'type': 'string'}}}},
 	{'name': 'pull_code',
 	 'description': "For a Test server's sync (scripts/sync.py pull), not for an assistant: "
 					"every strategy and indicator enabled here - the ones somebody read - with "
@@ -808,6 +839,47 @@ def pushRecord(service, args, client):
 	return dict((k, kept[k]) for k in ('ok', 'need', 'days', 'trades', 'alarms', 'net'))
 
 
+def slim(entry):
+	"""An entry for an assistant: a code change without its whole source."""
+	if entry.get('kind') != 'code':
+		return entry
+	return dict(entry, data={'hash': entry['data'].get('hash'), 'parts': sorted(entry['data'].get('source') or {})})
+
+
+def journalTool(service, name, args, client):
+	"""The journals and the cards (web/journal.py, cards.py): read everywhere, a note but on real money."""
+	setup = service.setup
+	if name == 'list_journals':
+		return {'journals': journal.journals(setup)}
+	if name == 'search_journals':
+		return {'entries': [slim(e) for e in journal.search(setup, str(args.get('text') or ''))]}
+	if name == 'list_cards':
+		return {'cards': cards.cards(setup, args.get('strategy') or None)}
+	if name == 'get_card':
+		try:
+			return cards.get(setup, str(args.get('id') or ''))
+		except cards.CardError as exc:
+			raise ToolError(str(exc))
+	strategy = str(args.get('strategy') or '')
+	if name == 'add_note':
+		if livesessions.serverAccounts() == 'real':
+			raise ToolError("a real money server's journal takes notes from its own page only")
+		try:
+			return journal.note(setup, strategy, args.get('text'), args.get('about') or None,
+								args.get('mark') or None, by='assistant %s' % client)
+		except ValueError as exc:
+			raise ToolError(str(exc))
+	entries = journal.read(setup, strategy)
+	if not entries:
+		raise ToolError("no journal for %r: list_journals names them" % strategy)
+	try:
+		limit = max(1, int(args.get('limit') or 200))
+	except (TypeError, ValueError):
+		limit = 200
+	return {'strategy': strategy, 'entries': [slim(e) for e in entries[-limit:]],
+			'cards': cards.cards(setup, strategy)}
+
+
 # the next version is taken and written by one submit at a time
 _submitLock = threading.Lock()
 
@@ -886,6 +958,9 @@ def submit(service, args, client, kind='strategies'):
 				os.remove(trial)
 		found = dict(found, server=server, submitted=int(time.time() * 1000), client=client)
 		keepMeta(path, found)
+	if kind == 'strategies':
+		journal.record(service.setup, code, 'draft', 'milestone', {'name': code, 'client': str(client)},
+					   by='assistant %s' % client)
 	return dict(found, name=code, family=name, version=version, state='draft',
 				next="run_backtest with strategy %s" % code if kind == 'strategies' else
 				"take it in a strategy: from parity_deriva.strategy.uploaded import indicator, "
@@ -1477,7 +1552,9 @@ SERVED = {'get_news': ('test',), 'list_helpers': ('test',), 'request_feature': (
 		  'get_source': ('test', 'archive'), 'list_data': ('test', 'archive'),
 		  'list_runs': ('test', 'archive'), 'get_run': ('test', 'archive'),
 		  'pull_code': ('archive',), 'push_mix': ('archive',), 'push_sweep': ('archive', 'trade'),
-		  'push_record': ('trade',), 'live_status': ('trade',)}
+		  'push_record': ('trade',), 'live_status': ('trade',),
+		  'list_journals': servers.ROLES, 'get_journal': servers.ROLES, 'search_journals': servers.ROLES,
+		  'add_note': servers.ROLES, 'list_cards': servers.ROLES, 'get_card': servers.ROLES}
 
 
 def served(service, name):
@@ -1545,6 +1622,8 @@ def call(service, name, args, base, client):
 		return getRun(service, args, base)
 	if name == 'pull_code':
 		return pullCode(service, args, client)
+	if name in ('list_journals', 'get_journal', 'search_journals', 'add_note', 'list_cards', 'get_card'):
+		return journalTool(service, name, args, client)
 	if name == 'live_status':
 		return liveStatus(service, args, client)
 	raise ToolError("no tool %r" % name)
@@ -1650,6 +1729,8 @@ def act(service, name, action):
 					os.replace(b, a)
 			raise ToolError("%s does not load, so it stays a draft: %s: %s"
 							% (name, type(exc).__name__, exc))
+		if kind == 'strategies':
+			journal.record(service.setup, name, 'enabled', 'milestone', {'name': name}, by='user')
 	elif action == 'disable':
 		if not live:
 			raise ToolError("%s is not enabled" % name)
