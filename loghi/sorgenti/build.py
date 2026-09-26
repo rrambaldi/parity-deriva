@@ -17,7 +17,9 @@ GREY = "#7C8A92"     # grigio tagline (rif. 3)
 FOREST = "#0F2E2B"   # verde petrolio profondo (rif. 8, 9, 14)
 
 NAME_L, NAME_R = "PARITY", "DERIVA"
-TAG = "STRATEGIE DI VALORE"
+# Tagline su due righe (dal 26/09/2026; prima era "STRATEGIE DI VALORE").
+# Una riga sola resta possibile: senza "\n" gli SVG sono identici a quelli di prima.
+TAG = "QUANTITATIVE STRATEGIES\nEDGE BY DESIGN"
 
 
 # ---------------------------------------------------------------- marchi
@@ -137,6 +139,11 @@ def svg(w, h, body, bg=None, title="parity-deriva"):
             f'<title>{title}</title>{bgr}{body}</svg>\n')
 
 
+def _tag_color(c, i):
+    """Colore della riga i della tagline: 'tag2' (se c'è) dalla seconda riga in poi."""
+    return c.get("tag2", c["tag"]) if i > 0 else c["tag"]
+
+
 def build(key, cfg, mode, with_bg):
     c = cfg[mode]
     nf = fnt(cfg["name"][0], cfg["name"][1])
@@ -151,7 +158,9 @@ def build(key, cfg, mode, with_bg):
     NS, TS = 64, cfg.get("ts", 20)
     ncap = nf.cap_height(NS)
     nw = nf.width("PARITY-DERIVA", NS, cfg["name"][2])
-    tw = tf.width(TAG, TS, cfg["tag"][2])
+    tags = TAG.split("\n")                      # tagline su una o più righe
+    tw = max(tf.width(t, TS, cfg["tag"][2]) for t in tags)
+    tlead = cfg.get("tlead", 1.9) * tf.cap_height(TS)   # passo fra le righe della tagline
     pad = 70
     W = max(nw, tw) + pad * 2
     msize = 230
@@ -162,11 +171,13 @@ def build(key, cfg, mode, with_bg):
     mark_bottom = top + (v1 - v0) * k
     ny = mark_bottom + 64 + ncap
     ty = ny + 34 + tf.cap_height(TS)
-    H = ty + 64
+    H = ty + (len(tags) - 1) * tlead + 64
     body = f'<g transform="translate({(W - msize) / 2:.1f} {my}) scale({msize / 120:.4f})">{m}</g>'
     wm, _ = wordmark(nf, NS, cfg["name"][2], W / 2, ny, c["text"], c["hy"])
-    tg, _ = tf.path(TAG, TS, cfg["tag"][2], W / 2, ty)
-    body += wm + f'<path d="{tg}" fill="{c["tag"]}"/>'
+    body += wm
+    for i, t in enumerate(tags):
+        tg, _ = tf.path(t, TS, cfg["tag"][2], W / 2, ty + i * tlead)
+        body += f'<path d="{tg}" fill="{_tag_color(c, i)}"/>'
     if cfg.get("frame"):
         # cornice con apertura in alto dove "esce" il germoglio (rif. 15, 5, 7)
         fx0, fy0 = 26, top + (v1 - v0) * k * 0.55
@@ -182,13 +193,15 @@ def build(key, cfg, mode, with_bg):
     NS2, TS2 = 58, cfg.get("ts2", 17)
     ncap2 = nf.cap_height(NS2)
     nw2 = nf.width("PARITY-DERIVA", NS2, cfg["name"][2])
-    tw2 = tf.width(TAG, TS2, cfg["tag"][2])
+    tw2 = max(tf.width(t, TS2, cfg["tag"][2]) for t in tags)
+    tlead2 = cfg.get("tlead", 1.9) * tf.cap_height(TS2)
     ms = 150
     gapx = 44
     padx, pady = 40, 36
     H2 = ms + pady * 2
     tx = padx + ms + gapx
-    block = ncap2 + 26 + tf.cap_height(TS2)
+    block = ncap2 + 26 + tf.cap_height(TS2) + (len(tags) - 1) * tlead2
+    H2 = max(H2, block + pady * 2 + 20)
     ny2 = (H2 - block) / 2 + ncap2
     ty2 = ny2 + 26 + tf.cap_height(TS2)
     W2 = tx + max(nw2, tw2) + padx
@@ -196,8 +209,10 @@ def build(key, cfg, mode, with_bg):
     my2 = H2 / 2 - ((v0 + v1) / 2) * k2
     body2 = f'<g transform="translate({padx} {my2:.1f}) scale({k2:.4f})">{m}</g>'
     wm2, _ = wordmark(nf, NS2, cfg["name"][2], tx, ny2, c["text"], c["hy"], anchor="start")
-    tg2, _ = tf.path(TAG, TS2, cfg["tag"][2], tx, ty2, anchor="start")
-    body2 += wm2 + f'<path d="{tg2}" fill="{c["tag"]}"/>'
+    body2 += wm2
+    for i, t in enumerate(tags):
+        tg2, _ = tf.path(t, TS2, cfg["tag"][2], tx, ty2 + i * tlead2, anchor="start")
+        body2 += f'<path d="{tg2}" fill="{_tag_color(c, i)}"/>'
     out["horizontal"] = svg(W2, H2, body2, c["bg"] if with_bg else None)
 
     # --- icona quadrata

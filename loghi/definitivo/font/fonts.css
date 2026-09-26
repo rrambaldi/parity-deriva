@@ -4,6 +4,10 @@
  * fonts/complete/woff2). Licenza SIL OFL 1.1 in OFL.txt, da tenere accanto ai
  * file. Niente CDN: i font si servono da qui come il resto della pagina.
  *
+ * PD Instrument (titoli): Instrument Serif allargato x1,08 in orizzontale,
+ * rinominato; SIL OFL 1.1 in OFL-Instrument-Serif.txt. Lo genera
+ * loghi/sorgenti/allarga_instrument.py.
+ *
  * Gli URL sono relativi a questo file, quindi funziona alla radice e dietro
  * un reverse proxy senza configurazione (stessa regola di web/static).
  */
@@ -44,6 +48,14 @@
   font-family: "IBM Plex Mono";
   src: url("IBMPlexMono-Medium.woff2") format("woff2");
   font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "PD Instrument";
+  src: url("PDInstrument-Regular.woff2") format("woff2");
+  font-weight: 400;
   font-style: normal;
   font-display: swap;
 }

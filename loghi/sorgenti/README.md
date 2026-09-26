@@ -12,7 +12,9 @@ i file di `../definitivo/` identici nel contenuto (verificato); l'unica differen
 | `build.py` | le quattro proposte iniziali A–D e le funzioni comuni (`build`, `wordmark`, `svg`) → `out/` |
 | `build_d.py` | sviluppo di D · Orizzonte (D1 classico, D2 incisa, D3 alba) → `out_d/` |
 | `build_mix.py` | mix Alba × Classico (M1 **scelto**, M2 monocolore, M3) + favicon → `out_mix/` |
-| `build_ui.py` | testata senza tagline e grafici d'esempio per le tavole → `out_ui/` |
+| `build_ui.py` | grafici d'esempio per le tavole e la testata di prima (0,16 em) → `out_ui/` |
+| `build_testata.py` | **testata dell'applicativo**: nome a 0,07 em con crenatura → `out_testata/` |
+| `allarga_instrument.py` | font dei titoli PD Instrument da Instrument Serif (×1,08) → woff2 |
 
 ## Come eseguirli
 
@@ -23,7 +25,12 @@ cd loghi/sorgenti
 pip install fonttools brotli
 npm i @fontsource/marcellus @fontsource/jost @fontsource/cormorant-garamond @fontsource/josefin-sans
 python build_mix.py     # logo scelto e monocolore
-python build_ui.py      # testata (usa ../definitivo/font/IBMPlexMono-Regular.woff2)
+python build_testata.py # testata dell'applicativo (0,07 em, crenata)
+python build_ui.py      # grafici d'esempio (usa ../definitivo/font/IBMPlexMono-Regular.woff2)
+
+# font dei titoli: scaricare InstrumentSerif-Regular.ttf da
+# https://github.com/google/fonts/tree/main/ofl/instrumentserif
+python allarga_instrument.py InstrumentSerif-Regular.ttf 1.08 ../definitivo/font/PDInstrument-Regular.woff2
 ```
 
 `build.py` e `build_d.py` servono solo se si vogliono rivedere le proposte scartate.
@@ -38,4 +45,13 @@ cartelle `out*/` non vanno committate.
 - `build_d.py`: `bridge()` genera il cammino con deriva fra due punti fissi;
   `modes()` contiene i colori per fondo chiaro, scuro e monocolore.
 - `build.py`: `build()` impagina verticale, orizzontale e icona; `NS`/`TS` sono
-  le dimensioni di nome e tagline.
+  le dimensioni di nome e tagline. `TAG` può avere più righe separate da `\n`
+  (oggi `QUANTITATIVE STRATEGIES\nEDGE BY DESIGN`); con una riga sola gli SVG sono
+  identici a quelli di prima.
+- `build_mix.py`: `tag2` (colore dalla seconda riga della tagline, ocra) e `tlead`
+  (passo fra le righe, 2,3 altezze delle maiuscole).
+- `build_testata.py`: `TRACK` (spaziatura del nome, em), `GAP` (spazio fra marchio e
+  nome), crenatura sì/no; da riga di comando `python build_testata.py 0.16 18 0`
+  rigenera la testata di prima, identica.
+- `allarga_instrument.py`: fattore di larghezza (secondo argomento); scala in x
+  contorni, avanzamenti, crenatura e ancore; l'hinting (solo verticale) resta.

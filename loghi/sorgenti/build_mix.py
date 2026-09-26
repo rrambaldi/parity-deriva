@@ -106,7 +106,10 @@ if __name__ == "__main__":
     n = 0
     for key, v in VARIANTS.items():
         md = modes(v["mono"])
-        cfg = dict(mark=v["mark"], vb=v["vb"], name=NAME, tag=TAGF, frame=False, ts=22, ts2=21, **md)
+        for m in ("light", "dark"):          # seconda riga della tagline (EDGE BY DESIGN) in ocra
+            md[m] = dict(md[m], tag2=B.OCHRE)
+        cfg = dict(mark=v["mark"], vb=v["vb"], name=NAME, tag=TAGF, frame=False, ts=22, ts2=21,
+                   tlead=2.3, **md)      # passo fra le righe della tagline, in altezze delle maiuscole
         for mode in md:
             for with_bg in (True, False):
                 res = B.build(key, cfg, mode, with_bg)

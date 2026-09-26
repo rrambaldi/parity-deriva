@@ -106,6 +106,31 @@ Contrasti del testo calcolati: ≥ 4,5:1 su fondo e pannelli in entrambi i temi.
   trade diventa troppo larga.
 - ▲ ▼ ■ non sono nei font Plex: vanno disegnati come SVG in linea.
 
+## 5bis. Aggiornamento del 25 settembre 2026
+
+Seconda sessione, sui componenti dell'applicativo (tutte le prove sono pagine HTML
+autonome in `web/`, si aprono col doppio clic).
+
+| tema | scelta di Roberto | prova | dove è scritto |
+|---|---|---|---|
+| parametri sì/no | **segmentato `Y \| N`** (fra checkbox ridisegnato, segmentato, chip) | `web/checkbox-proposte.html` | DESIGN § 6 Campi; prompt, aggiunta Y \| N |
+| testata dei dialog | **"titolo con contesto"**: titolo, conteggio, riga d'aiuto, `esc`, chiusura quadrata senza fondo (fra essenziale, contesto, barra strumenti, blocco unico) | `web/dialog-testata-proposte.html` | DESIGN § 6 Dialog; prompt, aggiunta dialog |
+| font dei titoli | **PD Instrument**: Instrument Serif allargato ×1,08, spaziatura +0,01 em (candidati Jost, Manrope, Instrument Serif, Newsreader; poi +0,02/+0,04 em, largo 105 %/108 %) | `web/font-titoli-proposte.html`, `web/titoli-instrument-varianti.html` | DESIGN § 4; `tokens.css` (`--font-title`, `--fs-h-*`); prompt, aggiunta font |
+| scritta nella testata | **0,07 em** con crenatura, invece di 0,16 senza (prove a 0,11 / 0,07 / 0,04) | `web/titoli-instrument-varianti.html` | DESIGN § 7; `loghi/definitivo/README.md` |
+| risorse del server in testata | **una spia sola** (`server ok` o la misura peggiore) con pannello al clic; niente verde, soglie 80 / 90 % (fra mini indicatori, in linea sobria, a tacche, spia). Scelta di Claude su "continua", da confermare | `web/risorse-proposte.html` | DESIGN § 6 Risorse del server; `tokens.css` (`--backdrop`, `--shadow-float`); prompt, aggiunta risorse |
+
+- Scala dei titoli: 24 px pagina, 22 px dialog, 18 px pannelli (prima tutti 15 px).
+- PD Instrument: licenza OFL senza nomi riservati, quindi modificabile; rinominato;
+  l'hinting originale resta (agisce solo in verticale), ~21 KB. Script
+  `sorgenti/allarga_instrument.py`.
+- Testata nuova: `sorgenti/build_testata.py` (0,07 em, spazio marchio–nome 16,
+  crenatura PA, VA, Y-). Con `0.16 18 0` rigenera identica quella di prima. La
+  spaziatura delle versioni con tagline (0,18 em) non è cambiata.
+- Il codice del viewer in questa cartella (branch `candle-forecast-livello0`) ha
+  ancora lo stile di prima: il refactoring gira altrove. Le istruzioni per Claude
+  Code sono aggiunte in fondo a `web/REFACTORING-claude-code.md`, ognuna utilizzabile
+  da sola.
+
 ## 6. Mappa dei file salvati
 
 ```
@@ -117,5 +142,10 @@ loghi/
   riassunto-sessione-logo.md    questo file
 web/
   DESIGN.md                     linee guida per il layout
-  REFACTORING-claude-code.md    prompt per Claude Code: refactoring grafico del viewer
+  REFACTORING-claude-code.md    prompt per Claude Code: refactoring grafico del viewer (+ aggiunte del 25/09)
+  checkbox-proposte.html        prova: parametri sì/no
+  dialog-testata-proposte.html  prova: testata dei dialog
+  font-titoli-proposte.html     prova: font dei titoli, quattro candidati
+  titoli-instrument-varianti.html  prova: Instrument più largo, scritta del logo più stretta
+  risorse-proposte.html         prova: risorse del server in testata
 ```

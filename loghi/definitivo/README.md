@@ -15,7 +15,7 @@ Regole d'uso in `web/DESIGN.md` (§ 7). "fondo-chiaro" = da usare su fondo chiar
 |---|---|
 | `parity-deriva_verticale_fondo-chiaro.svg` / `_fondo-scuro.svg` | marchio sopra, nome, tagline |
 | `parity-deriva_orizzontale_fondo-chiaro.svg` / `_fondo-scuro.svg` | marchio a sinistra, nome e tagline a destra |
-| `parity-deriva_testata_fondo-chiaro.svg` / `_fondo-scuro.svg` | marchio + nome senza tagline, per la barra dell'applicativo |
+| `parity-deriva_testata_fondo-chiaro.svg` / `_fondo-scuro.svg` | marchio + nome senza tagline, per la barra dell'applicativo; nome più stretto (0,07 em) e crenato, vedi sotto |
 | `parity-deriva_marchio_fondo-chiaro.svg` / `_fondo-scuro.svg` | solo il marchio |
 | `parity-deriva_icona_chiara.svg` / `_scura.svg` | marchio in quadrato arrotondato |
 | `parity-deriva_icona_quadrata_scura.svg` | a tutto quadro, per apple-touch-icon e avatar |
@@ -43,6 +43,7 @@ Regole d'uso in `web/DESIGN.md` (§ 7). "fondo-chiaro" = da usare su fondo chiar
 | Avorio (fondo scuro) | `#F4EFE4` |
 | Notte (fondo dell'icona) | `#0B1A26` |
 | Tagline su chiaro / su scuro | `#6B7A83` / `#C7AA9B` |
+| Seconda riga della tagline (EDGE BY DESIGN) | ocra `#C98A45`, su chiaro e su scuro; nelle monocolore dello stesso colore del resto |
 
 ## Font
 
@@ -50,6 +51,26 @@ Regole d'uso in `web/DESIGN.md` (§ 7). "fondo-chiaro" = da usare su fondo chiar
   convertiti in tracciati negli SVG.
 - Applicativo: **IBM Plex Sans** e **IBM Plex Mono** in `font/`, file ufficiali IBM
   non modificati, con `OFL.txt` e `fonts.css`.
+- Titoli dell'applicativo (nome della pagina, dialog, pannelli): **PD Instrument**,
+  `font/PDInstrument-Regular.woff2`: Instrument Serif allargato ×1,08 in orizzontale,
+  sottoinsieme latino, rinominato (SIL OFL 1.1 senza nomi riservati, licenza in
+  `font/OFL-Instrument-Serif.txt`). Nel CSS con spaziatura +0,01 em.
+
+## Tagline
+
+Dal 26/09/2026 la tagline è in inglese, su due righe sotto il nome:
+**QUANTITATIVE STRATEGIES** (grigio) / **EDGE BY DESIGN** (ocra). Jost 400, spaziatura
+0,46 em come prima, passo fra le righe 2,3 volte l'altezza delle maiuscole. La testata
+non ha tagline e non è cambiata. I file con la tagline di prima ("STRATEGIE DI VALORE")
+sono in `_precedente_strategie-di-valore/`.
+
+## Spaziatura del nome
+
+Il nome PARITY-DERIVA ha spaziatura 0,18 em nelle versioni con tagline (verticale,
+orizzontale) e **0,07 em nella testata**, con la crenatura del font (PA, VA, Y-):
+dal 25/09/2026, per stare accanto ai titoli dell'applicativo senza staccare troppo.
+La testata di prima (0,16 em, senza crenatura) si rigenera con
+`python build_testata.py 0.16 18 0`.
 
 ## Token
 
