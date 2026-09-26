@@ -345,7 +345,9 @@ seconda sospensione è `DEAD`.
 7. Piccoli: giorno della settimana nello sweep, commissioni e financing,
    colonna R nei trade, push e verify di un run senza mix.
 
-Il mix e quello che viene dopo: [ROADMAP.md](ROADMAP.md).
+Come si fa ogni cantiere, con file, dati, test e ordine di lavoro:
+[PIANO-FASE1.md](PIANO-FASE1.md). Il mix e quello che viene dopo:
+[ROADMAP.md](ROADMAP.md).
 
 ---
 
