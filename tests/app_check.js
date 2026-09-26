@@ -164,7 +164,11 @@ run(`state.data.candles = new Array(6).fill(${CANDLE});
 const click = (x) => { nodes['chart'].on.click({ clientX: x }); return run('state.selected'); };
 assert.strictEqual(click(271), 0, 'a click on the first trade\'s entry selects it');
 assert.strictEqual(click(500), 1, 'a click nearer the second entry goes there');
-assert.strictEqual(click(0), 0, 'and one off the left edge goes to the first');
+// Was: click(0), off the left edge. Now x=0 is on the price axis, where a
+// click is a stretch or half a double click that fits the prices, and picks
+// nothing; just inside the plot is still left of every entry
+assert.strictEqual(click(0), 1, 'a click on the price axis leaves the selection alone');
+assert.strictEqual(click(67), 0, 'and one off the left edge of the plot goes to the first');
 assert.strictEqual(click(544), 1, 'and one on the second entry selects that');
 
 /*
@@ -317,10 +321,16 @@ nodes['chart'].on.mousemove({ clientX: 300, clientY: 100 });
 assert.ok(run('$("chart-zoom").textContent').includes('H-L 2000.0 pips'),
   'the readout carries the range of the bar under the cursor');
 assert.strictEqual(run('pipSize()'), 0.0001);
-run('state.decimals = 1;');
+// Was: state.decimals, the closes' decimals. Now: state.quoted, the ask's and
+// the bid's - a candle is their middle and has a decimal more than the
+// instrument, which made every pip ten times too many
+run('state.quoted = 1;');
 assert.strictEqual(run('pipSize()'), 1, 'an index quoted to one decimal has '
   + 'a point for a pip');
-run('state.decimals = 5;');
+run('state.quoted = 5;');
+const MID = '[0, 1.171125, 1.17131, 1.170025, 1.171185, 1.17136, 1.17006, 1.17126, 1.16999]';
+assert.deepStrictEqual([run(`decimalsOf([${MID}])`), run(`decimalsOf([${MID}], 5)`)], [6, 5],
+  'the middle has six decimals, the ask five: the pip is read off the ask');
 
 /*
  * The swing levels. Twenty flat bars with a single high at bar 7, which
@@ -409,7 +419,9 @@ run(series(Array.from({ length: 20 }, () => flat), `[{ n:1, direction:'long',
   signalIndex: 8, entryIndex: 10, exitIndex: 12, entryPrice: 1, exitPrice: 1,
   stopLoss: null, takeProfit: null, stopFinal: null, exitTime: 1,
   balance: null, pl: 1 }]`) + ' state.data.setupBars = 5; state.selected = 0;');
-const boxes = () => { rects.length = 0; run('draw()'); return rects.slice(); };
+// Was: every strokeRect of draw(). Now draw() draws the navigator under the
+// chart too (drawNav), whose box around the stretch on show is the one at y=1.5
+const boxes = () => { rects.length = 0; run('draw()'); return rects.filter((r) => r[1] !== 1.5); };
 
 const box = boxes();
 assert.strictEqual(box.length, 1, 'the selected trade gets one box');
@@ -433,6 +445,50 @@ const wheel = (clientX, deltaY) => {
 };
 assert.strictEqual(wheel(500, -1), '{"from":21,"to":180}', 'a notch in zooms on the pointer');
 assert.strictEqual(wheel(500, 1), 'null', 'and a notch out is back to the whole range');
+
+/*
+ * The keys, the box, the ranges and the measure (chartKey and measured in
+ * menu.js; keyed, boxZoom, showTimes and measureOf here), on 200 daily bars
+ * whose highs are 2 and lows 0 - a price range of -0.12..2.12 once padded.
+ * Shift and an arrow move a quarter of the window, + and - zoom about its
+ * middle, End and Home go to either end of the run with the same span.
+ */
+run(series(Array.from({ length: 200 }, (_, i) => `[${i * 864e5},1,2,0,1,1,2,0,1]`)));
+const shown = () => JSON.stringify(run('state.view && [state.view.from, state.view.to]'));
+const press = (key, shiftKey) => run(`keyed(chartKey({ key: '${key}', shiftKey: ${!!shiftKey}, target: {} }))`);
+run('zoomTo(100, 40);');
+press('ArrowLeft', true);
+assert.strictEqual(shown(), '[90,129]', 'shift and left: a quarter of the window back');
+press('ArrowRight', true);
+assert.strictEqual(shown(), '[100,139]', 'and right: a quarter on');
+press('-');
+assert.strictEqual(shown(), '[95,144]', 'minus: a notch out, about the middle');
+press('+');
+assert.strictEqual(shown(), '[100,139]', 'plus: a notch in');
+press('End');
+assert.strictEqual(shown(), '[160,199]', 'End: the last bars, the same span');
+press('Home');
+assert.strictEqual(shown(), '[0,39]', 'Home: the first ones');
+assert.strictEqual(run(`chartKey({ key: 'ArrowLeft', shiftKey: false, target: {} })`), null,
+  'an arrow on its own is not the chart\'s: it walks the runs and the trades');
+
+// a box from the left edge of bar 50 to that of bar 100 - bars 50..99 - and
+// the top half of the plot: 820px of plot is 4.1px a bar, 382px of it high, so the prices are 2.12 down to the middle, 1.00
+run('state.view = null; draw(); pan = {};');
+run(`boxZoom({ x0: ${66 + 50 * 4.1}, y0: 12, x1: ${66 + 100 * 4.1}, y1: ${12 + 382 / 2} }); pan = null;`);
+assert.strictEqual(shown(), '[50,99]', 'a box zooms onto its bars');
+assert.deepStrictEqual(JSON.parse(JSON.stringify(run('[state.scale.high, state.scale.low]'))).map((v) => +v.toFixed(2)),
+  [2.12, 1], 'and onto its prices, set by hand');
+run(`pan = {}; boxZoom({ x0: 300, y0: 100, x1: 304, y1: 150 }); pan = null;`);
+assert.strictEqual(shown(), '[50,99]', 'one too narrow to have been meant does nothing');
+
+// 1M: thirty days ending where the chart does, bar 99 - so from bar 69
+nodes['ranges'].on.click({ target: { closest: () => ({ dataset: { range: '1M' } }) } });
+assert.strictEqual(shown(), '[69,99]', 'a range ends where the chart does');
+
+run('state.quoted = 5;');
+assert.strictEqual(run(`measureOf({ a: { ms: 0, price: 1 }, b: { ms: 10 * 864e5, price: 1.001 } })`),
+  '+10.0 pips · +0.10% · 10 bars · 10d', 'a measure in pips, percent, bars and time');
 
 /*
  * How a trade ended. A closed trade must never be reported as running: the

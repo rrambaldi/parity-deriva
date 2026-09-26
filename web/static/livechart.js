@@ -253,7 +253,9 @@ function drawOver() {
   if (!state.bars.length || !state.range) return;
   const pal = palette(), g = plot();
   const xAt = (ms) => AXIS.left + ((barAt(ms) ?? -1) - g.view.from + 0.5) * g.step;
-  const m = state.measure, box = pan && pan.box, at = state.pointer;
+  const m = state.measure, box = pan && pan.box,
+    // a pointer that is not a number (no layout yet) draws no crosshair
+    at = state.pointer && isFinite(state.pointer.x) && isFinite(state.pointer.y) ? state.pointer : null;
   const colour = m && m.b.price < m.a.price ? pal.down : pal.up;
   octx.save();
   octx.beginPath();
