@@ -551,6 +551,20 @@ assert.deepStrictEqual([year.xs, year.cells[0][8].n], [['2026'], 3], 'the years 
 assert.strictEqual(JSON.stringify(run('eventsOfBar(3).map((e) => e[3])')), '["Payrolls"]',
   'the release at 3:30 is in the bar of 3:00');
 run('draw()');
+// with the payrolls on Monday at 10:00 and a CPI on Tuesday at 14:00
+const HEAT_EVENTS = `[[Date.UTC(2026, 8, 21, 10), 'USD', 'high', 'Payrolls'], [Date.UTC(2026, 8, 22, 14), 'EUR', 'medium', 'CPI']]`;
+const heatNews = (layout, news) => JSON.parse(JSON.stringify(
+  run(`heatCells(${HEAT_TRADES}, '${layout}', 'entry', ${HEAT_EVENTS}, '${news}')`)));
+assert.deepStrictEqual([heatNews('week', 'near').trades, heatNews('week', 'away').trades], [2, 1],
+  "the two entered in the hour before the payrolls are near an event, Tuesday's is not");
+const marked = heatNews('week', 'all').marks;
+assert.deepStrictEqual([marked[0][10].length, marked[1][14].length, marked[0][9].length], [1, 1, 0],
+  'each event marks the cell of its own hour');
+const around = heatNews('event', 'all');
+assert.deepStrictEqual([around.ys, around.trades, around.xs[1], around.cells[1][0].n, around.cells[2][0].n],
+  [['USD Payrolls'], 2, '−1h…−30m', 1, 1],
+  'by event: 45 minutes before the payrolls and 20 before, and the CPI four hours off is no row');
+assert.strictEqual(run(`heatEvents(${HEAT_EVENTS})`), '2 events: USD Payrolls, EUR CPI');
 assert.strictEqual(run('$("events-note").textContent'), '2 on show · 2 in the run (1 high, 1 medium)');
 
 /*

@@ -291,6 +291,7 @@
         <option value="week">week: day × hour</option>
         <option value="month">month: month × day</option>
         <option value="year">year: year × month</option>
+        <option value="event">event: event × time from it</option>
       </select></label>
       <label>cell <select id="heat-cell">
         <option value="win">win rate</option>
@@ -300,6 +301,15 @@
       <label>time <select id="heat-when">
         <option value="entry">entry</option>
         <option value="exit">exit</option>
+      </select></label>
+      <label>calendar <select id="heat-news">
+        <option value="all">all trades</option>
+        <option value="near">within 1h of an event</option>
+        <option value="away">no event within 1h</option>
+      </select></label>
+      <label>events <select id="heat-impact">
+        <option value="high">high</option>
+        <option value="medium">high and medium</option>
       </select></label>
     </div>
     <div id="heat-wrap"><table id="heat"></table></div>

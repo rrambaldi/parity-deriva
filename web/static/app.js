@@ -626,11 +626,20 @@ async function loadEvents() {
   if (state.data !== data) return;   // another run came on meanwhile
   state.events = events;
   draw();
+  drawHeat();
 }
 
-// the events from one instant to another, oldest first
-function eventsBetween(fromMs, toMs) {
-  return (state.events || []).filter((e) => e[0] >= fromMs && e[0] < toMs);
+// the events from one instant to another, oldest first, of a list oldest first
+function eventsBetween(fromMs, toMs, events = state.events || []) {
+  const first = (ms) => {
+    let low = 0, high = events.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (events[mid][0] < ms) low = mid + 1; else high = mid;
+    }
+    return low;
+  };
+  return events.slice(first(fromMs), first(toMs));
 }
 
 // the events inside a drawn bar: from its open to the next bar's
@@ -1744,10 +1753,21 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
  * across and their days down, or the years across and their months down. A
  * cell is {n, ok, ko, pl}: OK made money, KO lost it, one at nought is
  * neither. cells[x][y], under the labels xs and ys.
+ *
+ * With the calendar's events (oldest first): `news` 'near' keeps the trades
+ * with one within NEAR of their time and 'away' those with none, and marks[x][y]
+ * are the events that fell in the cell. The layout 'event' is the other way
+ * round: a row an event, a column how long before or after it the time was.
  */
-function heatCells(trades, layout, when) {
+const NEAR = 60 * 60000;
+const AROUND = [-120, -60, -30, 0, 30, 60, 120];   // the event layout's edges, minutes
+
+function heatCells(trades, layout, when, events = [], news = 'all') {
+  const near = (t) => eventsBetween(t[when + 'Time'] - NEAR, t[when + 'Time'] + NEAR + 1, events).length > 0;
   const closed = trades.filter((t) => t.pl !== null && t.pl !== undefined
-    && t.exitTime !== null && t.exitTime !== undefined);
+    && t.exitTime !== null && t.exitTime !== undefined
+    && (news === 'all' || near(t) === (news === 'near')));
+  if (layout === 'event') return eventCells(closed, when, events);
   const dates = closed.map((t) => new Date(t[when + 'Time']));
   const years = dates.map((d) => d.getUTCFullYear());
   const first = years.length ? Math.min(...years) : 0, count = years.length ? Math.max(...years) - first + 1 : 0;
@@ -1761,14 +1781,47 @@ function heatCells(trades, layout, when) {
            Array.from({ length: count }, (_, i) => String(first + i)), MONTHS],
   }[layout];
   const cells = xs.map(() => ys.map(() => ({ n: 0, ok: 0, ko: 0, pl: 0 })));
-  closed.forEach((t, k) => {
-    const cell = cells[xOf(dates[k])][yOf(dates[k])];
-    cell.n++;
-    cell.pl += t.pl;
-    if (t.pl > 0) cell.ok++;
-    else if (t.pl < 0) cell.ko++;
-  });
-  return { xs, ys, cells, trades: closed.length };
+  closed.forEach((t, k) => heatAdd(cells[xOf(dates[k])][yOf(dates[k])], t));
+  const marks = xs.map(() => ys.map(() => []));
+  for (const e of events) {
+    const d = new Date(e[0]);
+    if (marks[xOf(d)]) marks[xOf(d)][yOf(d)].push(e);   // a year with no trades has no column
+  }
+  return { xs, ys, cells, marks, trades: closed.length };
+}
+
+function heatAdd(cell, t) {
+  cell.n++;
+  cell.pl += t.pl;
+  if (t.pl > 0) cell.ok++;
+  else if (t.pl < 0) cell.ko++;
+}
+
+// The trades by their time from an event's: a row an event (currency and
+// title), busiest first, a column a stretch of AROUND. A trade near two
+// events is in both rows, near the same one twice in the nearest.
+function eventCells(closed, when, events) {
+  const edges = AROUND.map((m) => m * 60000), last = edges.length - 1;
+  const rows = new Map();
+  let counted = 0;
+  for (const t of closed) {
+    const ms = t[when + 'Time'], seen = new Set();
+    const near = eventsBetween(ms - edges[last] + 1, ms - edges[0] + 1, events)
+      .sort((a, b) => Math.abs(ms - a[0]) - Math.abs(ms - b[0]));
+    for (const e of near) {
+      const name = `${e[1]} ${e[3]}`;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      if (!rows.has(name)) rows.set(name, edges.slice(1).map(() => ({ n: 0, ok: 0, ko: 0, pl: 0 })));
+      heatAdd(rows.get(name)[edges.findIndex((_, i) => ms - e[0] < edges[i + 1])], t);
+    }
+    if (seen.size) counted++;
+  }
+  const total = (name) => rows.get(name).reduce((sum, c) => sum + c.n, 0);
+  const ys = [...rows.keys()].sort((a, b) => total(b) - total(a));
+  const span = (m) => m ? (m > 0 ? '+' : '−') + (Math.abs(m) >= 60 ? Math.abs(m) / 60 + 'h' : Math.abs(m) + 'm') : '0';
+  const xs = AROUND.slice(1).map((m, i) => `${span(AROUND[i])}…${span(m)}`);
+  return { xs, ys, cells: xs.map((_, x) => ys.map((y) => rows.get(y)[x])), marks: null, trades: counted };
 }
 
 /*
@@ -1778,19 +1831,30 @@ function heatCells(trades, layout, when) {
  *    it holds, so one lucky trade is a pale cell and not a bright one;
  *  - P&L: green made, red lost, the fuller the more;
  *  - OK and KO: two bars, as long as the counts against the busiest cell.
+ * A corner marks where the calendar's events fell, red for a high one.
  */
 function drawHeat() {
   const trades = state.data ? state.data.trades : [];
   $('heat-panel').hidden = !trades.length;
   if (!trades.length || !$('heat-box').open) return;
   const layout = $('heat-layout').value, mode = $('heat-cell').value, when = $('heat-when').value;
-  const { xs, ys, cells, trades: counted } = heatCells(trades, layout, when);
+  const impact = $('heat-impact').value, kind = impact === 'high' ? 'high' : 'high or medium';
+  const news = layout === 'event' ? 'all' : $('heat-news').value;
+  $('heat-news').disabled = layout === 'event';
+  const events = (state.events || []).filter((e) => impact !== 'high' || e[2] === 'high');
+  const { xs, ys, cells, marks, trades: counted } = heatCells(trades, layout, when, events, news);
   const all = cells.flat();
   const most = Math.max(1, ...all.map((c) => c.n));
   const widest = Math.max(1e-12, ...all.map((c) => Math.abs(c.pl)));
   const decimals = widest >= 100 ? 0 : widest >= 1 ? 1 : amountDecimals(widest);
   const tint = (token, share) => `color-mix(in srgb, var(--${token}) ${Math.round(8 + 52 * share)}%, transparent)`;
-  $('heat-note').textContent = `${counted} closed trades by ${when} time, UTC`;
+  $('heat-note').textContent = (layout === 'event'
+    ? `${counted} closed trades with their ${when} within 2h of a ${kind} event, by how long before or after it`
+    : `${counted} closed trades by ${when} time, UTC`
+      + { all: '', near: ` · only those within 1h of a ${kind} event`,
+          away: ` · only those with no ${kind} event within 1h` }[news])
+    + (state.events === null ? ' · asking the calendar…'
+       : !events.length ? ` · no ${kind} calendar events in this run` : '');
 
   const table = $('heat');
   table.textContent = '';
@@ -1809,16 +1873,20 @@ function drawHeat() {
     row.appendChild(th);
     xs.forEach((xLabel, xi) => {
       const c = cells[xi][yi], td = row.insertCell();
-      if (!c.n) return;
+      const fell = marks ? marks[xi][yi] : [];
+      const said = fell.length ? ` · ${heatEvents(fell)}` : '';
+      if (fell.length) td.className = 'news' + (fell.some((e) => e[2] === 'high') ? '' : ' medium');
+      if (!c.n) { if (fell.length) td.title = `${xLabel} ${yLabel}${said}`; return; }
       const rate = (c.ok + c.ko) ? c.ok / (c.ok + c.ko) : 0.5;
       td.title = `${xLabel} ${yLabel} · ${c.n} trade${c.n === 1 ? '' : 's'} · ${c.ok} OK · ${c.ko} KO`
-        + ` · won ${Math.round(rate * 100)}% · P&L ${c.pl >= 0 ? '+' : ''}${amount(c.pl, decimals)}`;
+        + ` · won ${Math.round(rate * 100)}% · P&L ${c.pl >= 0 ? '+' : ''}${amount(c.pl, decimals)}` + said;
+      // the colour and not the whole background, which holds the events' corner
       if (mode === 'win') {
         td.textContent = `${c.ok}/${c.ko}`;
-        td.style.background = tint(rate >= 0.5 ? 'up' : 'down', Math.abs(rate - 0.5) * 2 * Math.sqrt(c.n / most));
+        td.style.backgroundColor = tint(rate >= 0.5 ? 'up' : 'down', Math.abs(rate - 0.5) * 2 * Math.sqrt(c.n / most));
       } else if (mode === 'pl') {
         td.textContent = (c.pl >= 0 ? '+' : '') + amount(c.pl, decimals);
-        td.style.background = tint(c.pl >= 0 ? 'up' : 'down', Math.abs(c.pl) / widest);
+        td.style.backgroundColor = tint(c.pl >= 0 ? 'up' : 'down', Math.abs(c.pl) / widest);
       } else {
         for (const [kind, count] of [['ok', c.ok], ['ko', c.ko]]) {
           const bar = document.createElement('span');
@@ -1830,6 +1898,16 @@ function drawHeat() {
       }
     });
   });
+}
+
+// a cell's events for its tooltip: how many, and the commonest by name
+function heatEvents(fell) {
+  const names = new Map();
+  for (const e of fell) names.set(`${e[1]} ${e[3]}`, (names.get(`${e[1]} ${e[3]}`) || 0) + 1);
+  const top = [...names].sort((a, b) => b[1] - a[1]);
+  return `${fell.length} event${fell.length === 1 ? '' : 's'}: `
+    + top.slice(0, 3).map(([name, n]) => n > 1 ? `${name} \u00d7${n}` : name).join(', ')
+    + (top.length > 3 ? ` and ${top.length - 3} more` : '');
 }
 
 /* ------------------------------------------------------------ the levels */
@@ -2581,7 +2659,7 @@ equityCanvas.addEventListener('click', (event) => {
 $('equity-box').addEventListener('toggle', drawEquity);
 $('drawdown-box').addEventListener('toggle', drawDrawdown);
 $('heat-box').addEventListener('toggle', drawHeat);
-for (const id of ['heat-layout', 'heat-cell', 'heat-when']) $(id).addEventListener('change', drawHeat);
+for (const id of ['heat-layout', 'heat-cell', 'heat-when', 'heat-news', 'heat-impact']) $(id).addEventListener('change', drawHeat);
 $('levels-box').addEventListener('toggle', drawLevels);
 $('curve-box').addEventListener('toggle', drawPanel);
 
