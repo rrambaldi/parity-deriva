@@ -102,6 +102,29 @@
 </section>
 
 <!--
+  An archive's trade servers (web/servers.py): each one's sessions as it said
+  last (live_status, read every few minutes), and a form pushed to one - its
+  code and its starred run of a set; to a real money one also its record on
+  demo, which that server judges by its own minimums.
+-->
+<section id="trade-servers" hidden>
+  <h3 class="panel-title">trade servers</h3>
+  <table id="remote-table" class="live-small">
+    <thead><tr><th>server</th><th>session</th><th>account</th><th>strategy</th><th>market</th>
+      <th>started (UTC)</th><th>status</th><th class="num">open</th><th class="num">closed</th>
+      <th class="num">net</th></tr></thead>
+    <tbody id="remote-rows"></tbody>
+  </table>
+  <form id="push-form" class="market-row">
+    <label>form <select id="push-what"></select></label>
+    <label>to <select id="push-to"></select></label>
+    <button type="submit" id="push-go" data-icon="upload">push</button>
+    <button type="button" id="remote-read" data-icon="rerun">read now</button>
+  </form>
+  <p id="push-note" class="hint" role="status"></p>
+</section>
+
+<!--
   A session started from here: the strategy with
   its own default parameters, on every account ticked - one process per
   account, all in parallel (web/livesessions.start).

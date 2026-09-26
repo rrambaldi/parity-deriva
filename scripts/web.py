@@ -38,6 +38,7 @@ import sys
 from parity_deriva.data import market
 from parity_deriva.etc import settings
 from parity_deriva.lib.utils import getLogger
+from parity_deriva.web import servers
 from parity_deriva.web.logs import servicePath
 from parity_deriva.web.service import LOGGER, MAX_CANDLES, serve
 
@@ -98,6 +99,8 @@ def main(argv=None):
     # the market data's sources on their timers (data/sources.py): nothing
     # on a server that only reads it, or whose sources are all manual
     server.RequestHandlerClass.service.sources.start()
+    # an archive reads its trade servers' sessions (web/servers.py poll)
+    servers.start(server.RequestHandlerClass.service)
     # a real money server's loss limit, every minute (web/livesessions.py guard)
     if settings.ACCOUNTS == 'real' and settings.DAILY_LOSS_PCT > 0:
         server.RequestHandlerClass.service.live.watch(settings.DAILY_LOSS_PCT)
