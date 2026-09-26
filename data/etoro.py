@@ -102,7 +102,7 @@ class EToroCandles(StreamHandler):
 	one for the other. Three differences are the API's, not this class's:
 
 	* **one price series, not three.** OANDA serves ask, bid and mid;
-	  eToro serves one OHLC. Without ETORO_SPREAD the event carries mid only
+	  eToro serves one OHLC. Without ETORO_SPREAD or spread.json the event carries mid only
 	  and bid/ask stay None, and the provider declines bid_ask_candles so a
 	  wiring that needs them refuses to start. See lib/etoro.SpreadModel.
 	* **no date range.** The route is "the last N candles", N at most 1000.
@@ -153,7 +153,8 @@ class EToroCandles(StreamHandler):
 
 		if not self.spread.enabled():
 			self.logger.warning(
-				"ETORO_SPREAD is not set: candles will carry mid only, and "
+				"ETORO_SPREAD is not set and the market folder has no "
+				"spread.json (scripts/spread_profile.py): candles will carry mid only, and "
 				"any strategy reading candle.ask or candle.bid will fail. "
 				"See lib/etoro.SpreadModel.")
 
@@ -239,7 +240,7 @@ class EToroCandles(StreamHandler):
 			'complete': True,
 			'mid': ohlc,
 		}
-		bid, ask = self.spread.apply(pair, ohlc)
+		bid, ask = self.spread.apply(pair, ohlc, when, self.period)
 		if bid is not None:
 			payload['bid'] = bid
 			payload['ask'] = ask

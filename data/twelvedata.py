@@ -17,9 +17,9 @@ the bar that was not there yet is picked up on the next boundary, one bar
 late and for nothing extra; and the previous bar is read again every time,
 so a bar the vendor re-served with other prices is seen and said out loud.
 
-One series, so bid and ask are a model or nothing: TWELVEDATA_SPREAD is the
-same rule as ETORO_SPREAD (lib/spread.py), off until measured. The live page
-prints each broker's median spread for exactly this purpose.
+One series, so bid and ask are a model or nothing: TWELVEDATA_SPREAD, or the
+market folder's spread.json, is the same rule as eToro's (lib/spread.py), off
+until measured. scripts/spread_profile.py builds that file.
 
     ponytail: polls through the weekend too - 288 empty calls a day per
     instrument fit the budget. Pause FX from Friday 22:00 to Sunday 22:00
@@ -88,7 +88,7 @@ class TwelveDataCandles(StreamHandler):
 			'complete': True,
 			'mid': mid,
 		}
-		bid, ask = self.spread.apply(pair, mid)
+		bid, ask = self.spread.apply(pair, mid, data['time'], self.period)
 		if bid is not None:
 			# only when modelled: CandleEvent turns a None side into a dict
 			# of zeros, and a strategy would read a bid of 0.0

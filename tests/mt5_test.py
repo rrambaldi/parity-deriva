@@ -130,6 +130,36 @@ class TransactionsTest(unittest.TestCase):
 		self.assertEqual(tx.positions, {})
 
 
+class ServerOffsetTest(unittest.TestCase):
+	"""The broker's clock, from a tick when one is live, else from settings."""
+
+	def offset(self, tick_age_hours, entry=None, configured=3):
+		api = lib.MT5(setup=types.SimpleNamespace(MT5_SERVER_UTC_OFFSET=configured),
+					  entry=entry or {})
+		now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+		# a tick on a UTC+2 server, tick_age_hours old
+		api.call = lambda name, sym: ({'time': now + 2 * 3600 - tick_age_hours * 3600}, None)
+		return api.serverOffset('EURUSD').total_seconds() / 3600, api.offset
+
+	def test_a_live_tick_says_the_offset_and_is_kept(self):
+		hours, kept = self.offset(0, entry={'utc_offset': 2})
+		self.assertEqual(hours, 2)
+		self.assertIsNotNone(kept)
+
+	def test_a_live_tick_moves_it_by_the_dst_hour(self):
+		self.assertEqual(self.offset(0, configured=3)[0], 2)
+
+	def test_a_stale_tick_is_not_believed(self):
+		"""Friday's 21:00 UTC tick read on Saturday at 12:30: 15.5 hours old."""
+		hours, kept = self.offset(15.5, entry={'utc_offset': 2})
+		self.assertEqual(hours, 2)
+		self.assertIsNone(kept)
+
+	def test_the_terminal_offset_wins_over_the_global_one(self):
+		self.assertEqual(self.offset(15.5, entry={'utc_offset': 2}, configured=3)[0], 2)
+		self.assertEqual(self.offset(15.5, entry={}, configured=3)[0], 3)
+
+
 class CredentialsTest(unittest.TestCase):
 
 	def credentials(self, text):

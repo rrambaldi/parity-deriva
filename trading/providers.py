@@ -39,6 +39,7 @@ a silent False.
 import logging
 
 from parity_deriva.etc import settings
+from parity_deriva.lib.spread import spreadModel
 
 
 class ProviderError(Exception):
@@ -261,8 +262,8 @@ class EToroProvider(Provider):
 
 	name = 'etoro'
 	capabilities = Capabilities(
-		# One OHLC per candle, no bid/ask split. Setting ETORO_SPREAD turns
-		# this True - see lib/etoro.SpreadModel for what that then means.
+		# One OHLC per candle, no bid/ask split. ETORO_SPREAD, or the market
+		# folder's spread.json, turns this True - see lib/spread.py.
 		bid_ask_candles=False,
 		# Candle history is "the last N", N <= 1000. There is no from/to, so
 		# nothing can be backfilled and data/bulksaver.py cannot be pointed
@@ -296,7 +297,7 @@ class EToroProvider(Provider):
 		# in the process.
 		declared = dict((name, getattr(EToroProvider.capabilities, name))
 						for name in EToroProvider.capabilities.names())
-		if getattr(self.setup, 'ETORO_SPREAD', None) is not None:
+		if spreadModel(self.setup, 'ETORO_SPREAD').enabled():
 			declared['bid_ask_candles'] = True
 		# eToro does not expire an order, and data/etoro.EToroTransactions
 		# cancels one once its gtdTime has passed: the order still dies
@@ -497,9 +498,9 @@ class IBProvider(Provider):
 
 	name = 'ib'
 	capabilities = Capabilities(
-		# The history route serves one OHLC, the way eToro does. Setting
-		# IB_SPREAD turns this True - see lib/spread.py for what that then
-		# means.
+		# The history route serves one OHLC, the way eToro does. IB_SPREAD,
+		# or the market folder's spread.json, turns this True - see
+		# lib/spread.py.
 		bid_ask_candles=False,
 		# A start time and a duration, so a window can be walked back.
 		dated_history=True,
@@ -529,7 +530,7 @@ class IBProvider(Provider):
 
 	def __init__(self, setup=None):
 		Provider.__init__(self, setup)
-		if getattr(self.setup, 'IB_SPREAD', None) is not None:
+		if spreadModel(self.setup, 'IB_SPREAD').enabled():
 			# Copied before being changed, for the reason the eToro provider
 			# copies its own: mutating the class attribute would have one
 			# configured session grant bid/ask to every other provider object
@@ -678,8 +679,8 @@ class TwelveDataProvider(Provider):
 	The capabilities are the simulator's, not a broker's: it tells a STOP
 	from a LIMIT, names the leg that closed a trade, expires a resting order
 	at its gtdTime and moves a stop. What it cannot do is quote a bid and an
-	ask, because Twelve Data serves one series - so TWELVEDATA_SPREAD is a
-	model, off until set, exactly as ETORO_SPREAD is.
+	ask, because Twelve Data serves one series - so TWELVEDATA_SPREAD or the
+	shared spread.json is a model, off until set, exactly as eToro's is.
 	"""
 
 	name = 'twelvedata'
@@ -701,7 +702,7 @@ class TwelveDataProvider(Provider):
 
 	def __init__(self, setup=None):
 		Provider.__init__(self, setup)
-		if getattr(self.setup, 'TWELVEDATA_SPREAD', None) is not None:
+		if spreadModel(self.setup, 'TWELVEDATA_SPREAD').enabled():
 			# copied before being changed, for the reason the eToro provider
 			# copies its own
 			declared = dict((name, getattr(TwelveDataProvider.capabilities, name))

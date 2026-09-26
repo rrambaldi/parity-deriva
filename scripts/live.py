@@ -335,6 +335,9 @@ def main(argv=None):
                   "pips: set TWELVEDATA_SPREAD in\netc/settings.py from it, "
                   "or run a strategy that does not read a candle's\nask and "
                   "bid.")
+        if 'bid_ask_candles' in needs and provider.name in ('etoro', 'ib', 'twelvedata'):
+            print("Or build the shared set every one-price broker reads, "
+                  "into the market\nfolder: python scripts/spread_profile.py")
         return 2
 
     logger = getLogger()

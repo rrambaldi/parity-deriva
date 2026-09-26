@@ -254,11 +254,20 @@ class MT5(object):
 		Broker clock minus UTC, as a timedelta.
 
 		Read off the newest tick while the market is open and kept: brokers
-		move by an hour at DST, which a restart picks up. With the market shut
-		the tick is stale, so MT5_SERVER_UTC_OFFSET (hours) answers instead.
+		move by an hour at DST, which a restart picks up. The tick is believed
+		only within that hour of the configured offset - the terminal entry's
+		'utc_offset', else MT5_SERVER_UTC_OFFSET - because with the market
+		shut it is hours old, and a Friday tick read on Saturday morning
+		rounds to an "offset" of -13.5 hours two times in three. Then the
+		configured offset answers, and is not kept.
 		"""
 		if self.offset is not None:
 			return self.offset
+		hours = self.entry.get('utc_offset')
+		source = "the terminal's utc_offset"
+		if hours is None:
+			hours, source = _setting(self.setup, 'MT5_SERVER_UTC_OFFSET', 0) or 0, 'MT5_SERVER_UTC_OFFSET'
+		hours = float(hours)
 		tick, _ = self.call('symbol_info_tick', symbol)
 		now = datetime.datetime.now(datetime.timezone.utc).timestamp()
 		if tick and tick.get('time'):
@@ -266,13 +275,12 @@ class MT5(object):
 			# a live tick is at most seconds old; the offset is whole
 			# half-hours, so rounding to those removes the tick's own age
 			half_hours = round(delta / 1800.0)
-			if abs(half_hours) <= 28 and abs(delta - half_hours * 1800) < 600:
+			if abs(half_hours / 2.0 - hours) <= 1 and abs(delta - half_hours * 1800) < 600:
 				self.offset = datetime.timedelta(minutes=30 * half_hours)
 				self.logger.info("MT5 server clock is UTC%+.1fh" % (half_hours / 2.0))
 				return self.offset
-		hours = float(_setting(self.setup, 'MT5_SERVER_UTC_OFFSET', 0) or 0)
 		self.logger.warning("MT5 market looks closed; server offset from "
-							"MT5_SERVER_UTC_OFFSET = %s h" % hours)
+							"%s = %s h" % (source, hours))
 		return datetime.timedelta(hours=hours)
 
 	def toUTC(self, seconds, symbol):

@@ -403,9 +403,12 @@ MT5_TERMINAL = 'C:\\Program Files\\MetaTrader 5\\terminal64.exe'
 # 'suffix' is what that broker adds to every symbol (OANDA TMS: EURUSD.pro).
 MT5_TERMINALS = [
     {'credentials': MT5_CREDENTIALS, 'bridge': MT5_BRIDGE, 'terminal': MT5_TERMINAL},
-    # OANDA TMS (EU): MT5 only, no v20 REST API
+    # OANDA TMS (EU): MT5 only, no v20 REST API. Its clock is UTC+2 in
+    # summer, not MetaQuotes' +3: Friday's last EURUSD tick is at 22:59
+    # server time and FX shuts at 21:00 UTC (measured 2026-09-26).
     {'credentials': '/home/rrambaldi/oanda-mt5.txt', 'bridge': '127.0.0.1:18813',
-     'terminal': 'C:\\MT5\\oanda\\terminal64.exe', 'portable': True, 'suffix': '.pro'},
+     'terminal': 'C:\\MT5\\oanda\\terminal64.exe', 'portable': True, 'suffix': '.pro',
+     'utc_offset': 2},
 ]
 # The login a process trades on; web/livesessions sets it per session.
 MT5_ACCOUNT = dotenv('MT5_ACCOUNT', '')
@@ -413,7 +416,8 @@ MT5_ACCOUNT = dotenv('MT5_ACCOUNT', '')
 # anything but a demo while this is False: True on a real money server only.
 MT5_ALLOW_REAL = ACCOUNTS == 'real'
 # The broker's clock minus UTC, in hours, used only while the market is shut:
-# with it open the offset is read off the newest tick.
+# with it open the offset is read off the newest tick. A terminal's own
+# 'utc_offset' (MT5_TERMINALS) wins over this one.
 MT5_SERVER_UTC_OFFSET = 3
 # Marks this stack's orders on the account, and slippage allowed on a market
 # order, in points.

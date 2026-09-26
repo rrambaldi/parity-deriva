@@ -6,7 +6,8 @@ data/transaction.py. What IB gives and what it does not:
 
 * **one price series per bar.** The history route serves a single OHLC, the
   way eToro does, so AG01's ask-high and bid-low do not exist in it. IB_SPREAD
-  is the same model under the same rule: unset it stays off, candles carry mid
+  (or the shared spread.json) is the same model under the same rule: unset
+  it stays off, candles carry mid
   only, the provider declines bid_ask_candles, and a strategy that needs them
   refuses to start. See lib/spread.py.
 * **history by date.** A start time and a duration, so an offline run can
@@ -120,7 +121,8 @@ class IBCandles(StreamHandler):
 
 		if not self.spread.enabled():
 			self.logger.warning(
-				"IB_SPREAD is not set: bars will carry mid only, and any "
+				"IB_SPREAD is not set and the market folder has no spread.json "
+				"(scripts/spread_profile.py): bars will carry mid only, and any "
 				"strategy reading candle.ask or candle.bid will fail. See "
 				"lib/spread.py.")
 
@@ -210,7 +212,7 @@ class IBCandles(StreamHandler):
 			'complete': True,
 			'mid': ohlc,
 		}
-		bid, ask = self.spread.apply(pair, ohlc)
+		bid, ask = self.spread.apply(pair, ohlc, payload['time'], self.period)
 		if bid is not None:
 			payload['bid'] = bid
 			payload['ask'] = ask
