@@ -69,13 +69,14 @@
       <button type="button" data-range="all">all</button>
     </span>
     <button type="button" id="chart-fit" data-icon="expand" hidden>fit prices</button>
-    <span id="chart-keys" class="hint" title="wheel: zoom · drag: pan · drag an axis: stretch it · double click the prices: fit them · shift + drag: measure · ctrl + drag: zoom onto a box · shift + ← →: pan · + −: zoom · home, end: either end · f: fit the prices · esc: let go">gestures</span>
+    <span id="chart-keys" class="hint" title="wheel: zoom · drag: pan · drag an axis: stretch it · double click the prices: fit them · shift + drag: measure · ctrl + drag: zoom onto a box · shift + ← →: pan · + −: zoom · home, end: either end · f: fit the prices · esc: let go · the grip under the chart: its height">gestures</span>
     <span id="chart-hover" class="hint"></span>
   </div>
   <div class="chart-stack">
     <canvas id="live-chart" height="380"></canvas>
     <canvas id="live-over" class="over" aria-hidden="true"></canvas>
   </div>
+  <div id="live-grip" class="grip" tabindex="0" role="separator" aria-orientation="horizontal" aria-label="chart height" title="drag to make the chart taller or shorter · ↑ ↓ too · double click: back to its own height"></div>
   <canvas id="live-skew" height="120"></canvas>
 </section>
 

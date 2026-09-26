@@ -67,6 +67,38 @@ function axisTag(context, pal, text, x, y, side, fill) {
   context.fillText(text, left + w / 2, top + h / 2 + 0.5);
 }
 
+// The grip under a candle chart: dragged, or its arrows pressed, the chart
+// gets taller or shorter, and a double click gives it back its own height.
+// Kept per page in this browser only - a convenience, so a storage that is
+// not there only means the chart's own height. Returns the height to start
+// at; apply(height) is called on every change after that.
+function chartGrip(grip, fallback, apply) {
+  const key = 'chart-height:' + location.pathname;
+  let height = fallback;
+  try { height = Number(localStorage.getItem(key)) || fallback; } catch (error) { /* the default */ }
+  const set = (h) => {
+    height = Math.round(Math.max(200, Math.min(1400, h)));
+    grip.ariaValueNow = String(height);
+    apply(height);
+  };
+  const keep = () => { try { localStorage.setItem(key, String(height)); } catch (error) { /* not kept */ } };
+  let drag = null;
+  grip.addEventListener('mousedown', (event) => { event.preventDefault(); drag = { y: event.clientY, h: height }; });
+  window.addEventListener('mousemove', (event) => { if (drag) set(drag.h + event.clientY - drag.y); });
+  window.addEventListener('mouseup', () => { if (drag) { drag = null; keep(); } });
+  grip.addEventListener('dblclick', () => { set(fallback); keep(); });
+  grip.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    // and not the page's: on the run page the arrows walk the trades
+    event.preventDefault();
+    event.stopPropagation();
+    set(height + (event.key === 'ArrowDown' ? 40 : -40));
+    keep();
+  });
+  grip.ariaValueNow = String(height);
+  return height;
+}
+
 // The chart's keys, the same on both pages. Shift and the arrows pan: the
 // arrows on their own already walk the runs and the trades on the run page.
 // Nothing is taken while a field has the focus or a dialog is open.
@@ -89,11 +121,15 @@ function chartKey(event) {
 // and the time
 function measured(a, b, pip, bars, timeframe) {
   const move = b.price - a.price, sign = move < 0 ? '-' : '+';
-  const minutes = Math.round(Math.abs(b.ms - a.ms) / 60000);
-  const time = [[Math.floor(minutes / 1440), 'd'], [Math.floor(minutes % 1440 / 60), 'h'], [minutes % 60, 'm']]
-    .filter(([n]) => n).map(([n, unit]) => n + unit).join(' ') || '0m';
   return `${sign}${Math.abs(move / pip).toFixed(1)} pips · ${sign}${Math.abs(move / a.price * 100).toFixed(2)}%`
-    + ` · ${bars} ${timeframe ? timeframe + ' ' : ''}bars · ${time}`;
+    + ` · ${bars} ${timeframe ? timeframe + ' ' : ''}bars · ${lasted(b.ms - a.ms)}`;
+}
+
+// a stretch of time in days, hours and minutes: '6d 14h 15m'
+function lasted(ms) {
+  const minutes = Math.round(Math.abs(ms) / 60000);
+  return [[Math.floor(minutes / 1440), 'd'], [Math.floor(minutes % 1440 / 60), 'h'], [minutes % 60, 'm']]
+    .filter(([n]) => n).map(([n, unit]) => n + unit).join(' ') || '0m';
 }
 
 /*

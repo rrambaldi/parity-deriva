@@ -78,6 +78,9 @@
       <li>ctrl (cmd on a Mac) and a drag draws a box, and the chart zooms onto its bars and its prices</li>
       <li>keys: shift + ← → pan, + and − zoom, home and end go to either end of the run, f fits the prices, esc shows the whole range; ← → on their own still walk the runs of a set, ↑ ↓ the trades</li>
       <li>1D 1W 1M 3M show that much time, ending where the chart does</li>
+      <li>under the chart: how many high and medium calendar events of the run's currencies are on show, and "calendar events" draws them - solid for high, dashed for medium - and names a bar's events in the readout when hovered</li>
+      <li>and under that the selected trade's card: its number and id, side, outcome, P&amp;L and pips, then entry, exit, stop and target in the colours of their marks - the chart fits the candles, so a stop or a target outside them is only here, marked off the chart - and the calendar's events while it was open</li>
+      <li>the grip right under the chart makes it taller or shorter: drag it, or focus it and press ↑ ↓; a double click gives the chart back its own height, and this browser remembers the one chosen</li>
       <li>the strip under the chart is the whole run's capital with the stretch on show boxed: drag the box to move, its edges to widen or narrow it, press anywhere else to go there</li>
       <li>the selected trade gets an arrow from its entry to its exit, coloured by what it made, and a box around the candles its entry rule read</li>
       <li>support and resistance are bands, not lines: the width is what decides that two swings are one level and that a bar touched it, and each is drawn from the bar that confirmed it and never from the swing itself</li>
@@ -140,13 +143,6 @@
     than from a copy kept here - see web/service.py.
   -->
   <p id="chart-about" hidden></p>
-  <!--
-    The selected trade, spelled out: the same figures as its row in the table
-    below, over the chart they are drawn on. It has its own line rather than
-    sharing the header's readout because that one follows the cursor - a
-    trade's numbers would be wiped by the first bar hovered after it.
-  -->
-  <p id="chart-trade" hidden></p>
   <!-- the chart, and over it the layer the crosshair, a measure and a zoom
        box are drawn on (drawOver in app.js); under it the whole run, with
        the stretch on show boxed, to drag (drawNav) -->
@@ -154,7 +150,23 @@
     <canvas id="chart" height="420"></canvas>
     <canvas id="chart-over" class="over" aria-hidden="true"></canvas>
   </div>
+  <div id="chart-grip" class="grip" tabindex="0" role="separator" aria-orientation="horizontal" aria-label="chart height" title="drag to make the chart taller or shorter · ↑ ↓ too · double click: back to its own height"></div>
   <canvas id="chart-nav" height="44" hidden></canvas>
+  <!--
+    Under the chart. The calendar's events: how many, on show and in the run,
+    and a button that draws them on the chart (loadEvents in app.js). Then the
+    selected trade's card: its row of the table and what the row has no room
+    for, stop and target included (tradeCard). Its own place rather than the
+    header's readout, because that one follows the cursor - a trade's numbers
+    would be wiped by the first bar hovered.
+  -->
+  <div id="chart-under">
+    <div id="events-line">
+      <button type="button" id="events" aria-pressed="false" data-icon="list" disabled>calendar events</button>
+      <span id="events-note"></span>
+    </div>
+    <div id="chart-trade" hidden></div>
+  </div>
 
   <!--
     The curves that are not on the price axis, on the same bars as the chart
@@ -245,6 +257,52 @@
       <span id="equity-note"></span>
     </summary>
     <canvas id="equity" height="200"></canvas>
+  </details>
+</section>
+
+<!--
+  How far under its best the capital went, close by close, in per cent of
+  that best (drawDrawdown in app.js). Closed until asked for.
+-->
+<section id="drawdown-panel" hidden>
+  <details id="drawdown-box">
+    <summary id="drawdown-head">
+      <span id="drawdown-title" class="panel-title">drawdown</span>
+      <span id="drawdown-note"></span>
+    </summary>
+    <canvas id="drawdown" height="160"></canvas>
+  </details>
+</section>
+
+<!--
+  The closed trades laid out by when they were entered or exited: the days of
+  the week against the hours, the months against the days, or the years
+  against the months, a cell reading their win rate, their P&L or their OK
+  and KO counts (drawHeat in app.js). Times are UTC. Closed until asked for.
+-->
+<section id="heat-panel" hidden>
+  <details id="heat-box">
+    <summary id="heat-head">
+      <span id="heat-title" class="panel-title">heatmap</span>
+      <span id="heat-note"></span>
+    </summary>
+    <div id="heat-controls">
+      <label>by <select id="heat-layout">
+        <option value="week">week: day × hour</option>
+        <option value="month">month: month × day</option>
+        <option value="year">year: year × month</option>
+      </select></label>
+      <label>cell <select id="heat-cell">
+        <option value="win">win rate</option>
+        <option value="pl">P&amp;L</option>
+        <option value="okko">OK and KO</option>
+      </select></label>
+      <label>time <select id="heat-when">
+        <option value="entry">entry</option>
+        <option value="exit">exit</option>
+      </select></label>
+    </div>
+    <div id="heat-wrap"><table id="heat"></table></div>
   </details>
 </section>
 

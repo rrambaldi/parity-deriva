@@ -25,7 +25,7 @@ body {
 
 /* the figures: prices, times, amounts, IDs, code - in the mono, whose
    digits line up in a column whatever they are */
-td.num, pre, code, #chart-trade, #live-clock, #data-dir,
+td.num, pre, code, #live-clock, #data-dir,
 input[type="number"], input[type="date"], .event {
   font-family: var(--font-mono);
 }
@@ -298,7 +298,7 @@ section {
    them is the same chart with another axis. */
 #curve-panel, #levels-panel { margin: 4px 0 0; padding: 0; border: 0; border-radius: 0; background: none; }
 
-#chart-tools, #equity-head, #levels-head, #curve-head, #report-head {
+#chart-tools, #equity-head, #drawdown-head, #heat-head, #levels-head, #curve-head, #report-head {
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -320,8 +320,8 @@ section {
 /* the disclosure triangle: a <summary> laid out as flex loses the marker the
    browser would draw, so it is drawn again - with borders, since the font has
    no triangle of its own */
-#equity-head, #levels-head, #curve-head, #report-head { cursor: pointer; list-style: none; }
-#equity-head::before, #levels-head::before, #curve-head::before, #report-head::before {
+#equity-head, #drawdown-head, #heat-head, #levels-head, #curve-head, #report-head { cursor: pointer; list-style: none; }
+#equity-head::before, #drawdown-head::before, #heat-head::before, #levels-head::before, #curve-head::before, #report-head::before {
   content: "";
   border-left: 4px solid transparent;
   border-right: 4px solid transparent;
@@ -329,28 +329,37 @@ section {
   color: var(--text-3);
 }
 #equity-box:not([open]) #equity-head::before,
+#drawdown-box:not([open]) #drawdown-head::before,
+#heat-box:not([open]) #heat-head::before,
 #curve-box:not([open]) #curve-head::before,
 #levels-box:not([open]) #levels-head::before,
 #report-box:not([open]) #report-head::before { transform: rotate(-90deg); }
 #equity-head::-webkit-details-marker,
+#drawdown-head::-webkit-details-marker,
+#heat-head::-webkit-details-marker,
 #curve-head::-webkit-details-marker,
 #levels-head::-webkit-details-marker,
 #report-head::-webkit-details-marker { display: none; }
-#chart-title, #equity-title, #levels-title, #curve-title, #report-title { color: var(--text); }
+#chart-title, #equity-title, #drawdown-title, #heat-title, #levels-title, #curve-title, #report-title { color: var(--text); }
 /* the curve is not hovered but it is clicked: a click on it goes to the trade
    that made that step */
 #equity { cursor: pointer; }
-#equity-note, #levels-note, #curve-note { color: var(--text-3); font-size: var(--fs-small); }
+#equity-note, #drawdown-note, #heat-note, #levels-note, #curve-note { color: var(--text-3); font-size: var(--fs-small); }
+/* the heatmap (drawHeat in app.js): a cell per stretch of the week, of the
+   month or of the year, its colour mixed from the gain and loss tokens */
+#heat-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; margin-bottom: 10px; }
+#heat-wrap { overflow-x: auto; }
+#heat { border-collapse: separate; border-spacing: 2px; font-family: var(--font-mono); font-size: var(--fs-label); }
+#heat th { padding: 0 6px; color: var(--text-3); font-weight: normal; text-align: center; white-space: nowrap; }
+#heat tbody th { text-align: right; }
+#heat td { min-width: 46px; height: 22px; padding: 0 4px; text-align: center; white-space: nowrap;
+  color: var(--text); background: var(--bg); border-radius: 3px; cursor: default; }
+#heat td .heat-bar { display: block; height: 5px; margin: 2px 0; border-radius: 2px; }
+#heat td .heat-bar.ok { background: var(--up); }
+#heat td .heat-bar.ko { background: var(--down); }
 /* nothing to hover on either of the two panels below the chart */
 #levels-chart, #curve-chart { cursor: default; }
 #chart-zoom { color: var(--entry); }
-/* the selected trade's figures, over the chart. Monospace and wrapping,
-   because it is a table row written as a line */
-#chart-trade {
-  margin: 0 0 6px;
-  font-size: var(--fs-small);
-  color: var(--text);
-}
 /* the buttons sit together at the right end; only the first one needs the
    push, and 'reset' is display:none while it is hidden rather than a gap */
 #chart-tools button:first-of-type { margin-left: auto; }
@@ -481,6 +490,41 @@ canvas {
    box on: over the chart, its size, letting the pointer through to it */
 .chart-stack { position: relative; }
 .chart-stack canvas.over { position: absolute; inset: 0; pointer-events: none; background: transparent; border-color: transparent; }
+/* the grip under a candle chart that makes it taller or shorter (chartGrip in menu.js) */
+.grip { height: 14px; display: flex; align-items: center; justify-content: center; cursor: row-resize;
+  background: var(--raised); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--radius-s) var(--radius-s); }
+.grip::before { content: ''; width: 64px; height: 4px; border-radius: 2px; background: var(--text-3); }
+.grip:hover, .grip:focus-visible { background: var(--line); }
+.grip:hover::before, .grip:focus-visible::before { background: var(--text-2); }
+/* under the run chart: the calendar's events and the selected trade (app.js) */
+#chart-under { margin-top: 8px; }
+#events-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-bottom: 6px; }
+#events-note { color: var(--text-3); font-size: var(--fs-small); }
+/* the selected trade's card (tradeCard in app.js): its figures under their
+   names, in the colours of their marks on the chart - entry, exit, stop,
+   target - and of the table's side, outcome and P&L. Every colour comes with
+   its word, as everywhere on this page */
+#chart-trade { display: grid; gap: 10px; margin: 0 0 6px; padding: 10px 14px; background: var(--raised);
+  border: 1px solid var(--line); border-left: 3px solid var(--entry); border-radius: var(--radius-s); }
+#chart-trade[hidden] { display: none; }
+.trade-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.trade-n { font-size: var(--fs-title); font-weight: 600; color: var(--text); }
+.trade-head .pl { font-family: var(--font-mono); font-weight: 600; }
+.trade-held { color: var(--text-2); font-size: var(--fs-small); }
+.trade-id { font-family: var(--font-mono); font-size: var(--fs-small); color: var(--text-3); overflow-wrap: anywhere; }
+.trade-facts { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0; }
+.fact { display: grid; gap: 2px; }
+.fact dt, .trade-label { color: var(--text-3); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: .04em; }
+.fact dd { margin: 0; font-family: var(--font-mono); font-size: var(--fs-small); color: var(--text); }
+.fact.entry dd { color: var(--entry); }
+.fact.exit dd { color: var(--mark-exit); }
+.fact.sl dd { color: var(--down); }
+.fact.tp dd { color: var(--up); }
+.trade-events { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: var(--fs-small); color: var(--text-2); }
+.trade-events .event::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 6px;
+  border-radius: 50%; background: var(--text-3); }
+.trade-events .event.high::before { background: var(--down); }
+.trade-quiet { color: var(--text-3); }
 /* the whole run under the chart (drawNav in app.js) */
 #chart-nav { margin-top: 4px; cursor: pointer; }
 #chart-nav[hidden], #ranges[hidden] { display: none; }

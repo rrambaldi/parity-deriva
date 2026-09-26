@@ -29,7 +29,6 @@ const ZOOM_STEP = 1.25;    // bars gained or lost per notch of the wheel
 const PAN_SLOP = 4;        // pixels of drag that stop counting as a click
 const AXIS_DRAG = 150;     // pixels of drag on an axis that stretch it e-fold
 const BOX_MIN = 8;         // pixels a zoom box needs either way to count
-const CHART_H = 380;       // the chart's height, which the layer over it shares
 const PADDING_BARS = 12;   // bars kept either side of a zoomed trade
 const AXIS = { left: 66, right: 14, top: 12, bottom: 26 };
 // the strip shares the chart's margins: a bar of one sits over the same bar
@@ -58,6 +57,7 @@ const state = {
   view: null,       // {from, to} indices into bars, or null for all of them
   scale: null,      // {high, low} once the prices are stretched by hand, or null to fit the bars
   range: null,      // the prices last drawn: where a stretch or a pan starts from
+  height: 380,      // the chart's, which the layer over it shares: the grip under it sets it
   pointer: null,    // {x, y} in the chart's own pixels while the pointer is over the plot
   measure: null,    // {a, b}, each {ms, price}, while a shift-drag measure is on show
   hover: null,      // bar index under the pointer
@@ -181,8 +181,8 @@ function zoomToTrade(signal) {
 
 function draw() {
   const pal = palette();
-  const { width, height } = fit(chart, ctx, CHART_H);
-  fit(over, octx, CHART_H);
+  const { width, height } = fit(chart, ctx, state.height);
+  fit(over, octx, state.height);
   ctx.clearRect(0, 0, width, height);
   if (!state.bars.length) {
     fit(strip, sctx, 120);   // sizing it clears it
@@ -220,7 +220,7 @@ function draw() {
 // the plot as draw() last laid it out, for the pointer's side of things
 function plot() {
   const view = visible(), r = state.range;
-  const plotW = chart.clientWidth - AXIS.left - AXIS.right, plotH = CHART_H - AXIS.top - AXIS.bottom;
+  const plotW = chart.clientWidth - AXIS.left - AXIS.right, plotH = state.height - AXIS.top - AXIS.bottom;
   const step = plotW / (view.to - view.from + 1);
   return { view, r, plotW, plotH, step,
            y: (v) => AXIS.top + (r.high - v) / (r.high - r.low) * plotH,
@@ -232,7 +232,7 @@ function plot() {
 function local(event) {
   const rect = chart.getBoundingClientRect();
   return { x: event.clientX - rect.left - chart.clientLeft,
-           y: (event.clientY - rect.top - chart.clientTop) * CHART_H / chart.clientHeight };
+           y: (event.clientY - rect.top - chart.clientTop) * state.height / chart.clientHeight };
 }
 
 // the bar and the price under the pointer, kept by time and by price
@@ -249,7 +249,7 @@ function measureOf(m) {
 // The layer over the chart: the level under the pointer with its price and
 // time tagged on the axes (the upright is hairline()'s), a measure, a zoom box
 function drawOver() {
-  octx.clearRect(0, 0, chart.clientWidth, CHART_H);
+  octx.clearRect(0, 0, chart.clientWidth, state.height);
   if (!state.bars.length || !state.range) return;
   const pal = palette(), g = plot();
   const xAt = (ms) => AXIS.left + ((barAt(ms) ?? -1) - g.view.from + 0.5) * g.step;
@@ -297,7 +297,7 @@ function drawOver() {
     const i = Math.max(g.view.from, Math.min(g.view.to, Math.floor(g.indexAt(at.x))));
     axisTag(octx, pal, price(g.priceAt(at.y)), AXIS.left - 2, at.y, 'left');
     axisTag(octx, pal, stamp(state.bars[i], true), AXIS.left + (i - g.view.from + 0.5) * g.step,
-            CHART_H - AXIS.bottom + 3, 'bottom');
+            state.height - AXIS.bottom + 3, 'bottom');
   }
   if (m) axisTag(octx, pal, measureOf(m), xAt(m.b.ms) + 10, g.y(m.b.price) + 8, 'at', colour);
 }
@@ -769,6 +769,9 @@ document.addEventListener('keydown', (event) => {
   if (key === 'end') { follows.checked = true; return zoomTo(count - span, span); }
   if (key === 'fit') setScale(null);
 });
+
+// taller or shorter, from the grip under the chart (chartGrip in menu.js)
+state.height = chartGrip($('live-grip'), 380, (height) => { state.height = height; draw(); });
 
 // the last hour, four, a day, or everything, following
 const RANGES = { '1h': 36e5, '4h': 4 * 36e5, '1D': 864e5 };

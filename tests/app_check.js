@@ -176,8 +176,10 @@ assert.strictEqual(click(544), 1, 'and one on the second entry selects that');
  * it is. It used to scroll the table's row into view, which took the chart
  * that had just zoomed onto the trade off the screen.
  */
-const line = run('$("chart-trade").textContent');
-assert.ok(line.includes('#2') && line.includes('target') && line.includes('stop')
+// Was: the line's text. Now a card built of nodes this sandbox does not keep,
+// so what it says is read off tradeCard(), which it is drawn from
+const line = run('JSON.stringify(tradeCard(state.data.trades[state.selected]))');
+assert.ok(line.includes('#2') && line.includes('"target"') && line.includes('"stop"')
           && line.includes('P&L'),
   'the chart carries what the table row carries');
 assert.strictEqual(run('$("chart-trade").hidden'), false);
@@ -489,6 +491,67 @@ assert.strictEqual(shown(), '[69,99]', 'a range ends where the chart does');
 run('state.quoted = 5;');
 assert.strictEqual(run(`measureOf({ a: { ms: 0, price: 1 }, b: { ms: 10 * 864e5, price: 1.001 } })`),
   '+10.0 pips · +0.10% · 10 bars · 10d', 'a measure in pips, percent, bars and time');
+
+/*
+ * Under the chart: the calendar's events counted and named, and the selected
+ * trade's second line (tradeMore) - its id, the bars it was held, the pips it
+ * moved (a short from 1.1000 to 1.0990 is ten up) and the events while it
+ * was open. Ten hourly bars, a release at 3:30 and one after the trade.
+ */
+run(series(Array.from({ length: 10 }, (_, i) => `[${i * 36e5},1,2,0,1,1,2,0,1]`), `[{ n: 1,
+  key: 'S 1:EUR_USD:H1:1', direction: 'short', units: 1, signalTime: 36e5, entryTime: 72e5,
+  entryPrice: 1.1, exitTime: 18e6, exitPrice: 1.099, entryIndex: 2, exitIndex: 5, signalIndex: 1,
+  orderPrice: 1.1, stopLoss: 1.11, stopFinal: null, takeProfit: 1.09,
+  outcome: 'TAKE_PROFIT_ORDER', pl: 1, balance: 1001 }]`));
+run(`state.quoted = 5; state.data.granularity = 'H1'; state.events = [
+  [126e5, 'USD', 'high', 'Payrolls', 256, 180, 150, 'K'], [324e5, 'EUR', 'medium', 'Later', null, null, null, null]];`);
+run('draw()');   // the range the card measures "off the chart" against: 0..2 padded
+const card = JSON.parse(JSON.stringify(run('tradeCard(state.data.trades[0])')));
+const said = JSON.stringify(card);
+assert.ok(said.includes('"S 1:EUR_USD:H1:1"') && said.includes('3 bars · 3h') && said.includes('+10.0 pips')
+  && said.includes('USD high Payrolls 256K (forecast 180K)') && !said.includes('Later'),
+  'the trade\'s id, bars, pips and only the events while it was open: ' + said);
+assert.deepStrictEqual(card.head.slice(1, 3), [['short', 'side short'], ['target', 'outcome tp']],
+  'its side and its outcome in the table\'s colours');
+assert.deepStrictEqual(card.facts.find((f) => f[0] === 'target'), ['target', '1.09000', 'tp'],
+  'a target inside the chart is only its price, in the target\'s colour');
+run('state.data.trades[0].takeProfit = 5; draw();');
+assert.strictEqual(JSON.parse(JSON.stringify(run('tradeCard(state.data.trades[0])'))).facts
+  .find((f) => f[0] === 'target')[1], '5.00000 · off the chart',
+  'and one above the candles is said to be off the chart, which fits the candles');
+run('state.data.trades[0].takeProfit = 1.09;');
+
+/*
+ * The drawdown (drawdowns) and the heatmap's cells (heatCells). A capital of
+ * 100, 110, 99, 105, 111: the worst is 99 under 110, -10%, from the second
+ * close to the third, and the fifth is the one back over 110.
+ */
+const dd = JSON.parse(JSON.stringify(run('drawdowns([[0, 100], [3, 110], [5, 99], [7, 105], [9, 111]])')));
+assert.strictEqual(dd.points.map((q) => +q[1].toFixed(2)).join(), '0,0,-10,-4.55,0',
+  'each close in per cent under the best so far');
+assert.deepStrictEqual([dd.worst.from, dd.worst.at, dd.worst.back], [1, 2, 4],
+  'the worst: from its best, at its bottom, back over it');
+assert.strictEqual(run('drawdowns([[0, 100], [1, 90]]).worst.back'), null, 'and none back is said to be none');
+
+// Monday 21 September 2026 09:15 and 09:40, Tuesday 10:00, and one still open
+const HEAT_TRADES = `[
+  { entryTime: Date.UTC(2026, 8, 21, 9, 15), exitTime: Date.UTC(2026, 8, 21, 11), pl: 5 },
+  { entryTime: Date.UTC(2026, 8, 21, 9, 40), exitTime: Date.UTC(2026, 8, 22, 1), pl: -2 },
+  { entryTime: Date.UTC(2026, 8, 22, 10), exitTime: Date.UTC(2026, 8, 22, 12), pl: 1 },
+  { entryTime: Date.UTC(2026, 8, 22, 10), exitTime: null, pl: null }]`;
+const heat = (layout, when) => JSON.parse(JSON.stringify(run(`heatCells(${HEAT_TRADES}, '${layout}', '${when}')`)));
+const week = heat('week', 'entry');
+assert.deepStrictEqual([week.trades, week.xs.length, week.ys.length], [3, 7, 24], 'the closed trades, a week of hours');
+assert.deepStrictEqual(week.cells[0][9], { n: 2, ok: 1, ko: 1, pl: 3 }, 'Monday 09:00 holds both of its entries');
+assert.deepStrictEqual(week.cells[1][10], { n: 1, ok: 1, ko: 0, pl: 1 }, 'Tuesday 10:00 the third');
+assert.strictEqual(heat('week', 'exit').cells[1][1].n, 1, 'by exit, the loser is Tuesday 01:00');
+assert.strictEqual(heat('month', 'entry').cells[8][20].n, 2, 'September the 21st');
+const year = heat('year', 'entry');
+assert.deepStrictEqual([year.xs, year.cells[0][8].n], [['2026'], 3], 'the years there are, against their months');
+assert.strictEqual(JSON.stringify(run('eventsOfBar(3).map((e) => e[3])')), '["Payrolls"]',
+  'the release at 3:30 is in the bar of 3:00');
+run('draw()');
+assert.strictEqual(run('$("events-note").textContent'), '2 on show · 2 in the run (1 high, 1 medium)');
 
 /*
  * How a trade ended. A closed trade must never be reported as running: the

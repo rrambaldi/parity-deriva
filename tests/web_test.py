@@ -1213,6 +1213,25 @@ class CalendarServiceTest(StoreCase):
         self.assertEqual(again['added'], 1)
         self.assertEqual(again['events'], 3)
 
+    def test_the_events_of_a_run_for_its_chart(self):
+        """
+        What the run page draws: the instrument's currencies only, high and
+        medium only, with their outcome - a run is looked back at.
+        """
+        self.service.importCalendar(self.CSV
+            + "2015-01-09 14:00:00,EUR,medium,German Trade Balance\n"
+            + "2015-01-09 14:30:00,JPY,high,Not for EUR_USD\n")
+        got = self.service.calendarEvents('EUR_USD', datetime.datetime(2015, 1, 9),
+                                          datetime.datetime(2015, 1, 10))['events']
+        self.assertEqual([(e[1], e[2], e[3]) for e in got],
+                         [('USD', 'high', 'Non-Farm Employment Change'),
+                          ('EUR', 'medium', 'German Trade Balance')])
+        self.assertEqual(got[0][0], millis(datetime.datetime(2015, 1, 9, 13, 30)))
+        self.assertEqual(self.service.calendarEvents('EUR_USD', datetime.datetime(2015, 2, 1),
+                                                     datetime.datetime(2015, 3, 1))['events'], [])
+        with self.assertRaises(ServiceError):
+            self.service.calendarEvents('EUR_USD', None, datetime.datetime(2015, 3, 1))
+
     def test_a_file_that_is_not_a_calendar_says_what_one_is(self):
         with self.assertRaises(ServiceError) as caught:
             self.service.importCalendar("a,b\n1,2\n")

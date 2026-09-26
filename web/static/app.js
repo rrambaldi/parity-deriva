@@ -26,7 +26,6 @@ const PAN_SLOP = 4;        // pixels of drag that stop counting as a click
 const AXIS_DRAG = 150;     // pixels of drag on an axis that stretch it e-fold
 const BOX_MIN = 8;         // pixels a zoom box needs either way to count
 const NAV_EDGE = 6;        // pixels either side of the navigator's box that take its edge
-const CHART_H = 420;       // the price chart's height, which the layer over it shares
 const AXIS = { left: 66, right: 14, top: 12, bottom: 26 };
 // the service's own ceiling on a window (web/service.py MAX_CANDLES): asking
 // for more is refused, so the ladder does not ask
@@ -37,7 +36,10 @@ const state = {
   view: null,        // {from, to} indices into data.candles, or null for all
   scale: null,       // {high, low} once the prices are stretched by hand, or null to fit the bars
   range: null,       // the prices last drawn: where a stretch or a pan starts from
+  height: 420,       // the price chart's, which the layer over it shares: the grip under it sets it
   pointer: null,     // {x, y} in the chart's own pixels while the pointer is over the plot
+  events: null,      // the run's calendar events once they are in (loadEvents), [ms, currency, impact, title, actual, forecast, previous, unit]
+  showEvents: false, // drawn on the chart: the button under it
   measure: null,     // {a, b}, each {ms, price}, while a shift-drag measure is on show
   want: null,        // [fromMs, toMs] for tune() to fit exactly, from showTimes()
   asked: 0,          // retune()s so far: a series that comes back after a newer one was asked is dropped
@@ -390,16 +392,6 @@ function visible() {
   return { candles: candles.slice(from, to + 1), from, to };
 }
 
-function levels(trade) {
-  // The prices a selected trade puts on the chart. They join the price range
-  // so that a stop just outside the window's own high/low is still drawn -
-  // a level you cannot see is a level you cannot check.
-  if (!trade) return [];
-  return [trade.entryPrice, trade.exitPrice, trade.stopLoss, trade.takeProfit,
-          trade.stopFinal]
-    .filter((v) => v !== null && v !== undefined);
-}
-
 /*
  * RG2 - the slope shading.
  *
@@ -536,7 +528,7 @@ function fitCanvas(cv, context, height) {
 }
 
 function resize() {
-  return fitCanvas(canvas, ctx, CHART_H);
+  return fitCanvas(canvas, ctx, state.height);
 }
 
 function draw() {
@@ -546,16 +538,16 @@ function draw() {
   ctx.clearRect(0, 0, width, height);
   $('ranges').hidden = !(state.data && state.data.candles.length);
   drawNav();
-  if (!state.data || !state.data.candles.length) return;
+  if (!state.data || !state.data.candles.length) { renderTrade(); return; }
 
   const view = visible();
   const trade = state.selected === null ? null : state.data.trades[state.selected];
   const zoomed = state.view !== null;
-  // the selected trade's own levels join the range whether or not the chart
-  // is zoomed. They used to join it only when it was, so a target outside the
-  // whole run's high and low - which is every target that was never reached -
-  // was drawn off the canvas and read as a target the page had not drawn
-  const range = state.scale || scales(view, levels(trade));
+  // The candles first: a selected trade's stop and target used to join the
+  // range, and a stop far from its entry flattened the bars it was about into
+  // a line. They are read in the card under the chart now, which says when one
+  // is off the chart (tradeCard).
+  const range = state.scale || scales(view, []);
   state.range = range;
 
   const plotW = width - AXIS.left - AXIS.right;
@@ -577,6 +569,7 @@ function draw() {
   ctx.rect(AXIS.left, AXIS.top, plotW, plotH);
   ctx.clip();
   shade(view, plotH, step, p);
+  if (state.showEvents) drawEvents(view, x, plotH, p);
   curves(view, x, y, p);
   if (state.levels) supports(view, x, y, plotW, n, range, p);
 
@@ -601,16 +594,199 @@ function draw() {
   ctx.restore();
   times(view, x, height, n, step, p);
   drawOver();
+  renderEvents();
+  // after the range: the card says which levels it leaves out
+  renderTrade();
   // the capital below boxes the same stretch
   drawEquity();
 }
 
+/* ------------------------------------------------- the calendar's events */
+
+/*
+ * The calendar's high and medium events for the run's currencies, asked once
+ * a run is on show (web/service.py calendarEvents). Counted under the chart
+ * for the stretch on show; drawn on it, as uprights behind the candles, when
+ * the button there is pressed; read out with a bar's prices on hover.
+ */
+async function loadEvents() {
+  const data = state.data;
+  state.events = null;
+  renderEvents();
+  if (!data || !data.candles.length) return;
+  const run = data.candles;
+  const query = new URLSearchParams({ instrument: data.instrument,
+                                      from: iso(run[0][0]), to: iso(run[run.length - 1][0]) });
+  let events = [];
+  try {
+    events = (await ask('api/calendar/events?' + query.toString())).events;
+  } catch (error) {
+    message(`calendar: ${error.message}`, 'info');
+  }
+  if (state.data !== data) return;   // another run came on meanwhile
+  state.events = events;
+  draw();
+}
+
+// the events from one instant to another, oldest first
+function eventsBetween(fromMs, toMs) {
+  return (state.events || []).filter((e) => e[0] >= fromMs && e[0] < toMs);
+}
+
+// the events inside a drawn bar: from its open to the next bar's
+function eventsOfBar(i) {
+  const list = bars();
+  if (!list[i]) return [];
+  const next = list[i + 1] ? list[i + 1][0] : list[i][0] + 60000 * (MINUTES[drawnAt()] || 1);
+  return eventsBetween(list[i][0], next);
+}
+
+// one event as the readouts write it: its time, whose it is, and its number against the forecast
+function eventText(e, withDate) {
+  const [ms, currency, impact, title, actual, forecast, , unit] = e;
+  const number = (v) => (v === null || v === undefined) ? '' : v + (unit || '');
+  return `${stamp(ms, withDate)} ${currency} ${impact} ${title}`
+    + (actual !== null && actual !== undefined ? ` ${number(actual)}` : '')
+    + (forecast !== null && forecast !== undefined ? ` (forecast ${number(forecast)})` : '');
+}
+
+// the line under the chart: how many there are, on show and in the whole run
+function renderEvents() {
+  const note = $('events-note'), button = $('events');
+  if (!state.data || !state.data.candles.length) { note.textContent = ''; return; }
+  const events = state.events;
+  button.disabled = !events || !events.length;
+  if (events === null) { note.textContent = 'asking the calendar\u2026'; return; }
+  if (!events.length) {
+    note.textContent = `no high or medium calendar events for ${state.data.instrument} in this run`
+      + ' - the calendar is imported on the settings page';
+    return;
+  }
+  const win = viewTimes();
+  const shown = win ? eventsBetween(win[0], win[1] + 1).length : 0;
+  const high = events.filter((e) => e[2] === 'high').length;
+  note.textContent = `${shown} on show \u00b7 ${events.length} in the run`
+    + ` (${high} high, ${events.length - high} medium)`;
+}
+
+// Uprights at the bars the events fell in: a high one in the loss colour and
+// solid, a medium one faint and dashed, and their currency on top when there
+// are few enough on show to read them.
+function drawEvents(view, x, plotH, p) {
+  const shown = [];
+  for (let i = view.from; i <= view.to; i++) {
+    for (const e of eventsOfBar(i)) shown.push([i, e]);
+  }
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.font = '10px ' + p.mono;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (const [i, e] of shown) {
+    const high = e[2] === 'high', px = Math.round(x(i - view.from)) + 0.5;
+    ctx.strokeStyle = ctx.fillStyle = high ? p.down : p.text3;
+    ctx.globalAlpha = high ? 0.55 : 0.35;
+    ctx.setLineDash(high ? [] : [3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(px, AXIS.top);
+    ctx.lineTo(px, AXIS.top + plotH);
+    ctx.stroke();
+    if (shown.length <= 60) {
+      ctx.globalAlpha = 0.9;
+      ctx.fillText(e[1], px, AXIS.top + 2);
+    }
+  }
+  ctx.restore();
+}
+
+/* ------------------------------------------------- the selected trade */
+
+/*
+ * The selected trade, as the card under the chart shows it: a head - its
+ * number and id, side, outcome, P&L, pips and how long it was held - then
+ * its figures under their names, each in the colour its mark has on the
+ * chart, then the calendar's events while it was open. The stop and the
+ * target are read here rather than off the chart, which fits the candles:
+ * one outside them is said to be.
+ */
+function tradeCard(trade) {
+  const [kind, outcome] = outcomeCell(trade);
+  const open = trade.exitTime === null || trade.exitTime === undefined;
+  const dir = trade.direction === 'short' ? -1 : 1, held = barsHeld(trade);
+  const moved = open ? null : (trade.exitPrice - trade.entryPrice) * dir / pipSize();
+  const given = (v) => v !== null && v !== undefined;
+  const signed = (v, digits) => (v >= 0 ? '+' : '') + v.toFixed(digits);
+  const tone = (v) => 'pl ' + (v >= 0 ? 'good' : 'bad');
+  const r = state.range;
+  const off = (v) => r && given(v) && (v > r.high || v < r.low) ? ' · off the chart' : '';
+  const run = state.data.candles;
+  const during = state.events === null ? null : eventsBetween(
+    trade.signalTime ?? trade.entryTime, (open ? run[run.length - 1][0] : trade.exitTime) + 1);
+  return {
+    head: [
+      [`#${trade.n}`, 'trade-n'],
+      [trade.direction, 'side ' + trade.direction],
+      [outcome, 'outcome ' + kind],
+      given(trade.pl) ? [`P&L ${signed(trade.pl, Math.min(state.decimals + 1, 8))}`, tone(trade.pl)] : null,
+      moved === null ? null : [`${signed(moved, 1)} pips`, tone(moved)],
+      held === null ? null : [`${held} bars · ${lasted(trade.exitTime - trade.entryTime)}`, 'trade-held'],
+      trade.key ? [trade.key, 'trade-id'] : null,
+    ].filter(Boolean),
+    facts: [
+      ['signal', stamp(trade.signalTime), ''],
+      ['entry', `${stamp(trade.entryTime)} @ ${price(trade.entryPrice)}`, 'entry'],
+      ['exit', open ? openAtEnd() : `${stamp(trade.exitTime)} @ ${price(trade.exitPrice)}`, 'exit'],
+      ['stop', stopCell(trade) + off(given(trade.stopFinal) ? trade.stopFinal : trade.stopLoss), 'sl'],
+      ['target', given(trade.takeProfit) ? price(trade.takeProfit) + off(trade.takeProfit) : 'none', 'tp'],
+      given(trade.orderPrice) ? ['ordered at', price(trade.orderPrice), ''] : null,
+      ['size', `${size(trade.units)} units`, ''],
+      given(trade.balance) ? ['balance after', amount(trade.balance, 2), ''] : null,
+    ].filter(Boolean),
+    // [impact, what] a row, or null while the calendar has not answered
+    events: during && during.map((e) => [e[2], eventText(e, true)]),
+  };
+}
+
+// The card, drawn again only when what it says changed: draw() asks on every
+// frame of a drag, and the stop's "off the chart" is all that moves then.
+function renderTrade() {
+  const box = $('chart-trade');
+  const trade = state.data && state.selected !== null ? state.data.trades[state.selected] : null;
+  box.hidden = !trade;
+  if (!trade) { box.dataset.card = ''; return; }
+  const card = tradeCard(trade), said = JSON.stringify(card);
+  if (box.dataset.card === said) return;
+  box.dataset.card = said;
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const head = el('div', 'trade-head');
+  head.append(...card.head.map(([text, cls]) => el('span', cls, text)));
+  const facts = el('dl', 'trade-facts');
+  for (const [name, value, cls] of card.facts) {
+    const fact = el('div', 'fact ' + cls);
+    fact.append(el('dt', '', name), el('dd', '', value));
+    facts.append(fact);
+  }
+  box.textContent = '';
+  box.append(head, facts);
+  if (card.events) {
+    const events = el('div', 'trade-events');
+    events.append(el('span', 'trade-label', `calendar while open${card.events.length ? ` (${card.events.length})` : ''}`),
+      ...(card.events.length ? card.events.map(([impact, text]) => el('span', 'event ' + impact, text))
+        : [el('span', 'trade-quiet', 'no high or medium events')]));
+    box.append(events);
+  }
+}
 /* ------------------------------------------------------ over the chart */
 
 // the plot as draw() last laid it out, for the pointer's side of things
 function plot() {
   const view = visible(), r = state.range;
-  const plotW = canvas.clientWidth - AXIS.left - AXIS.right, plotH = CHART_H - AXIS.top - AXIS.bottom;
+  const plotW = canvas.clientWidth - AXIS.left - AXIS.right, plotH = state.height - AXIS.top - AXIS.bottom;
   const step = plotW / view.candles.length;
   return { view, r, plotW, plotH, step,
            y: (v) => AXIS.top + (r.high - v) / (r.high - r.low) * plotH,
@@ -619,11 +795,11 @@ function plot() {
 }
 
 // The pointer in the chart's own pixels, the ones draw() works in. The height
-// is scaled: the canvas is drawn CHART_H high and shown inside its border.
+// is scaled: the canvas is drawn state.height high and shown inside its border.
 function local(event) {
   const rect = canvas.getBoundingClientRect();
   return { x: event.clientX - rect.left - canvas.clientLeft,
-           y: (event.clientY - rect.top - canvas.clientTop) * CHART_H / canvas.clientHeight };
+           y: (event.clientY - rect.top - canvas.clientTop) * state.height / canvas.clientHeight };
 }
 
 // the bar and the price under the pointer, as a measure keeps them: by time
@@ -644,7 +820,7 @@ function measureOf(m) {
  * which the chart under it is not.
  */
 function drawOver() {
-  octx.clearRect(0, 0, canvas.clientWidth, CHART_H);
+  octx.clearRect(0, 0, canvas.clientWidth, state.height);
   if (!state.data || !state.data.candles.length || !state.range) return;
   const p = palette(), g = plot();
   const xAt = (ms) => AXIS.left + ((barAt(ms) ?? -1) - g.view.from + 0.5) * g.step;
@@ -696,7 +872,7 @@ function drawOver() {
   octx.restore();
   if (at) {
     axisTag(octx, p, price(g.priceAt(at.y)), AXIS.left - 2, at.y, 'left');
-    axisTag(octx, p, stamp(g.view.candles[i][0]), AXIS.left + (i + 0.5) * g.step, CHART_H - AXIS.bottom + 3, 'bottom');
+    axisTag(octx, p, stamp(g.view.candles[i][0]), AXIS.left + (i + 0.5) * g.step, state.height - AXIS.bottom + 3, 'bottom');
   }
   if (m) axisTag(octx, p, measureOf(m), xAt(m.b.ms) + 10, g.y(m.b.price) + 8, 'at', colour);
 }
@@ -1451,6 +1627,211 @@ function drawEquity() {
         : '  \u00b7 price x units, not money');
 }
 
+/* ---------------------------------------------------------- the drawdown */
+
+const ddCanvas = $('drawdown');
+const dctx = ddCanvas.getContext('2d');
+
+/*
+ * How far each close left the capital under the best it had reached, in per
+ * cent of that best, and the worst of them: the close it was reached at, the
+ * best it fell from, and the close that climbed back over that best - null
+ * when none did. Positions are into the points, as equityPoints() gives them.
+ */
+function drawdowns(points) {
+  let best = -Infinity, from = 0;
+  let worst = { pct: 0, from: null, at: null, back: null, best: null };
+  const out = points.map(([i, v], k) => {
+    if (v >= best) { best = v; from = k; }
+    const pct = best > 0 ? (v - best) / best * 100 : 0;
+    if (pct < worst.pct) worst = { pct, from, at: k, back: null, best };
+    return [i, pct];
+  });
+  if (worst.at !== null) {
+    const k = points.findIndex(([, v], j) => j > worst.at && v >= worst.best);
+    worst.back = k < 0 ? null : k;
+  }
+  return { points: out, worst };
+}
+
+/*
+ * The drawdown under the capital's axis: the same run's bars across, so the
+ * two read together, zero at the top and the worst at the bottom. The worst
+ * one's stretch - from the best it fell from to the close back over it - is
+ * shaded, and the note says how deep and how long.
+ */
+function drawDrawdown() {
+  const points = equityPoints();
+  $('drawdown-panel').hidden = points.length < 2;
+  if (points.length < 2) return;
+  const { points: dd, worst } = drawdowns(points);
+  const run = state.data.candles, timeOf = (k) => run[Math.min(run.length - 1, points[k][0])][0];
+  $('drawdown-note').textContent = worst.at === null ? 'never under its best'
+    : `worst ${worst.pct.toFixed(2)}% on ${stamp(timeOf(worst.at))} · ${lasted(
+      (worst.back === null ? run[run.length - 1][0] : timeOf(worst.back)) - timeOf(worst.from))}`
+      + (worst.back === null ? ' from its best to the end, not back over it' : ' from its best until back over it');
+  if (!$('drawdown-box').open) return;
+
+  const p = palette();
+  const { width, height } = fitCanvas(ddCanvas, dctx, 160);
+  dctx.clearRect(0, 0, width, height);
+  // the worst at the bottom, however shallow: a run a hundredth of a per cent
+  // under its best is read on an axis of hundredths, and says so in the labels
+  const low = Math.min(-0.001, worst.pct * 1.15);
+  const decimals = -low >= 5 ? 1 : -low >= 0.5 ? 2 : 3;
+  const plotW = width - EQ_AXIS.left - EQ_AXIS.right, plotH = height - EQ_AXIS.top - EQ_AXIS.bottom;
+  const step = plotW / run.length;
+  const x = (i) => EQ_AXIS.left + (i + 0.5) * step;
+  const y = (v) => EQ_AXIS.top + v / low * plotH;
+
+  if (worst.at !== null) {
+    const a = x(points[worst.from][0]);
+    const b = worst.back === null ? width - EQ_AXIS.right : x(points[worst.back][0]);
+    dctx.fillStyle = p.span;
+    dctx.fillRect(a, EQ_AXIS.top, Math.max(1, b - a), plotH);
+  }
+  dctx.font = '11px ' + p.mono;
+  dctx.textAlign = 'right';
+  dctx.textBaseline = 'middle';
+  dctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const v = low * i / 4, py = Math.round(y(v)) + 0.5;
+    dctx.strokeStyle = p.grid;
+    dctx.beginPath();
+    dctx.moveTo(EQ_AXIS.left, py);
+    dctx.lineTo(width - EQ_AXIS.right, py);
+    dctx.stroke();
+    dctx.fillStyle = p.text3;
+    dctx.fillText(v.toFixed(decimals) + '%', EQ_AXIS.left - 8, py);
+  }
+  // a step, as the capital is: the drawdown sits still between closes
+  dctx.beginPath();
+  dctx.moveTo(x(dd[0][0]), y(0));
+  let last = 0;
+  for (const [i, v] of dd) {
+    dctx.lineTo(x(i), y(last));
+    dctx.lineTo(x(i), y(v));
+    last = v;
+  }
+  dctx.lineTo(width - EQ_AXIS.right, y(last));
+  dctx.lineTo(width - EQ_AXIS.right, y(0));
+  dctx.closePath();
+  dctx.fillStyle = dctx.strokeStyle = p.down;
+  dctx.globalAlpha = 0.25;
+  dctx.fill();
+  dctx.globalAlpha = 1;
+  dctx.lineWidth = 1.2;
+  dctx.stroke();
+  if (worst.at !== null) {
+    const px = x(points[worst.at][0]), py = y(worst.pct);
+    dctx.beginPath();
+    dctx.arc(px, py, 3.5, 0, Math.PI * 2);
+    dctx.fill();
+    dctx.textAlign = px > width / 2 ? 'right' : 'left';
+    dctx.textBaseline = 'bottom';
+    dctx.fillText(`worst ${worst.pct.toFixed(2)}%`, px + (px > width / 2 ? -8 : 8), py - 2);
+  }
+}
+
+/* ----------------------------------------------------------- the heatmap */
+
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/*
+ * The closed trades counted into cells by the time they were entered or
+ * exited (`when`), UTC: the week's days across and its hours down, the months
+ * across and their days down, or the years across and their months down. A
+ * cell is {n, ok, ko, pl}: OK made money, KO lost it, one at nought is
+ * neither. cells[x][y], under the labels xs and ys.
+ */
+function heatCells(trades, layout, when) {
+  const closed = trades.filter((t) => t.pl !== null && t.pl !== undefined
+    && t.exitTime !== null && t.exitTime !== undefined);
+  const dates = closed.map((t) => new Date(t[when + 'Time']));
+  const years = dates.map((d) => d.getUTCFullYear());
+  const first = years.length ? Math.min(...years) : 0, count = years.length ? Math.max(...years) - first + 1 : 0;
+  const pad = (n) => String(n).padStart(2, '0');
+  const [xOf, yOf, xs, ys] = {
+    week: [(d) => (d.getUTCDay() + 6) % 7, (d) => d.getUTCHours(),
+           DAYS, Array.from({ length: 24 }, (_, h) => pad(h) + ':00')],
+    month: [(d) => d.getUTCMonth(), (d) => d.getUTCDate() - 1,
+            MONTHS, Array.from({ length: 31 }, (_, i) => String(i + 1))],
+    year: [(d) => d.getUTCFullYear() - first, (d) => d.getUTCMonth(),
+           Array.from({ length: count }, (_, i) => String(first + i)), MONTHS],
+  }[layout];
+  const cells = xs.map(() => ys.map(() => ({ n: 0, ok: 0, ko: 0, pl: 0 })));
+  closed.forEach((t, k) => {
+    const cell = cells[xOf(dates[k])][yOf(dates[k])];
+    cell.n++;
+    cell.pl += t.pl;
+    if (t.pl > 0) cell.ok++;
+    else if (t.pl < 0) cell.ko++;
+  });
+  return { xs, ys, cells, trades: closed.length };
+}
+
+/*
+ * The heatmap, as a table: a cell's number is its text and its tooltip says
+ * the rest. What its colour reads is the choice above it:
+ *  - win rate: green over half OK, red under, and the fuller the more trades
+ *    it holds, so one lucky trade is a pale cell and not a bright one;
+ *  - P&L: green made, red lost, the fuller the more;
+ *  - OK and KO: two bars, as long as the counts against the busiest cell.
+ */
+function drawHeat() {
+  const trades = state.data ? state.data.trades : [];
+  $('heat-panel').hidden = !trades.length;
+  if (!trades.length || !$('heat-box').open) return;
+  const layout = $('heat-layout').value, mode = $('heat-cell').value, when = $('heat-when').value;
+  const { xs, ys, cells, trades: counted } = heatCells(trades, layout, when);
+  const all = cells.flat();
+  const most = Math.max(1, ...all.map((c) => c.n));
+  const widest = Math.max(1e-12, ...all.map((c) => Math.abs(c.pl)));
+  const decimals = widest >= 100 ? 0 : widest >= 1 ? 1 : amountDecimals(widest);
+  const tint = (token, share) => `color-mix(in srgb, var(--${token}) ${Math.round(8 + 52 * share)}%, transparent)`;
+  $('heat-note').textContent = `${counted} closed trades by ${when} time, UTC`;
+
+  const table = $('heat');
+  table.textContent = '';
+  const head = table.createTHead().insertRow();
+  head.appendChild(document.createElement('th'));
+  for (const label of xs) {
+    const th = document.createElement('th');
+    th.textContent = label;
+    head.appendChild(th);
+  }
+  const body = table.createTBody();
+  ys.forEach((yLabel, yi) => {
+    const row = body.insertRow();
+    const th = document.createElement('th');
+    th.textContent = yLabel;
+    row.appendChild(th);
+    xs.forEach((xLabel, xi) => {
+      const c = cells[xi][yi], td = row.insertCell();
+      if (!c.n) return;
+      const rate = (c.ok + c.ko) ? c.ok / (c.ok + c.ko) : 0.5;
+      td.title = `${xLabel} ${yLabel} · ${c.n} trade${c.n === 1 ? '' : 's'} · ${c.ok} OK · ${c.ko} KO`
+        + ` · won ${Math.round(rate * 100)}% · P&L ${c.pl >= 0 ? '+' : ''}${amount(c.pl, decimals)}`;
+      if (mode === 'win') {
+        td.textContent = `${c.ok}/${c.ko}`;
+        td.style.background = tint(rate >= 0.5 ? 'up' : 'down', Math.abs(rate - 0.5) * 2 * Math.sqrt(c.n / most));
+      } else if (mode === 'pl') {
+        td.textContent = (c.pl >= 0 ? '+' : '') + amount(c.pl, decimals);
+        td.style.background = tint(c.pl >= 0 ? 'up' : 'down', Math.abs(c.pl) / widest);
+      } else {
+        for (const [kind, count] of [['ok', c.ok], ['ko', c.ko]]) {
+          const bar = document.createElement('span');
+          // not .bar, which is the page's own bar across the top (app.css)
+          bar.className = 'heat-bar ' + kind;
+          bar.style.width = `${Math.max(count ? 6 : 0, count / most * 100)}%`;
+          td.appendChild(bar);
+        }
+      }
+    });
+  });
+}
+
 /* ------------------------------------------------------------ the levels */
 
 /*
@@ -1618,24 +1999,6 @@ function drawLevels() {
 /* What an open trade is: not a result, the data running out under it. */
 function openAtEnd() {
   return `open when the run ended, ${day(state.data.to)}`;
-}
-
-function tradeLine(trade) {
-  const [, outcome] = outcomeCell(trade);
-  return [
-    `#${trade.n}`,
-    trade.direction,
-    `${size(trade.units)} units`,
-    `signal ${stamp(trade.signalTime)}`,
-    `in ${stamp(trade.entryTime)} @ ${price(trade.entryPrice)}`,
-    trade.exitTime === null || trade.exitTime === undefined
-      ? openAtEnd()
-      : `out ${stamp(trade.exitTime)} @ ${price(trade.exitPrice)}`,
-    `stop ${stopCell(trade)}`,
-    `target ${price(trade.takeProfit)}`,
-    outcome,
-    `P&L ${pl(trade.pl)}`,
-  ].join('  \u00b7  ');
 }
 
 function stopCell(trade) {
@@ -1881,6 +2244,11 @@ function select(index) {
   state.page = Math.floor(index / PAGE_SIZE);
   const trade = trades[index];
 
+  // finer bars fetched around another stretch do not hold this trade, and
+  // looking it up in them lands on their edge: back to the run's own bars
+  const s = state.series, end = trade.exitTime ?? trade.entryTime;
+  if (s && (trade.entryTime < s.from || end > s.to)) { state.series = null; renderDetail(); }
+
   const last = bars().length - 1;
   const entry = tradeBar(trade, 'entry');
   const exit_ = tradeBar(trade, 'exit');
@@ -1893,8 +2261,6 @@ function select(index) {
   state.scale = null;
 
   $('reset').hidden = false;
-  $('chart-trade').textContent = tradeLine(trade);
-  $('chart-trade').hidden = false;
 
   renderTrades();
   draw();
@@ -1970,7 +2336,6 @@ function resetView() {
   renderDetail();
   $('reset').hidden = true;
   $('chart-zoom').textContent = '';
-  $('chart-trade').hidden = true;
   renderTrades();
   draw();
   drawEquity();
@@ -2091,7 +2456,7 @@ function show(data) {
   state.page = 0;
   $('reset').hidden = true;
   $('chart-zoom').textContent = '';
-  $('chart-trade').hidden = true;
+  loadEvents();
   // the run's id: a set's run as set/number, any other as the saved run's
   const where = new URLSearchParams(location.search);
   const id = where.get('sweep') ? `${where.get('sweep')}/${where.get('run')}` : data.runId;
@@ -2117,6 +2482,8 @@ function show(data) {
   draw();
   drawEquity();
   drawLevels();
+  drawDrawdown();
+  drawHeat();
 }
 
 /* ------------------------------------------------------------- address */
@@ -2212,6 +2579,9 @@ equityCanvas.addEventListener('click', (event) => {
 // A canvas measured while <details> is closed has no width, so the curve is
 // drawn when it opens rather than being drawn into nothing and left blank.
 $('equity-box').addEventListener('toggle', drawEquity);
+$('drawdown-box').addEventListener('toggle', drawDrawdown);
+$('heat-box').addEventListener('toggle', drawHeat);
+for (const id of ['heat-layout', 'heat-cell', 'heat-when']) $(id).addEventListener('change', drawHeat);
 $('levels-box').addEventListener('toggle', drawLevels);
 $('curve-box').addEventListener('toggle', drawPanel);
 
@@ -2231,6 +2601,12 @@ $('detail').addEventListener('change', () => {
   // than the run, which is a legitimate way to look at where you are
   state.detail = $('detail').value;
   retune(true);
+});
+
+$('events').addEventListener('click', () => {
+  state.showEvents = !state.showEvents;
+  $('events').setAttribute('aria-pressed', String(state.showEvents));
+  draw();
 });
 
 $('levels').addEventListener('click', () => {
@@ -2382,7 +2758,8 @@ canvas.addEventListener('mousemove', (event) => {
   $('chart-zoom').textContent =
     `${stamp(candle[0])}  O ${price(candle[1])}  H ${price(candle[2])}`
     + `  L ${price(candle[3])}  C ${price(candle[4])}`
-    + `  H-L ${span.toFixed(1)} pips`;
+    + `  H-L ${span.toFixed(1)} pips`
+    + (state.showEvents ? eventsOfBar(view.from + i).map((e) => '  \u00b7  ' + eventText(e, false)).join('') : '');
 });
 
 canvas.addEventListener('mouseleave', () => {
@@ -2395,7 +2772,10 @@ canvas.addEventListener('mouseleave', () => {
     + ` → ${trade.exitTime === null ? openAtEnd() : stamp(trade.exitTime)}`;
 });
 
-window.addEventListener('resize', () => { draw(); drawEquity(); drawLevels(); });
+window.addEventListener('resize', () => { draw(); drawEquity(); drawLevels(); drawDrawdown(); });
+
+// taller or shorter, from the grip under the chart (chartGrip in menu.js)
+state.height = chartGrip($('chart-grip'), 420, (height) => { state.height = height; draw(); });
 
 // The stretches the buttons over the chart jump to: a day, a week, a month
 // and three, ending where the chart does - or starting where the run does,

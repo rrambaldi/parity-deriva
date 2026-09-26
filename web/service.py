@@ -79,6 +79,7 @@ from parity_deriva.data import store
 from parity_deriva.data.candledb import CandleDB
 from parity_deriva.etc import settings
 from parity_deriva.lib import indicators
+from parity_deriva.lib import news as news_module
 from parity_deriva.performance import report as report_module
 from parity_deriva.strategy import plugins, uploaded
 from parity_deriva.web import livesessions, mcp, oauth
@@ -1789,6 +1790,26 @@ class Service(object):
 		out['start'] = self.calendarStart(out)
 		return out
 
+	def calendarEvents(self, instrument, dtfrom, dtto):
+		"""
+		The high and medium events of an instrument's currencies (and ALL's)
+		from `dtfrom` to `dtto`, oldest first, for the run page to draw on its
+		chart: [ms, currency, impact, title, actual, forecast, previous, unit]
+		a row. Read through lib/news.around(), as a strategy reads them, with
+		`now` just past the end: the page looks back at a run, so every event
+		in it is out and comes with its outcome.
+		"""
+		if not dtfrom or not dtto or dtto < dtfrom:
+			raise ServiceError("the events need a from and a to after it")
+		now = dtto + datetime.timedelta(minutes=1)
+		rows = news_module.around(
+			instrument, now, before=(now - dtfrom).total_seconds() / 60, after=0,
+			impacts=(calendar_module.HIGH, calendar_module.MEDIUM),
+			where=calendar_module.path(self.setup))
+		return {'events': [[millis(e['time']), e['currency'], e['impact'], e['title'],
+							e['actual'], e['forecast'], e['previous'], e['unit']]
+						   for e in rows]}
+
 	def importCalendar(self, text):
 		"""
 		Merge an uploaded calendar into the file.
@@ -3136,6 +3157,11 @@ class Handler(BaseHTTPRequestHandler):
 					parseDate(self.one(query, 'to'), 'to', end=True)))
 			if route == '/api/calendar':
 				return self.sendJSON(self.service.calendar())
+			if route == '/api/calendar/events':
+				return self.sendJSON(self.service.calendarEvents(
+					self.one(query, 'instrument', 'EUR_USD'),
+					parseDate(self.one(query, 'from'), 'from'),
+					parseDate(self.one(query, 'to'), 'to', end=True)))
 			if route == '/api/collector':
 				# the script itself, with this service's address and token in
 				# it. Served as text because it is pasted into a console
