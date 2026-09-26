@@ -1465,6 +1465,9 @@ never from a page (a click must not turn a server into a real money one):
 export PARITY_DERIVA_ACCOUNTS=real        # anything else, or nothing, is demo
 export PARITY_DERIVA_PROMOTE_DAYS=20      # on a real one: what a form must have done on demo
 export PARITY_DERIVA_PROMOTE_TRADES=30
+export PARITY_DERIVA_PROMOTE_SLOW_DAYS=90 # or, on a slow timeframe, this many days...
+export PARITY_DERIVA_PROMOTE_MIN_TRADES=10 # ...and this many trades
+export PARITY_DERIVA_PROMOTE_MIN_NET=0    # the net P&L on demo, at least
 export PARITY_DERIVA_DAILY_LOSS_PCT=3     # a day's loss that stops every session
 ```
 
@@ -1474,8 +1477,10 @@ server". A demo server refuses a real money account and a real one a demo
 account (the paper account is both). A real money server also:
 
 - starts a session of a form only once the archive promoted it with a
-  record this server finds enough: the days, the closed trades, no parity
-  alarm, demo accounts only. It judges the record itself and keeps it;
+  record this server finds enough: the days, the closed trades (30, or on a
+  slow timeframe 10 once it has traded 90 days: on D1 30 trades are a
+  year), a net not below zero, no parity alarm, demo accounts only. It
+  judges the record itself and keeps it;
 - asks for the capital at risk to be confirmed before it starts one;
 - stops every session at the day's loss limit, and starts none again
   before the next UTC day; "stop all" on the live page stops them by hand;
@@ -1497,6 +1502,52 @@ to a real money server, its record on demo - the sessions of it on the
 archive and on every demo server - which that server judges (`push_record`);
 its verdict is the answer. A trade server takes its market data from the
 archive like the PC does: a mirror token there, the archive as upstream.
+
+## Alerts, and a phone paired with a trade server
+
+Every minute a server with live sessions looks at them (`web/livesessions.py`
+alerts, `web/notify.py`): a session whose process died without anybody
+stopping it, one with no new candle for 3 of its bars while the market is
+open (the forex weekend left out), broker errors and rejected orders, a
+parity alarm, the loss limit. Each is a banner on the live and logs pages,
+a line in the service's log, and once set in `.env` an email and a Telegram
+message - once per event, and once more when it is resolved. The text says
+the form, the event and its numbers, never the account.
+
+```
+export PARITY_DERIVA_SMTP_HOST=smtp.example.com
+export PARITY_DERIVA_SMTP_PORT=587          # 465 for TLS from the start
+export PARITY_DERIVA_SMTP_USER=...
+export PARITY_DERIVA_SMTP_PASSWORD=...
+export PARITY_DERIVA_SMTP_TO=me@example.com
+export PARITY_DERIVA_TELEGRAM_TOKEN=...     # a bot made with BotFather
+export PARITY_DERIVA_TELEGRAM_CHAT=...      # the chat it writes to
+export PARITY_DERIVA_ALERT_STALE_BARS=3
+```
+
+A phone pairs from the settings page, alerts tab: "pair a phone" shows a QR
+code of `<public address>/phone?pair=<code>`, good once and for 10 minutes.
+The phone's page (`web/phone.py`) shows the sessions and their open trades,
+read only, and "enable notifications" turns the urgent alerts into
+notifications (Web Push, signed by the `openssl` command; the push itself is
+empty and the phone asks the server what to show). On an iPhone they need iOS
+16.4 or later and the page added to the home screen, paired from there by
+typing the code. The phone's token is a cookie; the server keeps its hash in
+`DATA_DIR/phones.json`, and the same tab revokes it.
+
+The phone has no client certificate and no sign-in: `/phone`,
+`/phone-sw.js`, `/phone-manifest.json`, `/api/phone/` and `/static/` are open
+to it - the app checks the phone's token itself. Behind a proxy that asks for a
+certificate they need the same exception as `/mcp`, e.g. for nginx:
+
+```nginx
+location ~ ^/parity/(phone|phone-sw\.js|phone-manifest\.json|api/phone/.*|static/.*)$ {
+        proxy_pass http://127.0.0.1:8731/$1$is_args$args;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Prefix /parity;
+}
+```
 
 ## Old simulations off the disk: an S3 bucket, a Google Drive, a OneDrive
 

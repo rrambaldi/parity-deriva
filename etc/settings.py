@@ -84,6 +84,20 @@ PROMOTE_SLOW_DAYS = int(dotenv('PARITY_DERIVA_PROMOTE_SLOW_DAYS', '90'))
 PROMOTE_MIN_TRADES = int(dotenv('PARITY_DERIVA_PROMOTE_MIN_TRADES', '10'))
 PROMOTE_MIN_NET = float(dotenv('PARITY_DERIVA_PROMOTE_MIN_NET', '0'))
 DAILY_LOSS_PCT = float(dotenv('PARITY_DERIVA_DAILY_LOSS_PCT', '3'))
+# The alerts of the live sessions (web/notify.py): a banner on the pages
+# always, and an urgent one also by email and by Telegram, each once it is
+# set here, and to the phones paired on the settings page (web/phone.py). A
+# session with no new candle for ALERT_STALE_BARS of its bars, the market
+# open, is one.
+SMTP_HOST = dotenv('PARITY_DERIVA_SMTP_HOST')
+SMTP_PORT = int(dotenv('PARITY_DERIVA_SMTP_PORT', '587'))
+SMTP_USER = dotenv('PARITY_DERIVA_SMTP_USER')
+SMTP_PASSWORD = dotenv('PARITY_DERIVA_SMTP_PASSWORD')
+SMTP_FROM = dotenv('PARITY_DERIVA_SMTP_FROM')
+SMTP_TO = dotenv('PARITY_DERIVA_SMTP_TO')
+TELEGRAM_TOKEN = dotenv('PARITY_DERIVA_TELEGRAM_TOKEN')
+TELEGRAM_CHAT = dotenv('PARITY_DERIVA_TELEGRAM_CHAT')
+ALERT_STALE_BARS = int(dotenv('PARITY_DERIVA_ALERT_STALE_BARS', '3'))
 
 DOMAIN = "real" if ACCOUNTS == 'real' else "practice"
 STREAM_DOMAIN = ENVIRONMENTS["streaming"][DOMAIN]

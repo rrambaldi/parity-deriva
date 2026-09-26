@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>parity-deriva phone</title>
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="static/fonts.css">
+<link rel="stylesheet" href="static/tokens.css">
+<link rel="manifest" href="phone-manifest.json">
+<link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="static/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<!--
+  A phone paired with this server (web/phone.py): its sessions and their open
+  trades, read only - nothing here starts or stops one - and the urgent
+  alerts as notifications. No menu: the phone reaches only its own routes.
+-->
+<style>
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+         font-family: var(--font-sans, sans-serif); font-size: 16px; line-height: 1.4; }
+  h1 { font-size: 20px; margin: 0 0 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .kind { font-size: 13px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--entry); color: var(--entry); }
+  .kind.real { background: var(--down); border-color: var(--down); color: #fff; font-weight: 700; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin: 0 0 12px; }
+  h2 { font-size: 15px; margin: 0 0 8px; color: var(--text-2); }
+  .dim { color: var(--text-3); font-size: 14px; }
+  .good { color: var(--up); } .bad { color: var(--down); }
+  .session { border-top: 1px solid var(--line); padding: 8px 0; }
+  .session:first-of-type { border-top: 0; padding-top: 0; }
+  .session .name { font-weight: 600; overflow-wrap: anywhere; }
+  .nums { display: flex; flex-wrap: wrap; gap: 4px 16px; font-family: var(--font-mono, monospace); font-size: 14px; }
+  .trade { font-family: var(--font-mono, monospace); font-size: 14px; }
+  .alert { padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; overflow-wrap: anywhere; }
+  .alert:first-of-type { border-top: 0; }
+  .alert.urgent:not(.resolved) { color: var(--down); }
+  input, button { font: inherit; font-size: 16px; }
+  input { padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text);
+          text-transform: uppercase; letter-spacing: 2px; width: 10em; max-width: 100%; }
+  button { padding: 8px 14px; border-radius: 6px; border: 0; background: var(--accent); color: var(--on-accent); }
+  #pair-form { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  #status { min-height: 1.4em; }
+</style>
+</head>
+<body>
+
+<h1><span id="title">parity-deriva</span> <span id="kind" class="kind" hidden></span></h1>
+
+<section id="pair" hidden>
+  <h2>pair this phone</h2>
+  <p class="dim">On this server's settings page, alerts tab, press "pair a phone": scan its QR code, or type its code here.</p>
+  <form id="pair-form">
+    <input id="pair-code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12" aria-label="pairing code">
+    <button type="submit">pair</button>
+  </form>
+</section>
+
+<section id="notify-box" hidden>
+  <h2>notifications</h2>
+  <p class="dim" id="notify-about">The urgent alerts of this server arrive here as notifications.</p>
+  <button type="button" id="notify-on">enable notifications</button>
+</section>
+
+<section id="sessions-box" hidden>
+  <h2>sessions</h2>
+  <div id="sessions"></div>
+</section>
+
+<section id="alerts-box" hidden>
+  <h2>latest alerts</h2>
+  <div id="alerts"></div>
+</section>
+
+<p id="status" class="dim" role="status"></p>
+
+<script src="static/i18n.js"></script>
+<script src="static/phone.js"></script>
+</body>
+</html>

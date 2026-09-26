@@ -83,7 +83,7 @@ from parity_deriva.lib import s3
 from parity_deriva.lib import news as news_module
 from parity_deriva.performance import report as report_module
 from parity_deriva.strategy import plugins, uploaded
-from parity_deriva.web import access, i18n, livesessions, mcp, oauth, servers, storage
+from parity_deriva.web import access, i18n, livesessions, mcp, notify, oauth, phone, servers, storage
 from parity_deriva.web import logs as logs_page
 
 
@@ -3314,7 +3314,10 @@ class Handler(BaseHTTPRequestHandler):
 		query = urllib.parse.parse_qs(parsed.query)
 
 		try:
-			# who may come in first (web/access.py), then its sign-in and setup
+			# the paired phones' page, which checks its own token (web/phone.py);
+			# then who may come in (web/access.py), then its sign-in and setup
+			if phone.route(self, 'GET', route, query):
+				return
 			if access.gate(self, 'GET', route, query) or access.route(self, 'GET', route, query):
 				return
 			if mcp.route(self, 'GET', route, query) or i18n.route(self, 'GET', route, query):
@@ -3337,6 +3340,13 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendFile('mix.html')
 			if route == '/api/live':
 				return self.sendJSON({'sessions': self.service.live.sessions()})
+			if route == '/api/alerts':
+				# the banners: the alerts open, and the latest (web/notify.py)
+				held = notify.read(self.service.setup)
+				return self.sendJSON({'open': sorted(held['open'].values(), key=lambda a: -a['at']),
+									  'recent': held['recent'][:30]})
+			if route == '/api/phones':
+				return self.sendJSON(phone.settings(self.service, self))
 			if route == '/api/live/targets':
 				return self.sendJSON({'targets': self.service.live.targets(
 					fresh=bool(self.one(query, 'fresh')))})
@@ -3497,6 +3507,8 @@ class Handler(BaseHTTPRequestHandler):
 		route = parsed.path
 		query = urllib.parse.parse_qs(parsed.query)
 		try:
+			if phone.route(self, 'POST', route, query):
+				return
 			if access.gate(self, 'POST', route, query) or access.route(self, 'POST', route, query):
 				return
 			# MCP and OAuth have their own door, and the settings page's
@@ -3636,6 +3648,26 @@ class Handler(BaseHTTPRequestHandler):
 			if route == '/api/live/stop-all':
 				# the kill switch: every session running, stopped and closed
 				return self.sendJSON(self.service.live.stopAll())
+			if route in ('/api/alerts/dismiss', '/api/alerts/test', '/api/phones/pair', '/api/phones/revoke'):
+				# {"id"} a banner dismissed or a phone revoked; a test alert on
+				# every channel; a pairing code for a phone (web/notify.py, phone.py)
+				length = int(self.headers.get('Content-Length') or 0)
+				try:
+					body = json.loads(self.rfile.read(length) or b'{}')
+				except ValueError:
+					body = None
+				if not isinstance(body, dict):
+					raise ServiceError('the body is a JSON object')
+				setup = self.service.setup
+				if route == '/api/alerts/dismiss':
+					notify.dismiss(setup, str(body.get('id') or ''))
+					return self.sendJSON({'open': list(notify.read(setup)['open'].values())})
+				if route == '/api/alerts/test':
+					return self.sendJSON({'sent': notify.test(setup)})
+				if route == '/api/phones/pair':
+					return self.sendJSON(dict(phone.newCode(setup), url=mcp.publicBase(self) + '/phone'))
+				phone.revoke(setup, str(body.get('id') or ''))
+				return self.sendJSON(phone.settings(self.service, self))
 			if route in ('/api/server/roles', '/api/trade-servers', '/api/trade-servers/poll',
 						 '/api/trade-servers/push', '/api/storage'):
 				# {"roles": [...]} this server's; {"name", "url", "token"} or {"name",

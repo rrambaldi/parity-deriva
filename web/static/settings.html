@@ -40,6 +40,7 @@
 -->
 <div id="settings-tabs" role="tablist" aria-label="settings">
   <button type="button" role="tab" id="tab-server" data-icon="server" aria-controls="server-panel" aria-selected="true">this server</button>
+  <button type="button" role="tab" id="tab-alerts" data-icon="phone" aria-controls="alerts-panel" aria-selected="false" tabindex="-1">alerts</button>
   <button type="button" role="tab" id="tab-backup" data-icon="cloud" aria-controls="backup-panel" aria-selected="false" tabindex="-1">backup</button>
   <button type="button" role="tab" id="tab-data" data-icon="candles" aria-controls="data-panel" aria-selected="false" tabindex="-1">market data</button>
   <button type="button" role="tab" id="tab-quality" data-icon="shield" aria-controls="quality-panel" aria-selected="false" tabindex="-1">data quality</button>
@@ -90,6 +91,38 @@
     </div>
   </div>
   <p id="server-note" role="status"></p>
+</section>
+
+<!--
+  The alerts of the live sessions (web/notify.py): where an urgent one goes, a
+  test of every channel, and the phones paired with this server (web/phone.py).
+-->
+<section id="alerts-panel" role="tabpanel" aria-labelledby="tab-alerts" hidden>
+  <h3 class="panel-title">where the alerts go</h3>
+  <p class="dim">Every alert is a banner on the live and logs pages. An urgent one - a session stopped
+    by itself, no new candles, orders rejected, the loss limit, a parity alarm - also goes by email and
+    by Telegram once they are set in .env (PARITY_DERIVA_SMTP_*, PARITY_DERIVA_TELEGRAM_*), and to the
+    phones paired here. Once per event, and once more when it is resolved.</p>
+  <p id="alert-channels"></p>
+  <p id="phone-url" class="bad" hidden>This server trades and has no public address (PARITY_DERIVA_PUBLIC_URL
+    in .env): a trade server always has one, in https - the archive and the phones reach it there.</p>
+  <button type="button" id="alert-test" data-icon="bell">send a test alert</button>
+  <p id="alert-note" role="status"></p>
+  <h3 class="panel-title">phones</h3>
+  <p class="dim">A phone paired here has a page with the sessions and their open trades, read only, and
+    gets the urgent alerts as notifications. On an iPhone they need iOS 16.4 or later and the page added
+    to the home screen: pair it from there, typing the code.</p>
+  <table id="phone-table" hidden>
+    <thead><tr><th>phone</th><th>paired</th><th>last seen</th><th>notifications</th><th></th></tr></thead>
+    <tbody id="phone-rows"></tbody>
+  </table>
+  <button type="button" id="phone-pair" data-icon="add">pair a phone</button>
+  <div id="phone-qr" hidden>
+    <img id="phone-qr-img" alt="the QR code of the pairing address">
+    <p>code <b id="phone-code"></b> &middot; good once, for 10 minutes</p>
+    <p class="dim" id="phone-link"></p>
+  </div>
+  <p id="phone-note" role="status"></p>
 </section>
 
 <!--
@@ -711,6 +744,7 @@ class MyEma(H4):
 
 <script src="static/i18n.js"></script>
 <script src="static/menu.js"></script>
+<script src="static/qrcode.js"></script>
 <script src="static/settings.js"></script>
 <script src="static/access.js"></script>
 </body>

@@ -1127,6 +1127,70 @@ $('mcp-disconnect').addEventListener('click', async () => {
 });
 
 showMcp().catch((error) => mcpSay(String(error.message || error)));
+/* ------------------------------------------------------ alerts and phones */
+
+// where the urgent alerts go (web/notify.py) and the phones paired (web/phone.py)
+function showPhones(p) {
+  const on = p.phones.filter((phone) => phone.notifications).length;
+  $('alert-channels').textContent = `email ${p.channels.email ? 'on' : 'off'} \u00b7 `
+    + `Telegram ${p.channels.telegram ? 'on' : 'off'} \u00b7 ${on} of ${p.phones.length} phones with notifications`;
+  $('phone-url').hidden = !p.tradeWithoutUrl;
+  $('phone-table').hidden = !p.phones.length;
+  const rows = $('phone-rows');
+  rows.textContent = '';
+  for (const phone of p.phones) {
+    const row = document.createElement('tr');
+    for (const text of [phone.name, stamp(phone.paired), stamp(phone.seen), phone.notifications ? 'on' : 'off']) {
+      const cell = document.createElement('td');
+      cell.textContent = text;
+      row.appendChild(cell);
+    }
+    const cell = document.createElement('td');
+    const drop = document.createElement('button');
+    drop.type = 'button';
+    drop.dataset.icon = 'delete';
+    drop.textContent = 'revoke';
+    drop.addEventListener('click', () => post('api/phones/revoke', JSON.stringify({ id: phone.id }))
+      .then(showPhones).catch((error) => { $('phone-note').textContent = String(error.message || error); }));
+    cell.appendChild(drop);
+    row.appendChild(cell);
+    rows.appendChild(row);
+  }
+}
+
+function stamp(ms) {
+  return ms ? new Date(ms).toISOString().slice(0, 16).replace('T', ' ') : '';
+}
+
+$('phone-pair').addEventListener('click', async () => {
+  try {
+    const got = await post('api/phones/pair', '{}');
+    const url = `${got.url}?pair=${got.code}`;
+    const qr = qrcode(0, 'M');
+    qr.addData(url);
+    qr.make();
+    $('phone-qr-img').src = qr.createDataURL(6, 2);
+    $('phone-code').textContent = got.code;
+    $('phone-link').textContent = url;
+    $('phone-qr').hidden = false;
+    $('phone-note').textContent = '';
+  } catch (error) {
+    $('phone-note').textContent = String(error.message || error);
+  }
+});
+
+$('alert-test').addEventListener('click', async () => {
+  $('alert-note').textContent = 'sending\u2026';
+  try {
+    const { sent } = await post('api/alerts/test', '{}');
+    $('alert-note').textContent = Object.entries(sent).map(([channel, how]) => `${channel}: ${how}`)
+      .join(' \u00b7 ');
+    showPhones(await ask('api/phones'));
+  } catch (error) {
+    $('alert-note').textContent = String(error.message || error);
+  }
+});
+
 /* -------------------------------------------------------------- the tabs */
 
 // one section a tab, as the docs page has them: the address says which (a
@@ -1175,6 +1239,7 @@ follow();
 
 showLanguages().catch((error) => { $('lang-note').textContent = String(error.message || error); });
 ask('api/server').then(showServer).catch(serverSay);
+ask('api/phones').then(showPhones).catch((error) => { $('phone-note').textContent = String(error.message || error); });
 ask('api/storage').then(showStorage).catch(backupSay);
 ask('api/market').then((state) => { showMarket(state); showQuality(state); if (marketRunning) followMarket(); })
   .catch((error) => dataLog([String(error.message || error)]));

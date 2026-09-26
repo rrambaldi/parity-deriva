@@ -31,8 +31,12 @@ import subprocess
 import sys
 import time
 
+from zoneinfo import ZoneInfo
+
 from parity_deriva.trading import providers
 from parity_deriva.etc import settings
+from parity_deriva.lib.utils import granularityToTimedelta
+from parity_deriva.web import notify
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(ROOT, 'scripts', 'live.py')
@@ -114,6 +118,11 @@ def sessionSettings():
 class LiveSessions(object):
 
     def __init__(self, root):
+        #: the errors each session had when its last alert went out (alerts)
+        # ponytail: in memory - after a restart the count starts again from
+        # what the sessions have, so errors made while the service was down
+        # are not told
+        self._errors = {}
         self.root = root
         self.children = {}
         self._accounts = (0, None)
@@ -479,21 +488,88 @@ class LiveSessions(object):
         os.replace(self.haltPath() + '.part', self.haltPath())
         return held
 
-    def watch(self, pct, every=60):
-        """guard() every minute, in the background: the real money server's."""
+    def watch(self, setup, every=60):
+        """
+        Every minute, in the background: on a real money server the loss
+        limit (guard), on every server the alerts (alerts).
+        """
+        import logging
         import threading
+
+        log = logging.getLogger('parity_deriva.web')
 
         def loop():
             while True:
                 try:
-                    self.guard(pct)
+                    if setup.ACCOUNTS == 'real' and setup.DAILY_LOSS_PCT > 0:
+                        self.guard(setup.DAILY_LOSS_PCT)
                 except Exception:
-                    import logging
-                    logging.getLogger('parity_deriva.web').exception("loss limit")
+                    log.exception("loss limit")
+                try:
+                    self.alerts(setup)
+                except Exception:
+                    log.exception("alerts")
                 time.sleep(every)
-        thread = threading.Thread(target=loop, name='loss-limit')
+        thread = threading.Thread(target=loop, name='watch')
         thread.daemon = True
         thread.start()
+
+    def alerts(self, setup):
+        """
+        The minute's round of alerts (web/notify.py), each sent once and
+        "resolved" once when it has gone: a session whose process died
+        without anybody stopping it, one with no new candle for
+        ALERT_STALE_BARS of its bars while the market is open, broker errors
+        and rejected orders, a parity alarm, the loss limit.
+
+        Errors are counted rather than a state: an alert says how many came
+        since the last one and stays until the session stops or the banner
+        is dismissed; more errors after that are a new alert.
+        """
+        now = time.time()
+        opened = notify.read(setup)['open']
+        watched = set()
+        for sid in self.ids():
+            try:
+                # a stopped session's log is not read again every minute
+                if self.meta(sid).get('stopped') is not None:
+                    continue
+                s = self.summary(sid)
+            except (LiveError, OSError, ValueError):
+                continue
+            watched.add(sid)
+            errors = (s.get('errors') or 0) + (s.get('rejects') or 0)
+            seen = self._errors.setdefault(sid, errors)
+            problems = {}
+            if s.get('exited'):
+                problems['exited'] = 'the session stopped by itself: its process is gone'
+            elif s.get('running'):
+                stale = staleBars(s, now, getattr(setup, 'ALERT_STALE_BARS', 3))
+                if stale:
+                    problems['stale'] = 'no new candle for %d bars' % stale
+            if (s.get('parity') or {}).get('alarms'):
+                problems['parity'] = 'parity alarm: ' + '; '.join(s['parity']['alarms'])[:300]
+            if errors > seen:
+                many = '' if errors - seen == 1 else 's'
+                problems['errors'] = '%d broker error%s or rejected order%s' % (errors - seen, many, many)
+            for kind in SESSION_ALERTS:
+                if kind in problems:
+                    if notify.notify(setup, 'urgent', kind, sid, '%s · %s' % (label(s), problems[kind])) \
+                            and kind == 'errors':
+                        self._errors[sid] = errors
+                elif kind != 'errors' and '%s:%s' % (kind, sid) in opened:
+                    notify.resolve(setup, kind, sid)
+        # a session stopped or deleted with an alert open: its problem has gone with it
+        for alert in opened.values():
+            if alert['kind'] in SESSION_ALERTS and alert['key'] not in watched:
+                notify.resolve(setup, alert['kind'], alert['key'])
+        held = self.halted()
+        if held:
+            notify.notify(setup, 'urgent', 'loss-limit', 'day', "loss limit: %.2f today on a capital of %.2f "
+                          "(%g%%): every session stopped until tomorrow (UTC)"
+                          % (held['net'], held['capital'], held['pct']))
+        elif 'loss-limit:day' in opened:
+            notify.resolve(setup, 'loss-limit', 'day')
 
     def sessions(self):
         out = []
@@ -584,6 +660,55 @@ class LiveSessions(object):
             out['events'] = events[-400:]
             out['console'] = self.console(session)
         return out
+
+
+#: the alerts of one session, keyed by its id (LiveSessions.alerts)
+SESSION_ALERTS = ('exited', 'stale', 'parity', 'errors')
+NEW_YORK = ZoneInfo('America/New_York')
+
+
+def label(session):
+    """A session in an alert: the form and the broker, never the account."""
+    f = session.get('fields') or {}
+    return '%s · %s %s · %s' % (f.get('strategy'), f.get('instrument'), f.get('granularity'),
+                               session.get('provider'))
+
+
+def marketSeconds(a, b):
+    """
+    The seconds from `a` to `b` (epoch) with the market open: less the
+    forex weekend, Friday 17:00 to Sunday 17:00 New York time.
+    """
+    # ponytail: the forex week for every instrument, no holidays; a stock's
+    # own hours once stocks trade live
+    total = max(0.0, b - a)
+    day = datetime.datetime.fromtimestamp(a, NEW_YORK).date()
+    friday = day - datetime.timedelta(days=(day.weekday() - 4) % 7)
+    while True:
+        shut = datetime.datetime.combine(friday, datetime.time(17), NEW_YORK).timestamp()
+        if shut >= b:
+            return total
+        opens = datetime.datetime.combine(friday + datetime.timedelta(days=2), datetime.time(17),
+                                          NEW_YORK).timestamp()
+        total -= max(0.0, min(b, opens) - max(a, shut))
+        friday += datetime.timedelta(days=7)
+
+
+def staleBars(session, now, bars):
+    """
+    How many of its bars a running session has gone without a new candle,
+    with the market open, once that is more than `bars`; else 0. The last
+    candle's time is its open, and it arrives when it closes: a bar late.
+    """
+    try:
+        step = granularityToTimedelta((session.get('fields') or {}).get('granularity')).total_seconds()
+    except (AttributeError, TypeError, ValueError):
+        return 0
+    last = (session.get('lastBar') or {}).get('time') or session.get('started')
+    if not step or not last:
+        return 0
+    gone = marketSeconds(last / 1000.0, now) / step - 1
+    return int(gone) if gone > bars else 0
 
 
 def judge(sessions):
@@ -680,7 +805,7 @@ def read(events, paper=False):
     divergence, and PARITY_ALARM its breaches (trading/parity.py).
     """
     last = None
-    signals = orders = cancels = 0
+    signals = orders = cancels = rejects = 0
     errors = []
     parity = {'divergences': 0, 'byKind': {}, 'alarms': [], 'last': None}
     for event in events:
@@ -697,6 +822,8 @@ def read(events, paper=False):
             cancels += 1
         elif kind == 'STATUS' and event.get('status') == 'ERROR':
             errors.append(millis(event.get('_created')))
+        elif kind == 'TRANSACTION' and str(event.get('type') or '').endswith('ORDER_REJECT'):
+            rejects += 1
         elif kind == 'STATUS' and event.get('status') == 'PARITY':
             parity['divergences'] += 1
             name = event.get('kind') or '?'
@@ -710,7 +837,7 @@ def read(events, paper=False):
     simOpen, simClosed = ([], []) if paper else fills(events, 'SIMULATEDFILL')
     net = sum(t['pl'] for t in closed if t.get('pl') is not None)
     return {'lastBar': last, 'signals': signals, 'orders': orders,
-            'cancels': cancels, 'errors': len(errors),
+            'cancels': cancels, 'errors': len(errors), 'rejects': rejects,
             'open': open_, 'closed': closed, 'net': net,
             'won': sum(1 for t in closed if (t.get('pl') or 0) > 0),
             'lost': sum(1 for t in closed if (t.get('pl') or 0) < 0),

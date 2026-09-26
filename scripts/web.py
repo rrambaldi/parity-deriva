@@ -101,9 +101,9 @@ def main(argv=None):
     server.RequestHandlerClass.service.sources.start()
     # an archive reads its trade servers' sessions (web/servers.py poll)
     servers.start(server.RequestHandlerClass.service)
-    # a real money server's loss limit, every minute (web/livesessions.py guard)
-    if settings.ACCOUNTS == 'real' and settings.DAILY_LOSS_PCT > 0:
-        server.RequestHandlerClass.service.live.watch(settings.DAILY_LOSS_PCT)
+    # every minute: the alerts of the sessions, and a real money server's
+    # loss limit (web/livesessions.py watch)
+    server.RequestHandlerClass.service.live.watch(settings)
 
     def restart(signum, frame):
         # the socket is closed first so the new process can bind the port;

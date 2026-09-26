@@ -21,7 +21,7 @@ Per ogni cantiere: obiettivo, scelte, file, dati, pagine/API/MCP, test,
   `web/static/i18n/it.json`.
 - **Nessuna dipendenza nuova**: stdlib, numpy e pandas che ci sono già, e i
   comandi che l'immagine Docker ha già (`openssl`). Una sola eccezione, piccola:
-  la libreria MIT per il QR, copiata in `web/static/vendor/` (C8).
+  la libreria MIT per il QR, copiata in `web/static/qrcode.js` (C8).
 - **Test**: `unittest` in `tests/`, uno per cantiere almeno; `tests/app_check.js`
   dopo ogni modifica ad `app.js` o `menu.js`. Screenshot con Chrome headless
   per le pagine toccate.
@@ -59,9 +59,9 @@ per le altre c'è la mia proposta.
 L'ordine segue le dipendenze, non il numero del cantiere:
 
 ```text
-C1a  net ≥ 0 e trade minimi in promote()  subito, non dipende da niente
-C7c  colonna R nei trade                  serve a C4 e C5
-C8   avvisi + pagina per il telefono      utile subito: le demo girano già
+C1a  net ≥ 0 e trade minimi in promote()  fatto (7d93728)
+C7c  colonna R nei trade                  fatto (0ca8c06)
+C8   avvisi + pagina per il telefono      fatto
 C2   diario + scheda                      serve a C1b, C3, C6
 C5   banda Monte Carlo + baseline         serve a C1b, C3, C6
 C3   holdout + gate SIM → DEMO            usa C2 e C5
@@ -597,9 +597,11 @@ il server demo e per quello reale.
 - **Telegram.** Un POST alla Bot API con `urllib` (stdlib), con
   `TELEGRAM_TOKEN` (il bot si crea con BotFather) e `TELEGRAM_CHAT` in `.env`.
 - **Il telefono.**
-  - **Abbinamento con un QR.** Pagina settings, tab "Phones", "Pair a
+  - **Abbinamento con un QR.** Pagina settings, tab "alerts", "pair a
     phone": il server crea un codice monouso valido 10 minuti e mostra il QR
-    di `<PUBLIC_URL>/phone?pair=<codice>`. Il telefono lo apre e il codice
+    di `<PUBLIC_URL>/phone?pair=<codice>`. Il codice si può anche scrivere a
+    mano nella pagina del telefono: su iPhone l'app nella schermata Home non
+    ha i cookie di Safari, quindi si abbina da lì. Il telefono lo apre e il codice
     diventa un token del dispositivo, in un cookie `HttpOnly`, `Secure`,
     `SameSite=Strict`. Sul server se ne tiene solo lo sha256, in
     `DATA_DIR/phones.json`, con nome, data e ultimo accesso. Dalla stessa tab
@@ -625,11 +627,13 @@ il server demo e per quello reale.
     schermata home, con il nome del ruolo del server ("parity demo",
     "parity REAL"). Un telefono si abbina a ogni server che vuole: demo e
     reale sono due icone.
-  - **Accesso.** `/phone`, `/phone/sw.js` e `/api/phone/*` entrano nelle rotte
-    pubbliche di `web/access.py` (`PUBLIC`), come `/mcp`, perché il telefono
-    non ha il certificato client; il manifest sta sotto `/static/`, che è già
-    pubblico. Tutte tranne l'abbinamento vogliono il token del dispositivo.
-    Dove nginx chiede il certificato, serve la stessa eccezione di `/mcp`.
+  - **Accesso.** `/phone`, `/phone-sw.js` (alla radice, così il suo scope è
+    tutto il servizio), `/phone-manifest.json` e `/api/phone/*` passano prima
+    del cancello di `web/access.py`, come `/mcp`, perché il telefono non ha il
+    certificato client; `/static/` è già pubblico. Tutte tranne
+    l'abbinamento vogliono il token del dispositivo. Dove nginx chiede il
+    certificato, serve la stessa eccezione di `/mcp` (README, "Alerts, and a
+    phone paired with a trade server").
   - **Limiti.**
     - Il telefono parla con il server di trade al suo indirizzo pubblico
       (`PARITY_DERIVA_PUBLIC_URL`). Un server di trade ha sempre un
@@ -639,16 +643,17 @@ il server demo e per quello reale.
     - iPhone: le notifiche web funzionano da iOS 16.4, e solo dopo
       "Aggiungi a schermata Home". Android: da Chrome, anche senza.
 - **QR.** Lo disegna il browser, con una piccola libreria MIT copiata in
-  `web/static/vendor/qrcode.js` (qrcode-generator, circa 20 KB): nessuna CDN,
-  le pagine funzionano anche offline.
+  `web/static/qrcode.js` (qrcode-generator 1.4.4 di Kazuhiko Arase, 56 KB;
+  `sendFile` serve solo file piatti in `web/static`): nessuna CDN, le pagine
+  funzionano anche offline.
 - **File.** Nuovi `web/notify.py`, `web/phone.py` (abbinamento, token, VAPID,
-  push), `web/static/phone.html`, `phone.js`, `sw.js`, `manifest-phone.json`,
-  `web/static/vendor/qrcode.js`. Da toccare: `web/livesessions.py` (il giro
-  di ogni minuto, gli eventi), `scripts/web.py` (lo fa partire su ogni
-  server), `web/access.py` (rotte pubbliche), `web/service.py` (route),
-  `web/static/settings.js` (tab "Phones", "send a test alert"), `live.js` e
-  `logs.js` (banner), `etc/settings.py` (`SMTP_*`, `TELEGRAM_*`,
-  `ALERT_STALE_BARS=3`), `i18n/it.json`.
+  push, il manifest), `web/static/phone.html`, `phone.js`, `phone-sw.js`,
+  `alerts.js` (i banner), `qrcode.js`. Toccati: `web/livesessions.py` (il
+  giro di ogni minuto, gli ordini rifiutati contati), `scripts/web.py` (lo fa
+  partire su ogni server), `web/service.py` (route), `settings.html` e
+  `settings.js` (tab "alerts", "send a test alert"), `live.html` e
+  `logs.html` (banner), `app.css`, `etc/settings.py` (`SMTP_*`,
+  `TELEGRAM_*`, `ALERT_STALE_BARS=3`), `i18n/it.json`, README.
 - **Test.**
   - Nuovo `tests/notify_test.py`: un evento parte una volta sola, e
     "resolved" una volta; banner sempre; email e Telegram solo se
