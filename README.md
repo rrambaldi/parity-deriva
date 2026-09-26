@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <img src="assets/logo-light.svg" alt="parity-deriva" width="480">
-  </picture>
+  <img src="loghi/definitivo/png/orizzontale_fondo-scuro.png" alt="parity-deriva" width="480">
 </p>
 
 # parity-deriva
