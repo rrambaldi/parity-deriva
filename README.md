@@ -81,10 +81,10 @@ The image is built from a clone of this repository: `docker compose up -d`
 builds it the first time (`--build` after a `git pull`). No image is published
 yet: `.github/workflows/docker.yml` pushes one to ghcr.io only when run by hand.
 
-**On a PC.** On Windows, `docker/pc.ps1` does it all, with Docker Desktop
-running and Git for Windows:
-
-    powershell -ExecutionPolicy Bypass -File pc.ps1
+**On a PC.** On Windows, double-click `docker/install-pc.cmd`: it runs
+`docker/pc.ps1`, which installs what is missing (Git, WSL 2, Docker Desktop,
+with winget) and does the rest. Step by step, for anyone:
+[docs/INSTALLA-PC.md](docs/INSTALLA-PC.md) (in Italian).
 
 It keeps everything under one folder, `%USERPROFILE%\parity-deriva`: the code
 cloned in `app`, and all the data in `data` - bind-mounted as `/data` by a
