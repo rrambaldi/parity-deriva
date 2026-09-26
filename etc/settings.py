@@ -74,10 +74,15 @@ OUTPUT_RESULTS_DIR = os.environ.get('OUTPUT_RESULTS_DIR', ".")
 # push_record). Anything but 'real' is demo.
 ACCOUNTS = 'real' if dotenv('PARITY_DERIVA_ACCOUNTS', 'demo') == 'real' else 'demo'
 # on a real server: what a form needs to have done on demo to be promoted -
-# days trading, trades closed, no parity alarm - and the day's loss, in % of
-# the sessions' capital, at which every session is stopped until tomorrow
+# days trading, trades closed (or, on a slow timeframe, PROMOTE_MIN_TRADES
+# once it has traded PROMOTE_SLOW_DAYS: on D1 30 trades are a year), a net
+# P&L of at least PROMOTE_MIN_NET, no parity alarm - and the day's loss, in %
+# of the sessions' capital, at which every session is stopped until tomorrow
 PROMOTE_DAYS = int(dotenv('PARITY_DERIVA_PROMOTE_DAYS', '20'))
 PROMOTE_TRADES = int(dotenv('PARITY_DERIVA_PROMOTE_TRADES', '30'))
+PROMOTE_SLOW_DAYS = int(dotenv('PARITY_DERIVA_PROMOTE_SLOW_DAYS', '90'))
+PROMOTE_MIN_TRADES = int(dotenv('PARITY_DERIVA_PROMOTE_MIN_TRADES', '10'))
+PROMOTE_MIN_NET = float(dotenv('PARITY_DERIVA_PROMOTE_MIN_NET', '0'))
 DAILY_LOSS_PCT = float(dotenv('PARITY_DERIVA_DAILY_LOSS_PCT', '3'))
 
 DOMAIN = "real" if ACCOUNTS == 'real' else "practice"

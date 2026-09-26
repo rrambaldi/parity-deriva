@@ -25,11 +25,11 @@ FORM = {'strategy': 'AB', 'instrument': 'EUR_USD', 'granularity': 'H1', 'capital
 DAY = 86400000
 
 
-def record(days, trades, alarms=0, demo=True):
+def record(days, trades, alarms=0, demo=True, pl=1.0):
     now = int(time.time() * 1000)
     return {'fields': dict(FORM, **{'from': '2020-01-01'}), 'sessions': [{
         'id': 'S', 'provider': 'ig', 'account': 'DEMO1', 'demo': demo, 'started': now - days * DAY,
-        'stopped': None, 'closed': [{'time': now, 'pl': 1.0}] * trades,
+        'stopped': None, 'closed': [{'time': now, 'pl': pl}] * trades,
         'parity': {'divergences': 0, 'alarms': ['a breach'] * alarms}}]}
 
 
@@ -99,6 +99,20 @@ class DemoRealTest(unittest.TestCase):
             self.assertIn('confirm the capital at risk', str(caught.exception))
         self.start('REAL1', confirm='1000')
         self.assertEqual(self.spawned, [('ig', 'REAL1')])
+
+    def test_a_promotion_needs_a_net_not_below_zero(self):
+        told = self.live.promote(record(30, 50, pl=-2.5), 'promote: demo')
+        self.assertFalse(told['ok'])
+        self.assertEqual(told['need'], ['net on demo \u2265 0, it has -125.00'])
+        self.assertTrue(self.live.promote(record(30, 50, pl=0.0), 'promote: demo')['ok'])
+        self.assertTrue(self.live.promote(record(30, 50, pl=2.5), 'promote: demo')['ok'])
+
+    def test_a_slow_timeframe_passes_with_fewer_trades_after_enough_days(self):
+        self.assertTrue(self.live.promote(record(95, 12), 'promote: demo')['ok'])
+        for days, trades in ((95, 8), (40, 12)):
+            told = self.live.promote(record(days, trades), 'promote: demo')
+            self.assertFalse(told['ok'])
+            self.assertEqual(told['need'], ['30 closed trades, or 10 after 90 days: it has %d' % trades])
 
     def test_the_loss_limit_stops_every_session_until_tomorrow(self):
         self.server('real')

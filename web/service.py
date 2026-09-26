@@ -677,6 +677,9 @@ class Service(object):
 		return {'accounts': livesessions.serverAccounts(), 'roles': servers.roles(self.setup),
 				'promoteDays': getattr(self.setup, 'PROMOTE_DAYS', settings.PROMOTE_DAYS),
 				'promoteTrades': getattr(self.setup, 'PROMOTE_TRADES', settings.PROMOTE_TRADES),
+				'promoteSlowDays': getattr(self.setup, 'PROMOTE_SLOW_DAYS', settings.PROMOTE_SLOW_DAYS),
+				'promoteMinTrades': getattr(self.setup, 'PROMOTE_MIN_TRADES', settings.PROMOTE_MIN_TRADES),
+				'promoteMinNet': getattr(self.setup, 'PROMOTE_MIN_NET', settings.PROMOTE_MIN_NET),
 				'dailyLossPct': getattr(self.setup, 'DAILY_LOSS_PCT', settings.DAILY_LOSS_PCT),
 				'halted': self.live.halted(), 'bucket': storage.bucket(self.setup) is not None}
 

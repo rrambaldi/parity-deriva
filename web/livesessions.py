@@ -259,8 +259,9 @@ class LiveSessions(object):
             promotion = self.promoted(fields)
             if not promotion or not promotion.get('ok'):
                 raise LiveError("this form was not promoted from a demo server with its record "
-                                "(%d days, %d trades, no parity alarm): promote it from the demo "
-                                "server's live page" % (settings.PROMOTE_DAYS, settings.PROMOTE_TRADES))
+                                "(%d days, %d trades, net \u2265 %g, no parity alarm): promote it from "
+                                "the demo server's live page"
+                                % (settings.PROMOTE_DAYS, settings.PROMOTE_TRADES, settings.PROMOTE_MIN_NET))
             if str(confirm or '') != str(fields['capital']):
                 raise LiveError("real money: confirm the capital at risk, %s a session on %d "
                                 "account%s" % (fields['capital'], len(targets),
@@ -404,8 +405,8 @@ class LiveSessions(object):
     def promote(self, record, origin):
         """
         Keep a demo server's record of a form, judged here and not taken on
-        its word: ok once it has the days, the trades and no parity alarm
-        this server's settings ask for. Kept either way, as the proof.
+        its word: ok once it has the days, the trades, the net and no parity
+        alarm this server's settings ask for. Kept either way, as the proof.
         """
         if not isinstance(record, dict) or not isinstance(record.get('fields'), dict) \
                 or not isinstance(record.get('sessions'), list):
@@ -415,8 +416,13 @@ class LiveSessions(object):
         need = []
         if verdict['days'] < settings.PROMOTE_DAYS:
             need.append("%d days on demo, it has %.1f" % (settings.PROMOTE_DAYS, verdict['days']))
-        if verdict['trades'] < settings.PROMOTE_TRADES:
-            need.append("%d closed trades, it has %d" % (settings.PROMOTE_TRADES, verdict['trades']))
+        slow = verdict['days'] >= settings.PROMOTE_SLOW_DAYS and verdict['trades'] >= settings.PROMOTE_MIN_TRADES
+        if verdict['trades'] < settings.PROMOTE_TRADES and not slow:
+            need.append("%d closed trades, or %d after %d days: it has %d" % (
+                settings.PROMOTE_TRADES, settings.PROMOTE_MIN_TRADES, settings.PROMOTE_SLOW_DAYS,
+                verdict['trades']))
+        if verdict['net'] < settings.PROMOTE_MIN_NET:
+            need.append("net on demo \u2265 %g, it has %.2f" % (settings.PROMOTE_MIN_NET, verdict['net']))
         if verdict['alarms']:
             need.append("no parity alarm, it has %d" % verdict['alarms'])
         if any(s.get('demo') is False for s in sessions):
