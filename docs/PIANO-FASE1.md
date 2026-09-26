@@ -45,7 +45,7 @@ proposta.
 | D2 | Il **ramp** dal 25% al 100%: automatico o con un click? | Con un click. Dopo 30 trade dentro la banda la pagina live dice "ready for full size" e un pulsante riavvia il form al 100%, con la stessa conferma del capitale di oggi. Sono soldi veri: decide una persona. | C6 |
 | D3 | Che **canale** usano gli avvisi? | Sempre nella pagina (banner su live e logs) e nel log. In più l'email con `smtplib` (stdlib) se in `.env` ci sono i campi `SMTP_*`. Telegram eventualmente dopo. | C6 |
 | D4 | L'holdout è **per strumento** o **per strategia**? | Per strumento + granularità: una data di taglio sola, uguale per tutte le strategie su quello strumento. È più semplice e più severo: nessuna strategia viene provata su quel pezzo di storico. | C3 |
-| D5 | Un diario per **strategia** o per strategia + strumento? | Per strategia, cioè per nome del codice. Ogni voce dice strumento e granularità e la pagina filtra: "va su FX, non sulle azioni" si legge nello stesso posto. Le versioni restano per strategia + strumento + granularità (D1). | C2 |
+| D5 | Un diario per **strategia** o per strategia + strumento? | **Deciso il 2026-09-26.** Per strategia, cioè per nome del codice. Ogni voce dice strumento e granularità e la pagina filtra: "va su FX, non sulle azioni" si legge nello stesso posto. Le versioni restano per strategia + strumento + granularità (D1). | C2 |
 
 ---
 
