@@ -69,6 +69,45 @@ def submitted(upstream, code, dataDir, report):
     return there
 
 
+def pushRuns(upstream, service, items, codes, sent, report, dry_run=False, here=''):
+    """
+    The sets of `items` ({sweep, n}) and those runs of theirs, the uploaded
+    strategies they trade submitted first (`codes` maps this server's code
+    to the other's). A file whose sha1 is in `sent` already went.
+    """
+    files = []
+    for sweep in sorted(set(i['sweep'] for i in items)):
+        path = service.sweepPath(sweep, '.json.gz')
+        with gzip.open(path, 'rb') as handle:
+            job = json.loads(handle.read())
+        code = (job.get('fields') or {}).get('strategy')
+        if code and code not in codes:
+            codes[code] = code if dry_run else submitted(upstream, code, service.setup.DATA_DIR, report)
+        if code and codes[code] != code:
+            job['fields']['strategy'] = codes[code]
+            blob = gzip.compress(json.dumps(job).encode())
+        else:
+            with open(path, 'rb') as handle:
+                blob = handle.read()
+        files.append((path, blob, {'sweep': sweep, 'commit': here}))
+        for item in items:
+            if item['sweep'] == sweep:
+                run = service.sweepRunPath(sweep, item['n'])
+                with open(run, 'rb') as handle:
+                    files.append((run, handle.read(), {'sweep': sweep, 'n': item['n']}))
+    for path, blob, what in files:
+        stamp = hashlib.sha1(blob).hexdigest()
+        if sent.get(path) == stamp:
+            continue
+        if dry_run:
+            report("would push %s (%d KB)" % (os.path.basename(path), len(blob) >> 10))
+            continue
+        pushFile(upstream, blob, what)
+        sent[path] = stamp
+        report("pushed %s%s (%d KB)" % (what['sweep'], '/%s' % what['n'] if 'n' in what else '',
+                                       len(blob) >> 10))
+
+
 def main(argv=None, report=print):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[1],
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -106,37 +145,7 @@ def main(argv=None, report=print):
                        '%s/%s' % (i['sweep'], i['n']) for i in missing)))
             status = 1
             continue
-        files = []
-        for sweep in sorted(set(i['sweep'] for i in mix['items'])):
-            path = service.sweepPath(sweep, '.json.gz')
-            with gzip.open(path, 'rb') as handle:
-                job = json.loads(handle.read())
-            code = (job.get('fields') or {}).get('strategy')
-            if code and code not in codes:
-                codes[code] = code if args.dry_run else submitted(upstream, code, settings.DATA_DIR, report)
-            if code and codes[code] != code:
-                job['fields']['strategy'] = codes[code]
-                blob = gzip.compress(json.dumps(job).encode())
-            else:
-                with open(path, 'rb') as handle:
-                    blob = handle.read()
-            files.append((path, blob, {'sweep': sweep, 'commit': here}))
-            for item in mix['items']:
-                if item['sweep'] == sweep:
-                    run = service.sweepRunPath(sweep, item['n'])
-                    with open(run, 'rb') as handle:
-                        files.append((run, handle.read(), {'sweep': sweep, 'n': item['n']}))
-        for path, blob, what in files:
-            stamp = hashlib.sha1(blob).hexdigest()
-            if sent.get(path) == stamp:
-                continue
-            if args.dry_run:
-                report("would push %s (%d KB)" % (os.path.basename(path), len(blob) >> 10))
-                continue
-            pushFile(upstream, blob, what)
-            sent[path] = stamp
-            report("pushed %s%s (%d KB)" % (what['sweep'], '/%s' % what['n'] if 'n' in what else '',
-                                           len(blob) >> 10))
+        pushRuns(upstream, service, mix['items'], codes, sent, report, args.dry_run, here)
         if not args.dry_run:
             rpc(upstream, 'push_mix', {'mix': {'id': mix['id'], 'name': mix.get('name') or '',
                                                'leverage': mix.get('leverage'),

@@ -88,6 +88,9 @@ def main(argv=None):
     # the market data's sources on their timers (data/sources.py): nothing
     # on a server that only reads it, or whose sources are all manual
     server.RequestHandlerClass.service.sources.start()
+    # a real money server's loss limit, every minute (web/livesessions.py guard)
+    if settings.ACCOUNTS == 'real' and settings.DAILY_LOSS_PCT > 0:
+        server.RequestHandlerClass.service.live.watch(settings.DAILY_LOSS_PCT)
 
     def restart(signum, frame):
         # the socket is closed first so the new process can bind the port;

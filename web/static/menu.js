@@ -183,6 +183,12 @@ function marginText(m) {
   spinner.setAttribute('aria-label', 'loading');
   spinner.hidden = true;
   document.getElementById('env-badge').after(spinner);
+  // what the server trades, demo accounts or real money (PARITY_DERIVA_ACCOUNTS
+  // in .env, never set from a page): beside the page's own badge, on every page
+  const accounts = document.createElement('span');
+  accounts.id = 'accounts-badge';
+  accounts.hidden = true;
+  document.getElementById('env-badge').after(accounts);
   const plain = window.fetch.bind(window);
   let waiting = 0;
   window.fetch = (...args) => {
@@ -350,6 +356,15 @@ function marginText(m) {
           el.title = titles[name] + (on ? ' - ' + what : '');
         }
         if (busy.server) serverAnswer(busy.server);
+        if (busy.accounts) {
+          const real = busy.accounts === 'real';
+          accounts.hidden = false;
+          accounts.className = 'badge ' + (real ? 'live' : 'practice');
+          accounts.textContent = real ? 'real money server' : 'demo server';
+          accounts.title = (real ? 'this server trades real money accounts only'
+            : 'this server trades demo accounts only') + ' (PARITY_DERIVA_ACCOUNTS in .env)';
+          document.documentElement.dataset.accounts = busy.accounts;
+        }
       } catch (error) { /* no answer, no light: the page itself is unaffected */ }
       showServer();
     }

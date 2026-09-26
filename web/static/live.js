@@ -15,7 +15,14 @@ const state = {
   group: null,                  // the group key the chart draws
   candles: { key: null, reference: null, feeds: {} },   // feed -> {provider, account, candles}
   pendingZoom: null,            // a trade clicked in a group the chart had not loaded yet
+  server: { accounts: 'demo' },  // api/server: demo accounts or real money, from .env
+  note: '',                     // a verdict the poll does not wipe
 };
+
+function note(text) {
+  state.note = text;
+  message(text);
+}
 
 function stamp(ms) {
   if (ms === null || ms === undefined) return '';
@@ -100,8 +107,10 @@ function updateBadge() {
   const badge = $('env-badge');
   if (!badge) return;
   const live = state.sessions.some((s) => s.running && !s.demo);
-  badge.className = 'badge ' + (live ? 'live' : 'practice');
-  badge.textContent = live ? 'live · real money' : 'practice';
+  // a real money server is never practice, running or not
+  const real = state.server.accounts === 'real';
+  badge.className = 'badge ' + (live || real ? 'live' : 'practice');
+  badge.textContent = live ? 'live · real money' : real ? 'real money · none running' : 'practice';
 }
 
 function renderTable() {
@@ -143,10 +152,42 @@ function renderTable() {
     button.textContent = s.running ? 'stop & close' : 'delete';
     button.disabled = !!(s.running && s.stopped);
     actions.appendChild(button);
+    // on a demo server, what this form did goes to the real money one, which
+    // judges it by its own minimums (api/live/<id>/promote)
+    if (state.server.accounts === 'demo' && state.server.promoteTo && state.server.promoteTo.url) {
+      const promote = document.createElement('button');
+      promote.type = 'button';
+      promote.dataset.action = 'promote';
+      promote.dataset.icon = 'upload';
+      promote.textContent = 'promote';
+      promote.title = `send this form's record to the real money server, ${state.server.promoteTo.url}`;
+      actions.append(' ', promote);
+    }
     if (s.running) running += 1;
   }
-  cell(foot.insertRow(), `${running} running of ${state.sessions.length}`).colSpan = 13;
+  const total = cell(foot.insertRow(), `${running} running of ${state.sessions.length}`);
+  total.colSpan = 13;
+  if (running) {
+    // the kill switch: every session stopped and closed at once
+    const all = document.createElement('button');
+    all.type = 'button';
+    all.dataset.action = 'stop-all';
+    all.dataset.icon = 'stop';
+    all.textContent = 'stop all';
+    all.title = 'stop every running session and close its trades at market';
+    total.append(' ', all);
+  }
 }
+
+$('live-foot').addEventListener('click', async (event) => {
+  if (event.target.dataset.action !== 'stop-all') return;
+  try {
+    if (!await askUser('Stop EVERY running session and close everything? Their resting orders are cancelled and their open trades closed at market.')) return;
+    const { stopped } = await post('api/live/stop-all');
+    note(`stopped ${stopped.length} session${stopped.length === 1 ? '' : 's'}`);
+    return refresh();
+  } catch (error) { message(String(error.message || error)); }
+});
 
 $('live-rows').addEventListener('click', async (event) => {
   const row = event.target.closest('tr[data-id]');
@@ -158,6 +199,14 @@ $('live-rows').addEventListener('click', async (event) => {
       if (!await askUser(`Stop session ${id} and close everything? Its resting orders are cancelled and its open trades closed at market. Other sessions on the same account keep theirs.`)) return;
       await post(`api/live/${id}/stop`);
       return refresh();
+    }
+    if (action === 'promote') {
+      if (!await askUser(`Send what the form of session ${id} did here - every session of it - to the real money server? It trades there only once that server finds the record enough.`)) return;
+      note('promoting…');
+      const v = await post(`api/live/${id}/promote`);
+      note(v.ok ? `promoted: ${v.days} days, ${v.trades} trades, no parity alarm - it can start on the real money server`
+        : `not promoted yet: it needs ${v.need.join(', ')}`);
+      return;
     }
     if (action === 'delete') {
       if (!await askUser(`Delete session ${id} and its log?`)) return;
@@ -277,7 +326,8 @@ function drawEquity(d) {
 async function refresh() {
   try {
     ({ sessions: state.sessions } = await ask('api/live'));
-    message('');
+    // what a promotion, the kill switch or the loss limit said stays up
+    message(state.note || '');
   } catch (error) { message(String(error.message || error)); }
   renderTable();
 }
@@ -943,10 +993,19 @@ $('new-form').addEventListener('submit', async (event) => {
   // the capital the risk is a percentage of: one number for every account,
   // a USD one taking it 1:1 (web/livesessions.start, scripts/live.py quoteBalance)
   fields.capital = $('new-capital').value;
+  // a real money server starts a session only with the capital at risk
+  // confirmed (web/livesessions.start), asked here in words
+  let confirm;
+  if (state.server.accounts === 'real') {
+    if (!fields.capital) { newSay('real money: give the capital at risk'); return; }
+    if (!await askUser(`REAL MONEY: ${ticked.length} session${ticked.length === 1 ? '' : 's'}, `
+      + `each risking ${fields.risk || '?'}% a trade of a capital of ${fields.capital}. Start?`)) return;
+    confirm = fields.capital;
+  }
   $('new-start').disabled = true;
   newSay('starting…');
   try {
-    const { started } = await post('api/live', { fields,
+    const { started } = await post('api/live', { fields, confirm,
       targets: ticked.map((t) => ({ provider: t.dataset.provider, account: t.dataset.account })) });
     newSay(`started ${started.length} session${started.length === 1 ? '' : 's'}`);
     for (const t of ticked) t.checked = false;
@@ -958,3 +1017,12 @@ $('new-form').addEventListener('submit', async (event) => {
 });
 
 setupNew();
+// demo or real money, and on a real server the day's halt by the loss limit
+ask('api/server').then((server) => {
+  state.server = server;
+  if (server.halted) {
+    note(`the day's loss limit (${server.dailyLossPct}% of the capital traded) stopped every session: `
+      + 'none starts again before tomorrow, UTC');
+  }
+  renderTable();
+}).catch(() => {});

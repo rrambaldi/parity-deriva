@@ -59,7 +59,21 @@ PROVIDER = os.environ.get('PARITY_DERIVA_PROVIDER', 'oanda')
 CSV_DATA_DIR = os.environ.get('PARITY_DERIVA_CSV_DATA_DIR', ".")
 OUTPUT_RESULTS_DIR = os.environ.get('OUTPUT_RESULTS_DIR', ".")
 
-DOMAIN = "practice"
+# What this server trades: 'demo' accounts or 'real' money, never both - a
+# server for each. From .env only, never from a page: a click must not turn a
+# server into one that trades real money. It picks DOMAIN below and
+# MT5_ALLOW_REAL, web/livesessions.py refuses an account of the other kind,
+# and a real one takes only what a demo server promoted (web/mcp.py
+# push_record). Anything but 'real' is demo.
+ACCOUNTS = 'real' if dotenv('PARITY_DERIVA_ACCOUNTS', 'demo') == 'real' else 'demo'
+# on a real server: what a form needs to have done on demo to be promoted -
+# days trading, trades closed, no parity alarm - and the day's loss, in % of
+# the sessions' capital, at which every session is stopped until tomorrow
+PROMOTE_DAYS = int(dotenv('PARITY_DERIVA_PROMOTE_DAYS', '20'))
+PROMOTE_TRADES = int(dotenv('PARITY_DERIVA_PROMOTE_TRADES', '30'))
+DAILY_LOSS_PCT = float(dotenv('PARITY_DERIVA_DAILY_LOSS_PCT', '3'))
+
+DOMAIN = "real" if ACCOUNTS == 'real' else "practice"
 STREAM_DOMAIN = ENVIRONMENTS["streaming"][DOMAIN]
 API_DOMAIN = ENVIRONMENTS["api"][DOMAIN]
 # Credentials come from the environment only - never commit them. Set:
@@ -395,9 +409,9 @@ MT5_TERMINALS = [
 ]
 # The login a process trades on; web/livesessions sets it per session.
 MT5_ACCOUNT = dotenv('MT5_ACCOUNT', '')
-# Demo only for now. lib/mt5.py reads the account's trade mode after the
-# login and refuses anything but a demo while this is False.
-MT5_ALLOW_REAL = False
+# lib/mt5.py reads the account's trade mode after the login and refuses
+# anything but a demo while this is False: True on a real money server only.
+MT5_ALLOW_REAL = ACCOUNTS == 'real'
 # The broker's clock minus UTC, in hours, used only while the market is shut:
 # with it open the offset is read off the newest tick.
 MT5_SERVER_UTC_OFFSET = 3

@@ -1291,6 +1291,40 @@ mix page runs each run again on the cloud's code and candles and compares
 the trades: "the same here", or where they part. Candles and calendar go
 the other way only: the PC takes them with the cloud as its upstream.
 
+## A server for demo accounts, another for real money
+
+Each server trades one kind of account, set in `parity_deriva/.env` and
+never from a page (a click must not turn a server into a real money one):
+
+```
+export PARITY_DERIVA_ACCOUNTS=real        # anything else, or nothing, is demo
+export PARITY_DERIVA_PROMOTE_DAYS=20      # on a real one: what a form must have done on demo
+export PARITY_DERIVA_PROMOTE_TRADES=30
+export PARITY_DERIVA_DAILY_LOSS_PCT=3     # a day's loss that stops every session
+```
+
+It picks OANDA's, eToro's, IG's and Capital's DOMAIN and MT5_ALLOW_REAL,
+and every page's header says it: "demo server" or, in red, "real money
+server". A demo server refuses a real money account and a real one a demo
+account (the paper account is both). A real money server also:
+
+- starts a session of a form only once a demo server promoted it with a
+  record this server finds enough: the days, the closed trades, no parity
+  alarm, demo accounts only. It judges the record itself and keeps it;
+- asks for the capital at risk to be confirmed before it starts one;
+- stops every session at the day's loss limit, and starts none again
+  before the next UTC day; "stop all" on the live page stops them by hand;
+- over MCP takes only what a demo server promotes: no assistant writes
+  strategies there or runs backtests.
+
+A promotion: make a token of the promote role on the real server, give it
+to the demo one (settings, this server), then press promote on a session of
+the form on the demo server's live page. It sends the uploaded strategy the
+form trades, the run of a set it was starred from and every session of the
+form there (`push_record`); the answer is the real server's verdict. The
+real server takes its market data from the demo one like the PC does: a
+mirror token there, and the demo server as its upstream.
+
 # Tests
 
 The project ships a test suite under ```parity_deriva/tests/``` (plain

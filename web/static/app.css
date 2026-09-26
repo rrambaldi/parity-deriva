@@ -437,6 +437,9 @@ section {
 /* the buttons sit on the line of the boxes, under the names of the ones that
    have one */
 #calendar-actions, #market-actions, .market-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+#server-state.bad { color: var(--live); font-weight: 600; }
+#server-note:empty, #promote-box[hidden] { display: none; }
+#promote-url { width: min(36em, 80vw); }
 #market-box { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 #market-box .market-row { margin-top: 10px; }
 #market-box [hidden] { display: none; }

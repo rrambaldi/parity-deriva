@@ -591,6 +591,78 @@ class Service(object):
 		del self._order[:]
 		return self.marketData()
 
+	# ------------------------------------------------ demo, real, promotion
+
+	def promoteTargetPath(self):
+		return os.path.join(getattr(self.setup, 'DATA_DIR', '') or '.', 'promote.json')
+
+	def promoteTarget(self):
+		"""{url, token} of the real money server this demo one promotes to."""
+		try:
+			with open(self.promoteTargetPath()) as handle:
+				kept = json.load(handle)
+		except (OSError, ValueError):
+			kept = {}
+		return {'url': str(kept.get('url') or ''), 'token': str(kept.get('token') or '')}
+
+	def serverData(self):
+		"""
+		What this server trades, from .env and not from a page, with what
+		goes with it: a real one's minimums for a promotion, its loss limit
+		and today's halt; a demo one's real server to promote to.
+		"""
+		target = self.promoteTarget()
+		return {'accounts': livesessions.serverAccounts(),
+				'promoteDays': getattr(self.setup, 'PROMOTE_DAYS', settings.PROMOTE_DAYS),
+				'promoteTrades': getattr(self.setup, 'PROMOTE_TRADES', settings.PROMOTE_TRADES),
+				'dailyLossPct': getattr(self.setup, 'DAILY_LOSS_PCT', settings.DAILY_LOSS_PCT),
+				'halted': self.live.halted(),
+				'promoteTo': {'url': target['url'], 'token': bool(target['token'])}}
+
+	def setPromoteTarget(self, body):
+		url = str(body.get('url') or '').strip()
+		if not url.startswith(('https://', 'http://')):
+			raise ServiceError("the real server's MCP address, https://.../mcp")
+		token = str(body.get('token') or '') or self.promoteTarget()['token']
+		path = self.promoteTargetPath()
+		with open(os.open(path + '.part', os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as handle:
+			json.dump({'url': url, 'token': token}, handle)
+		os.replace(path + '.part', path)
+		return self.serverData()
+
+	def promote(self, session):
+		"""
+		Send the real money server what a session's form did here: the
+		uploaded strategy it trades, the run of a set it was starred from and
+		its live record (livesessions.record). The real server judges it by
+		its own minimums; its verdict is the answer.
+		"""
+		from parity_deriva.scripts import sync
+		if livesessions.serverAccounts() == 'real':
+			raise ServiceError("this is the real money server: promote from a demo one")
+		target = self.promoteTarget()
+		if not target['url'] or not target['token']:
+			raise ServiceError("no real server to promote to: set it on the settings page")
+		fields = dict(self.live.meta(session)['fields'])
+		lines, codes = [], {}
+		code = fields.get('strategy')
+		try:
+			if code:
+				codes[code] = sync.submitted(target, code, self.setup.DATA_DIR, lines.append)
+				fields['strategy'] = codes[code]
+			key = livesessions.groupKey(self.live.meta(session)['fields'])
+			starred = next((f for f in self.favourites()
+							if (f.get('source') or {}).get('kind') == 'sweep'
+							and livesessions.groupKey(f.get('fields')) == key), None)
+			if starred:
+				sync.pushRuns(target, self, [{'sweep': starred['source']['id'], 'n': starred['source']['n']}],
+							  codes, {}, lines.append)
+			record = dict(self.live.record(self.live.meta(session)['fields']), fields=fields)
+			verdict = sources.rpc(target, 'push_record', {'record': record})
+		except sources.SourceError as exc:
+			raise ServiceError(str(exc))
+		return dict(verdict, lines=lines)
+
 	def mergeBars(self, instrument, granularity, frame, keep=False):
 		"""
 		Bars into a store as an import puts them: under the backtest lock, so
@@ -1741,6 +1813,8 @@ class Service(object):
 								 or self._progress.get('running')
 								 or self._sandbox.locked()),
 				'live': self.live.running(),
+				# demo accounts or real money: the badge of every page
+				'accounts': livesessions.serverAccounts(),
 				'server': self.machine()}
 
 	def machine(self):
@@ -2998,6 +3072,8 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendJSON(self.service.pending())
 			if route == '/api/market':
 				return self.sendJSON(self.service.marketData())
+			if route == '/api/server':
+				return self.sendJSON(self.service.serverData())
 			if route == '/api/imports/status':
 				return self.sendJSON(self.service.importStatus())
 			if route == '/api/runs':
@@ -3157,7 +3233,19 @@ class Handler(BaseHTTPRequestHandler):
 				if not isinstance(body, dict) or not isinstance(body.get('fields'), dict):
 					raise ServiceError('the body is {"fields": {...}, "targets": [...]}')
 				return self.sendJSON({'started': self.service.live.start(
-					body['fields'], body.get('targets') or [])})
+					body['fields'], body.get('targets') or [], body.get('confirm'))})
+			if route == '/api/live/stop-all':
+				# the kill switch: every session running, stopped and closed
+				return self.sendJSON(self.service.live.stopAll())
+			if route == '/api/server/promote-to':
+				length = int(self.headers.get('Content-Length') or 0)
+				try:
+					body = json.loads(self.rfile.read(length) or b'{}')
+				except ValueError:
+					body = None
+				if not isinstance(body, dict):
+					raise ServiceError('the body is {"url", "token"}')
+				return self.sendJSON(self.service.setPromoteTarget(body))
 			if route == '/api/favourites' or route.startswith('/api/favourites/'):
 				# star a simulated form, or unstar / annotate one by its id
 				length = int(self.headers.get('Content-Length') or 0)
@@ -3190,6 +3278,8 @@ class Handler(BaseHTTPRequestHandler):
 					return self.sendJSON(self.service.live.stop(session))
 				if action == 'delete':
 					return self.sendJSON(self.service.live.delete(session))
+				if action == 'promote':
+					return self.sendJSON(self.service.promote(session))
 				return self.sendError("no route %s" % route, 404)
 			if route == '/api/calendar':
 				length = int(self.headers.get('Content-Length') or 0)

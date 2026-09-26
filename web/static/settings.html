@@ -38,6 +38,23 @@
   merge them all into the stores. The import is scripts/import_csv.py run by
   the service, so its report here is what it prints on the command line.
 -->
+<!--
+  What this server trades - demo accounts or real money - from .env and never
+  from here (etc/settings.py ACCOUNTS), and what goes with it: a real one's
+  minimums for a promotion and its loss limit, a demo one's real server.
+-->
+<section id="server-panel">
+  <h2 class="panel-title">this server</h2>
+  <div id="server-state"></div>
+  <div id="promote-box" class="market-row" hidden>
+    <label>promote to: the real server's MCP address
+      <input type="url" id="promote-url" spellcheck="false" placeholder="https://host/parity/mcp"></label>
+    <label>its promote token <input type="password" id="promote-token" autocomplete="off"></label>
+    <button type="button" id="promote-save" data-icon="yes">save</button>
+  </div>
+  <p id="server-note" role="status"></p>
+</section>
+
 <section id="data-panel">
   <!--
     Where the stores and the calendar are, and whether this server writes
@@ -202,6 +219,7 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
           <option value="pc">pc: pushes strategies, sets, mixes; copies the market data</option>
           <option value="mirror">mirror: copies the market data, nothing else</option>
           <option value="market">market: pushes candles and calendar, nothing else</option>
+          <option value="promote">promote: a demo server promoting to this real money one</option>
         </select></label>
       <button type="button" id="mcp-key-add" data-icon="add">new program token</button>
     </div>

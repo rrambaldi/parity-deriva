@@ -19,6 +19,7 @@ never stopped, on the same folder, warming up afresh.
 
 import datetime
 import glob
+import hashlib
 import json
 import os
 import re
@@ -51,6 +52,17 @@ SESSION_ID = re.compile(r'\d{8}-\d{6}-[0-9a-f]{6}')
 
 class LiveError(Exception):
     """A request the sessions refuse: the page shows it as it is."""
+
+
+def serverAccounts():
+    """'demo' or 'real': what this server trades (etc/settings.py ACCOUNTS, from .env)."""
+    return 'real' if getattr(settings, 'ACCOUNTS', 'demo') == 'real' else 'demo'
+
+
+def today():
+    """Midnight UTC, in epoch ms: the day a loss limit counts."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return int(now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
 
 
 def dotenv(path=os.path.join(ROOT, '.env')):
@@ -206,10 +218,19 @@ class LiveSessions(object):
             raise LiveError("%s on %s: %s" % (spec['strategy'], provider, exc))
         return spec
 
-    def start(self, fields, targets):
-        """One session per {provider, account}; returns their summaries."""
+    def start(self, fields, targets, confirm=None):
+        """
+        One session per {provider, account}; returns their summaries.
+
+        An account of the other kind than the server's is refused (the paper
+        one, the simulator, is both). On a real money server a session also
+        needs the form promoted from a demo server (promoted()), the day not
+        halted by the loss limit, and `confirm` the capital at risk: the
+        page asks for it, so a request that did not see it does not trade.
+        """
         if not targets:
             raise LiveError("no account chosen")
+        kind = serverAccounts()
         # every account trades the same capital - the form's, else the one
         # the backtest ran on - so the sessions' P&L compare number for
         # number; one in USD takes it 1:1 (scripts/live.quoteBalance)
@@ -222,7 +243,27 @@ class LiveSessions(object):
             if (target.get('provider'), target.get('account')) not in known:
                 raise LiveError("%s account %s is not one these credentials reach"
                                 % (target.get('provider'), target.get('account')))
+            account = known[(target['provider'], target['account'])]
+            if not isPaper(target['provider']) and bool(account.get('demo')) != (kind == 'demo'):
+                raise LiveError(
+                    "this server trades %s (PARITY_DERIVA_ACCOUNTS=%s in .env): %s account %s is %s"
+                    % ('demo accounts only' if kind == 'demo' else 'real money only', kind,
+                       target['provider'], target['account'],
+                       'a demo one' if account.get('demo') else 'real money'))
             self.check(fields, target['provider'])
+        if kind == 'real':
+            if self.halted():
+                raise LiveError("the day's loss limit stopped every session: no new one before "
+                                "tomorrow (UTC)")
+            promotion = self.promoted(fields)
+            if not promotion or not promotion.get('ok'):
+                raise LiveError("this form was not promoted from a demo server with its record "
+                                "(%d days, %d trades, no parity alarm): promote it from the demo "
+                                "server's live page" % (settings.PROMOTE_DAYS, settings.PROMOTE_TRADES))
+            if str(confirm or '') != str(fields['capital']):
+                raise LiveError("real money: confirm the capital at risk, %s a session on %d "
+                                "account%s" % (fields['capital'], len(targets),
+                                               '' if len(targets) == 1 else 's'))
         started = []
         for target in targets:
             account = known[(target['provider'], target['account'])]
@@ -258,6 +299,9 @@ class LiveSessions(object):
         command = [sys.executable, SCRIPT, '--provider', provider,
                    '--form', json.dumps(fields), '--account', account,
                    '--events', os.path.join(folder, 'events')]
+        # scripts/live.py wants it said on a real DOMAIN; start() checked the rest
+        if serverAccounts() == 'real':
+            command.append('--live')
         # the shadow simulator fills against a candle's bid and ask: on a
         # provider serving one series it has nothing to fill against. On the
         # paper account the execution handler is the simulator itself, so a
@@ -308,6 +352,141 @@ class LiveSessions(object):
             meta['stopped'] = int(time.time() * 1000)
             self.writeMeta(session, meta)
         return self.summary(session)
+
+    def stopAll(self):
+        """The kill switch: every session that is running, stopped and closed."""
+        stopped = []
+        for session in self.ids():
+            try:
+                if self.alive(self.meta(session)):
+                    stopped.append(self.stop(session)['id'])
+            except (LiveError, OSError, ValueError):
+                continue
+        return {'stopped': stopped}
+
+    # ------------------------------------------------ demo, real, promotion
+
+    def record(self, fields):
+        """
+        What a form did on this (demo) server: every session of it (the same
+        groupKey), its closed trades and its parity monitor's findings, and
+        the days, trades and alarms added up - what a promotion carries.
+        """
+        key = groupKey(fields)
+        sessions = []
+        for session in self.ids():
+            try:
+                s = self.summary(session)
+            except (LiveError, OSError, ValueError):
+                continue
+            if groupKey(s.get('fields')) != key:
+                continue
+            sessions.append({'id': s['id'], 'provider': s['provider'], 'account': s['account'],
+                             'demo': s.get('demo'), 'started': s['started'], 'stopped': s.get('stopped'),
+                             'closed': [{'time': t['time'], 'pl': t['pl']} for t in s['closed']],
+                             'parity': {'divergences': s['parity']['divergences'],
+                                        'alarms': s['parity']['alarms']}})
+        return {'fields': fields, 'sessions': sessions, **judge(sessions)}
+
+    def promotionPath(self, fields):
+        name = hashlib.sha1(groupKey(fields).encode()).hexdigest()[:16]
+        return os.path.join(self.root, 'promotions', name + '.json')
+
+    def promoted(self, fields):
+        """The promotion a real server keeps for a form, or None."""
+        try:
+            with open(self.promotionPath(fields)) as handle:
+                return json.load(handle)
+        except (OSError, ValueError):
+            return None
+
+    def promote(self, record, origin):
+        """
+        Keep a demo server's record of a form, judged here and not taken on
+        its word: ok once it has the days, the trades and no parity alarm
+        this server's settings ask for. Kept either way, as the proof.
+        """
+        if not isinstance(record, dict) or not isinstance(record.get('fields'), dict) \
+                or not isinstance(record.get('sessions'), list):
+            raise LiveError("a record is {fields, sessions: [...]}, as record() makes it")
+        sessions = record['sessions']
+        verdict = judge(sessions)
+        need = []
+        if verdict['days'] < settings.PROMOTE_DAYS:
+            need.append("%d days on demo, it has %.1f" % (settings.PROMOTE_DAYS, verdict['days']))
+        if verdict['trades'] < settings.PROMOTE_TRADES:
+            need.append("%d closed trades, it has %d" % (settings.PROMOTE_TRADES, verdict['trades']))
+        if verdict['alarms']:
+            need.append("no parity alarm, it has %d" % verdict['alarms'])
+        if any(s.get('demo') is False for s in sessions):
+            need.append("a record of demo accounts only")
+        kept = {'fields': record['fields'], 'sessions': sessions, 'origin': origin,
+                'received': int(time.time() * 1000), 'ok': not need, 'need': need, **verdict}
+        path = self.promotionPath(record['fields'])
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + '.part', 'w') as handle:
+            json.dump(kept, handle)
+        os.replace(path + '.part', path)
+        return kept
+
+    def lossToday(self):
+        """Today's closed P&L of every session (UTC day) and the capital they trade."""
+        since, net, capital = today(), 0.0, 0.0
+        for session in self.ids():
+            try:
+                meta = self.meta(session)
+                if meta.get('stopped') is not None and meta['stopped'] < since:
+                    continue
+                s = self.summary(session)
+            except (LiveError, OSError, ValueError):
+                continue
+            net += sum(t['pl'] for t in s['closed'] if t.get('pl') is not None and (t['time'] or 0) >= since)
+            capital += capitalOf(meta) or 0.0
+        return net, capital
+
+    def haltPath(self):
+        return os.path.join(self.root, 'halted.json')
+
+    def halted(self):
+        """Today's halt by the loss limit, or None."""
+        try:
+            with open(self.haltPath()) as handle:
+                held = json.load(handle)
+        except (OSError, ValueError):
+            return None
+        return held if held.get('day') == today() else None
+
+    def guard(self, pct):
+        """
+        The loss limit, once: a day's loss of `pct` % of the capital traded
+        stops every session and keeps new ones off until tomorrow.
+        """
+        net, capital = self.lossToday()
+        if capital <= 0 or net > -capital * pct / 100.0 or self.halted():
+            return None
+        stopped = self.stopAll()['stopped']
+        held = {'day': today(), 'at': int(time.time() * 1000), 'net': net, 'capital': capital,
+                'pct': pct, 'stopped': stopped}
+        with open(self.haltPath() + '.part', 'w') as handle:
+            json.dump(held, handle)
+        os.replace(self.haltPath() + '.part', self.haltPath())
+        return held
+
+    def watch(self, pct, every=60):
+        """guard() every minute, in the background: the real money server's."""
+        import threading
+
+        def loop():
+            while True:
+                try:
+                    self.guard(pct)
+                except Exception:
+                    import logging
+                    logging.getLogger('parity_deriva.web').exception("loss limit")
+                time.sleep(every)
+        thread = threading.Thread(target=loop, name='loss-limit')
+        thread.daemon = True
+        thread.start()
 
     def sessions(self):
         out = []
@@ -384,6 +563,17 @@ class LiveSessions(object):
             out['events'] = events[-400:]
             out['console'] = self.console(session)
         return out
+
+
+def judge(sessions):
+    """The days, closed trades and parity alarms of a form's sessions, added up."""
+    now = int(time.time() * 1000)
+    starts = [s['started'] for s in sessions if s.get('started')]
+    ends = [s.get('stopped') or now for s in sessions if s.get('started')]
+    return {'days': round((max(ends) - min(starts)) / 86400000.0, 2) if starts else 0.0,
+            'trades': sum(len(s.get('closed') or []) for s in sessions),
+            'net': sum(t.get('pl') or 0 for s in sessions for t in s.get('closed') or []),
+            'alarms': sum(len((s.get('parity') or {}).get('alarms') or []) for s in sessions)}
 
 
 def millis(text):

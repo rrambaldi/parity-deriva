@@ -50,7 +50,7 @@ import pandas as pd
 from parity_deriva.backtest import ledger
 from parity_deriva.data import calendar, market
 from parity_deriva.strategy import uploaded
-from parity_deriva.web import oauth, sandbox
+from parity_deriva.web import livesessions, oauth, sandbox
 
 PROTOCOLS = ('2025-11-25', '2025-06-18', '2025-03-26')
 
@@ -335,6 +335,13 @@ TOOLS = [
 		 'sweep': {'type': 'string'}, 'n': {'type': 'integer'},
 		 'part': {'type': 'integer'}, 'parts': {'type': 'integer'},
 		 'data': {'type': 'string'}, 'commit': {'type': 'string'}}}},
+	{'name': 'push_record',
+	 'description': "For a demo server promoting a form to this real money one, not for an "
+					"assistant: the form's live record there (web/livesessions.py record). "
+					"Judged here by this server's minimums and kept: a session of the form "
+					"starts here only once it is ok.",
+	 'inputSchema': {'type': 'object', 'required': ['record'], 'properties': {
+		 'record': {'type': 'object'}}}},
 	{'name': 'push_mix',
 	 'description': "For the PC's sync, not for an assistant: a mix, once its sets and their "
 					"runs are pushed. The runs are then checked again here (verify on the mix page).",
@@ -651,8 +658,8 @@ PUSH_FILE = 256 << 20
 
 
 def pcPusher(client):
-	"""The PC's sync (scripts/sync.py) holds a pc token, or the token itself."""
-	if role(client) not in ('token', 'pc'):
+	"""The PC's sync (scripts/sync.py) holds a pc token, a demo server a promote one."""
+	if role(client) not in ('token', 'pc', 'promote'):
 		raise ToolError("pushing a set or a mix is for the PC's token, not for an assistant")
 
 
@@ -753,6 +760,22 @@ def pushMix(service, args, client):
 			raise ToolError("run %s of set %s is not here: push_sweep it first" % (item['n'], item['sweep']))
 	entry = service.saveMix(mix, origin={'client': client, 'pushed': int(time.time() * 1000)})
 	return {'mix': entry['id'], 'items': len(entry['items']), 'saved': True}
+
+
+def pushRecord(service, args, client):
+	"""
+	A demo server's record of a form - its sessions, trades and parity - for
+	this real money server to judge by its own minimums and keep as proof.
+	"""
+	if role(client) != 'promote':
+		raise ToolError("a promotion comes from a demo server, with a promote token")
+	if livesessions.serverAccounts() != 'real':
+		raise ToolError("this server trades demo accounts: a promotion goes to a real money one")
+	try:
+		kept = service.live.promote(args.get('record'), client)
+	except livesessions.LiveError as exc:
+		raise ToolError(str(exc))
+	return dict((k, kept[k]) for k in ('ok', 'need', 'days', 'trades', 'alarms', 'net'))
 
 
 # the next version is taken and written by one submit at a time
@@ -1313,15 +1336,23 @@ PULLS = ('market_status', 'pull_candles', 'pull_calendar')
 PUSHES = ('push_calendar', 'push_candles')
 #: what a program's token may call, by its role: the PC everything but the
 #: market data (it takes that from here, never the other way)
+#: on a real money server, what only a promotion does, and no assistant
+WRITES = ('submit_strategy', 'submit_indicator', 'run_backtest', 'propose_public',
+		  'request_feature', 'push_sweep', 'push_mix', 'push_record')
+PROMOTES = ('submit_strategy', 'push_sweep', 'push_record')
 ROLES = {'mirror': lambda name: name in PULLS,
 		 'market': lambda name: name in PUSHES + ('market_status',),
-		 'pc': lambda name: name not in PUSHES}
+		 'pc': lambda name: name not in PUSHES,
+		 'promote': lambda name: name in PROMOTES + ('list_strategies', 'market_status')}
 
 
 def call(service, name, args, base, client):
 	held = role(client)
 	if held in ROLES and not ROLES[held](name):
 		raise ToolError("a %s token may not call %s" % (held, name))
+	if livesessions.serverAccounts() == 'real' and name in WRITES and held != 'promote':
+		raise ToolError("a real money server takes only what a demo server promotes: no %s here"
+						% name)
 	if name == 'get_news':
 		return getNews(service, args, client)
 	if name == 'list_strategies':
@@ -1356,6 +1387,8 @@ def call(service, name, args, base, client):
 		return pushSweep(service, args, client)
 	if name == 'push_mix':
 		return pushMix(service, args, client)
+	if name == 'push_record':
+		return pushRecord(service, args, client)
 	raise ToolError("no tool %r" % name)
 
 

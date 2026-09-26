@@ -130,6 +130,33 @@ $('market-run').addEventListener('click', () => dataAction(async () => {
   await followMarket();
 }));
 
+/* ----------------------------------------------------------- the server */
+
+function showServer(s) {
+  $('server-state').textContent = s.accounts === 'real'
+    ? `REAL MONEY accounts only (PARITY_DERIVA_ACCOUNTS=real in .env: no page changes it) \u00b7 a form `
+      + `trades here once promoted from a demo server with ${s.promoteDays} days, ${s.promoteTrades} `
+      + `closed trades and no parity alarm \u00b7 every session stops at a day's loss of `
+      + `${s.dailyLossPct}% of the capital traded` + (s.halted ? ' \u00b7 STOPPED today by that limit' : '')
+    : 'demo accounts only (PARITY_DERIVA_ACCOUNTS=demo in .env: no page changes it) \u00b7 what '
+      + 'worked here is promoted to a real money server from the live page';
+  $('server-state').className = s.accounts === 'real' ? 'bad' : '';
+  $('promote-box').hidden = s.accounts === 'real';
+  $('promote-url').value = s.promoteTo.url;
+  $('promote-token').value = '';
+  $('promote-token').placeholder = s.promoteTo.token ? 'kept: type a new one to change it' : '';
+}
+
+$('promote-save').addEventListener('click', async () => {
+  try {
+    showServer(await post('api/server/promote-to', JSON.stringify(
+      { url: $('promote-url').value, token: $('promote-token').value })));
+    $('server-note').textContent = 'saved: the live page offers promote on every session';
+  } catch (error) {
+    $('server-note').textContent = String(error.message || error);
+  }
+});
+
 /* --------------------------------------------------------- the calendar */
 
 /*
@@ -719,6 +746,7 @@ $('mcp-disconnect').addEventListener('click', async () => {
 });
 
 showMcp().catch((error) => mcpSay(String(error.message || error)));
+ask('api/server').then(showServer).catch((error) => { $('server-note').textContent = String(error.message || error); });
 ask('api/market').then((state) => { showMarket(state); if (marketRunning) followMarket(); })
   .catch((error) => dataLog([String(error.message || error)]));
 showCalendar();

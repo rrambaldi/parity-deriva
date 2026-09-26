@@ -140,13 +140,14 @@ class Authority(object):
 	# ------------------------------------------------ the programs' tokens
 
 	#: what a program's token is for; mcp.ROLES says what each one may call
-	ROLES = ('pc', 'mirror', 'market')
+	ROLES = ('pc', 'mirror', 'market', 'promote')
 
 	def newKey(self, name, role):
 		"""
 		A token of its own for a program - the PC that pushes its results,
-		another server that copies the market data, the scraper - allowed one
-		kind of work. A new one of the same name replaces it.
+		another server that copies the market data, the scraper, the demo
+		server promoting to a real one - allowed one kind of work. A new one
+		of the same name replaces it.
 		"""
 		name = ' '.join(str(name or '').split())[:40]
 		if not name or role not in self.ROLES:
