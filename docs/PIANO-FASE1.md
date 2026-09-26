@@ -64,8 +64,8 @@ C7c  colonna R nei trade                  fatto (0ca8c06)
 C8   avvisi + pagina per il telefono      fatto (21cc77b)
 C2   diario + scheda                      fatto (e21e911)
 C5   banda Monte Carlo + baseline         fatto (0cc433b)
-C3   holdout + gate SIM → DEMO            fatto
-C1b  banda e serie di perdite in promote  usa C2 e C5
+C3   holdout + gate SIM → DEMO            fatto (f3208a0)
+C1b  banda e serie di perdite in promote  fatto
 C7d  push e verify senza mix              prima della prima demo vera
 C4   motore correlazioni + filtri         usa C3 (solo periodo di sviluppo)
 C6   live: ramp, protezioni               usa C2, C5, C8
@@ -123,6 +123,10 @@ né una che in demo è andata peggio di quanto la simulazione permetteva.
   rifiutata.
 - **Fatto quando.** Il verdetto nomina il primo trade fuori banda o la serie
   troppo lunga.
+- **Com'è stato fatto.** Una scheda senza riferimento (gate non passato)
+  non basta. La scheda cambia stato da sola dove il passaggio è un fatto:
+  SIM → DEMO quando la form parte su un conto demo o va a un server demo,
+  DEMO → LIVE quando parte sui soldi veri. `DEAD` resta solo dell'utente.
 - **Dipende da.** C2, C5.
 
 ---

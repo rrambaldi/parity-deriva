@@ -315,7 +315,7 @@ function showServer(s) {
     ? `REAL MONEY accounts only (PARITY_DERIVA_ACCOUNTS=real in .env: no page changes it) \u00b7 a form `
       + `trades here once promoted by the archive with ${s.promoteDays} days on demo, ${s.promoteTrades} `
       + `closed trades (or ${s.promoteMinTrades} after ${s.promoteSlowDays} days), a net of at least `
-      + `${s.promoteMinNet} and no parity alarm \u00b7 every session stops at a day's loss of `
+      + `${s.promoteMinNet}, no parity alarm and a curve inside its card's band \u00b7 every session stops at a day's loss of `
       + `${s.dailyLossPct}% of the capital traded` + (s.halted ? ' \u00b7 STOPPED today by that limit' : '')
     : 'demo accounts only (PARITY_DERIVA_ACCOUNTS=demo in .env: no page changes it)';
   $('server-state').className = s.accounts === 'real' ? 'bad' : '';

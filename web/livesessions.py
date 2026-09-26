@@ -263,6 +263,7 @@ class LiveSessions(object):
                        target['provider'], target['account'],
                        'a demo one' if account.get('demo') else 'real money'))
             self.check(fields, target['provider'])
+        promotion = None
         if kind == 'real':
             if self.halted():
                 raise LiveError("the day's loss limit stopped every session: no new one before "
@@ -282,7 +283,30 @@ class LiveSessions(object):
             account = known[(target['provider'], target['account'])]
             started.append(self.spawn(fields, target['provider'], account))
             self.journal(started[-1], 'session-start', {'capital': fields.get('capital')})
+        self.cardOnStart(fields, kind, promotion if kind == 'real' else None)
         return started
+
+    def cardOnStart(self, fields, kind, promotion=None):
+        """
+        The version's card (web/cards.py) to DEMO when its form starts on a
+        demo account, to LIVE on real money - the card the promotion brought.
+        A move the card cannot make (a form with no card, one in LIVE already)
+        is no move.
+        """
+        if self.setup is None:
+            return
+        from parity_deriva.web import cards
+        try:
+            card = (promotion or {}).get('card') if kind == 'real' else cards.forFields(self.setup, fields)
+            if not card:
+                return
+            card = cards.get(self.setup, card['id'])
+            to = 'LIVE' if kind == 'real' else 'DEMO'
+            if to in cards.MOVES[card['state']]:
+                cards.move(self.setup, card['id'], to, 'a session started', journal.MACHINE)
+        except Exception:
+            import logging
+            logging.getLogger('parity_deriva.web').exception("the card of %s" % fields.get('strategy'))
 
     def journal(self, s, kind, data=None):
         """A session's entry in its strategy's journal (web/journal.py)."""
@@ -411,6 +435,8 @@ class LiveSessions(object):
                 continue
             sessions.append({'id': s['id'], 'provider': s['provider'], 'account': s['account'],
                              'demo': s.get('demo'), 'started': s['started'], 'stopped': s.get('stopped'),
+                             # what a trade's P&L is a return of (versusCard)
+                             'capital': capitalOf(s),
                              'closed': [{'time': t['time'], 'pl': t['pl']} for t in s['closed']],
                              'parity': {'divergences': s['parity']['divergences'],
                                         'alarms': s['parity']['alarms']}})
@@ -432,7 +458,8 @@ class LiveSessions(object):
         """
         Keep a demo server's record of a form, judged here and not taken on
         its word: ok once it has the days, the trades, the net and no parity
-        alarm this server's settings ask for. Kept either way, as the proof.
+        alarm this server's settings ask for, and stayed within its card's
+        band and losing streak. Kept either way, as the proof.
         """
         if not isinstance(record, dict) or not isinstance(record.get('fields'), dict) \
                 or not isinstance(record.get('sessions'), list):
@@ -453,6 +480,11 @@ class LiveSessions(object):
             need.append("no parity alarm, it has %d" % verdict['alarms'])
         if any(s.get('demo') is False for s in sessions):
             need.append("a record of demo accounts only")
+        if record.get('card') is None:
+            if settings.PROMOTE_NEEDS_CARD:
+                need.append("a reference card: the version passes the gate first")
+        else:
+            need.extend(versusCard(sessions, record['card']))
         # the version's card, a copy of it kept here: what C1b and the live
         # protections judge it by (web/cards.py)
         card = record.get('card')
@@ -688,6 +720,32 @@ class LiveSessions(object):
             out['events'] = events[-400:]
             out['console'] = self.console(session)
         return out
+
+
+def versusCard(sessions, card):
+    """
+    What a demo record breaks of its version's card (web/cards.py): its trades
+    in the order they closed, each a return on its session's capital, the
+    curve they compound to under the band's 5th percentile at the same trade,
+    or a losing streak longer than the card's worst. A card with no reference
+    - its gate not passed - is none to go live with.
+    """
+    from parity_deriva.performance import montecarlo
+    reference = (card or {}).get('reference')
+    if not reference:
+        return ["a card that passed the gate's holdout: %s has no reference" % (card or {}).get('label')]
+    closed = sorted((t.get('time') or 0, t['pl'] / s['capital']) for s in sessions if s.get('capital')
+                    for t in s.get('closed') or [] if t.get('pl') is not None)
+    values = [r for _, r in closed]
+    need = []
+    band = reference.get('band')
+    first = montecarlo.below(montecarlo.compounded(values), band) if band else None
+    if first:
+        need.append("a curve inside the card's band: trade %d fell under its 5th percentile" % first)
+    worst, streak = reference.get('worstStreak'), montecarlo.streak(values)
+    if worst is not None and streak > worst:
+        need.append("a losing streak of at most %d, the card's worst: it had %d" % (worst, streak))
+    return need
 
 
 #: the alerts of one session, keyed by its id (LiveSessions.alerts)

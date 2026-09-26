@@ -215,6 +215,7 @@ def record(service, fields):
 			if livesessions.groupKey(s.get('fields')) == key:
 				sessions.append({'id': '%s/%s' % (server['name'], s.get('id')), 'provider': s.get('provider'),
 								 'account': s.get('account'), 'demo': s.get('demo'),
+								 'capital': livesessions.capitalOf(s),
 								 'started': s.get('started'), 'stopped': s.get('stopped'),
 								 'closed': [{'time': t.get('time'), 'pl': t.get('pl')} for t in s.get('closed') or []],
 								 'parity': s.get('parity') or {'divergences': 0, 'alarms': []}})
@@ -262,6 +263,8 @@ def push(service, name, fields):
 	if kind == 'real':
 		verdict = sources.rpc(target, 'push_record', {'record': dict(record(service, fields), fields=sent,
 																	  card=card and dict(card, fields=sent))})
+	if card and kind == 'demo' and card['state'] == 'SIM':
+		cards.move(service.setup, card['id'], 'DEMO', 'pushed to %s' % name, journal.MACHINE)
 	journal.record(service.setup, code, 'push', 'milestone',
 				   {'server': name, 'accounts': kind, 'card': card and card['label'], 'gate': bool(card),
 					'verdict': verdict and {'ok': verdict.get('ok'), 'need': verdict.get('need')}},

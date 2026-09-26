@@ -1468,6 +1468,7 @@ export PARITY_DERIVA_PROMOTE_TRADES=30
 export PARITY_DERIVA_PROMOTE_SLOW_DAYS=90 # or, on a slow timeframe, this many days...
 export PARITY_DERIVA_PROMOTE_MIN_TRADES=10 # ...and this many trades
 export PARITY_DERIVA_PROMOTE_MIN_NET=0    # the net P&L on demo, at least
+export PARITY_DERIVA_PROMOTE_NEEDS_CARD=1 # the version's card from the gate: 0 promotes without
 export PARITY_DERIVA_DAILY_LOSS_PCT=3     # a day's loss that stops every session
 ```
 
@@ -1479,8 +1480,10 @@ account (the paper account is both). A real money server also:
 - starts a session of a form only once the archive promoted it with a
   record this server finds enough: the days, the closed trades (30, or on a
   slow timeframe 10 once it has traded 90 days: on D1 30 trades are a
-  year), a net not below zero, no parity alarm, demo accounts only. It
-  judges the record itself and keeps it;
+  year), a net not below zero, no parity alarm, demo accounts only, and -
+  with the version's card from the gate, which comes with it - a curve that
+  never fell under the card's band nor had a losing streak longer than the
+  card's worst. It judges the record itself and keeps it, the card with it;
 - asks for the capital at risk to be confirmed before it starts one;
 - stops every session at the day's loss limit, and starts none again
   before the next UTC day; "stop all" on the live page stops them by hand;

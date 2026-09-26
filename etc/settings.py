@@ -83,6 +83,10 @@ PROMOTE_TRADES = int(dotenv('PARITY_DERIVA_PROMOTE_TRADES', '30'))
 PROMOTE_SLOW_DAYS = int(dotenv('PARITY_DERIVA_PROMOTE_SLOW_DAYS', '90'))
 PROMOTE_MIN_TRADES = int(dotenv('PARITY_DERIVA_PROMOTE_MIN_TRADES', '10'))
 PROMOTE_MIN_NET = float(dotenv('PARITY_DERIVA_PROMOTE_MIN_NET', '0'))
+# and the version's card from the gate, whose band the demo curve stays in and
+# whose worst losing streak it does not pass (web/livesessions.py versusCard);
+# 0 promotes without one, as before the cards
+PROMOTE_NEEDS_CARD = dotenv('PARITY_DERIVA_PROMOTE_NEEDS_CARD', '1') != '0'
 DAILY_LOSS_PCT = float(dotenv('PARITY_DERIVA_DAILY_LOSS_PCT', '3'))
 # The alerts of the live sessions (web/notify.py): a banner on the pages
 # always, and an urgent one also by email and by Telegram, each once it is

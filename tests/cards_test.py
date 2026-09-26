@@ -73,6 +73,32 @@ class MoveTest(unittest.TestCase):
             cards.move(self.setup, self.card['id'], 'SIM', 'second thoughts', 'rr')
 
 
+class StartTest(unittest.TestCase):
+
+    def live(self, setup):
+        live = livesessions.LiveSessions(os.path.join(setup.DATA_DIR, 'live'), setup)
+        live.targets = lambda fresh=False: [{'provider': 'ig', 'accounts': [{'id': 'D', 'demo': True},
+                                                                             {'id': 'R', 'demo': False}]}]
+        live.check = lambda fields, provider: None
+        live.spawn = lambda fields, provider, account: {'id': 'S', 'fields': fields, 'provider': provider}
+        return live
+
+    def test_a_session_moves_the_card_to_demo_and_on_real_money_to_live(self):
+        setup = server(self).setup
+        card = cards.make(setup, FIELDS)
+        with mock.patch.object(livesessions.settings, 'ACCOUNTS', 'demo'):
+            self.live(setup).start(FIELDS, [{'provider': 'ig', 'account': 'D'}])
+        self.assertEqual(cards.get(setup, card['id'])['state'], 'DEMO')
+        # the real server: the card the promotion brought
+        live = self.live(setup)
+        live.promoted = lambda fields: {'ok': True, 'card': card}
+        with mock.patch.object(livesessions.settings, 'ACCOUNTS', 'real'):
+            live.start(dict(FIELDS, capital='1000'), [{'provider': 'ig', 'account': 'R'}], confirm='1000')
+        self.assertEqual(cards.get(setup, card['id'])['state'], 'LIVE')
+        moves = [(e['data']['to'], e['by']) for e in journal.read(setup, 'AG01') if e['kind'] == 'state']
+        self.assertEqual(moves, [('DEMO', 'parity-deriva'), ('LIVE', 'parity-deriva')])
+
+
 class PushTest(unittest.TestCase):
 
     def test_the_card_goes_with_the_record_to_a_real_money_server_which_keeps_a_copy(self):

@@ -13,6 +13,7 @@ import unittest
 from unittest import mock
 
 from parity_deriva.etc import settings
+from parity_deriva.performance import montecarlo
 from parity_deriva.web import livesessions, mcp
 from parity_deriva.web.service import Service
 
@@ -57,6 +58,10 @@ class DemoRealTest(unittest.TestCase):
         self.live.check = lambda fields, provider: None
         self.spawned = []
         self.live.spawn = lambda fields, provider, account: self.spawned.append((provider, account['id']))
+        # the record's own checks: the card's are CardPromotionTest's
+        patch = mock.patch.object(settings, 'PROMOTE_NEEDS_CARD', False)
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def server(self, kind):
         patch = mock.patch.object(settings, 'ACCOUNTS', kind)
@@ -134,15 +139,59 @@ class DemoRealTest(unittest.TestCase):
         self.assertIsNone(self.live.halted())
 
 
+class CardPromotionTest(unittest.TestCase):
+    """The demo record against its version's card: its band, its losing streak (C1b)."""
+
+    def setUp(self):
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, True)
+        self.setup = types.SimpleNamespace(DATA_DIR=folder)
+        self.live = livesessions.LiveSessions(os.path.join(folder, 'live'), self.setup)
+        self.card = {'id': '0123456789abcdef', 'label': 'AB v1', 'state': 'DEMO', 'fields': FORM,
+                     'reference': {'worstStreak': 4, 'band': montecarlo.band([0.01, 0.012, -0.008, -0.008] * 25)}}
+
+    def carded(self, pls, card=True, capital=1000.0):
+        now = int(time.time() * 1000)
+        held = record(30, 0)
+        held['sessions'][0].update(capital=capital, closed=[{'time': now + i, 'pl': pl} for i, pl in enumerate(pls)])
+        if card:
+            held['card'] = self.card if card is True else card
+        return self.live.promote(held, 'promote: archive')
+
+    def test_a_curve_inside_the_band_with_a_short_streak_is_promoted(self):
+        told = self.carded([10.0, 12.0, -8.0, -8.0] * 8)
+        self.assertEqual(told['need'], [])
+        self.assertEqual(told['card']['id'], self.card['id'])
+
+    def test_the_first_trade_under_the_band_is_named(self):
+        told = self.carded([-8.0] * 3 + [10.0, 12.0] * 15)
+        self.assertEqual(told['need'], ["a curve inside the card's band: trade %d fell under its 5th percentile"
+                                        % montecarlo.below(montecarlo.compounded([-0.008] * 3), self.card['reference']['band'])])
+
+    def test_a_streak_longer_than_the_cards_is_refused(self):
+        told = self.carded([30.0] * 25 + [-8.0] * 5 + [30.0] * 2)
+        self.assertIn("a losing streak of at most 4, the card's worst: it had 5", told['need'])
+
+    def test_no_card_or_one_without_a_reference_is_no_promotion(self):
+        self.assertEqual(self.carded([10.0] * 32, card=False)['need'],
+                         ['a reference card: the version passes the gate first'])
+        failed = dict(self.card, reference=None)
+        self.assertEqual(self.carded([10.0] * 32, card=failed)['need'],
+                         ["a card that passed the gate's holdout: AB v1 has no reference"])
+        with mock.patch.object(settings, 'PROMOTE_NEEDS_CARD', False):
+            self.assertTrue(self.carded([10.0] * 32, card=False)['ok'])
+
+
 class RealMcpTest(unittest.TestCase):
 
     def setUp(self):
         folder = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, folder, True)
         self.service = Service(setup=types.SimpleNamespace(DATA_DIR=folder))
-        patch = mock.patch.object(settings, 'ACCOUNTS', 'real')
-        patch.start()
-        self.addCleanup(patch.stop)
+        for patch in (mock.patch.object(settings, 'ACCOUNTS', 'real'),
+                      mock.patch.object(settings, 'PROMOTE_NEEDS_CARD', False)):
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def call(self, name, args, client):
         return mcp.call(self.service, name, args, 'https://real', client)
