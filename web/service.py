@@ -81,10 +81,11 @@ from parity_deriva.etc import settings
 from parity_deriva.lib import indicators
 from parity_deriva.lib import s3
 from parity_deriva.lib import news as news_module
-from parity_deriva.performance import montecarlo
+from parity_deriva.performance import baseline, montecarlo
+from parity_deriva.performance import gate as gate_module
 from parity_deriva.performance import report as report_module
 from parity_deriva.strategy import plugins, uploaded
-from parity_deriva.web import access, cards, i18n, journal, livesessions, mcp, notify, oauth, phone, servers, storage
+from parity_deriva.web import access, cards, holdout, i18n, journal, livesessions, mcp, notify, oauth, phone, servers, storage
 from parity_deriva.web import logs as logs_page
 
 
@@ -1328,7 +1329,7 @@ class Service(object):
 		if pushed is None:
 			raise ServiceError("run %s of set %s has no trades here: push it with its mix" % (n, sweep))
 		fields, _, _ = self.simulated({'kind': 'sweep', 'id': sweep, 'n': n})
-		here = self.outline(self.backtest(confirmed=True,
+		here = self.outline(self.backtest(confirmed=True, readHoldout=True,
 										  **backtestArgs(lambda name: _text(fields.get(name)))))
 		there = self.outline(pushed)
 		first = differ(here['rows'], there['rows'])
@@ -1345,6 +1346,170 @@ class Service(object):
 						'first': out['first'] and out['first']['trade']},
 					   fields, link={'kind': 'sweep-run', 'id': sweep, 'n': int(n), 'fields': fields})
 		return out
+
+	# ------------------------------------------------------------ the gate
+
+	def neighbours(self, job, n):
+		"""
+		The runs of a set one step of one parameter away from run `n`, in the
+		grid's order: the plateau the gate asks to be profitable too.
+		"""
+		rows = dict((r['n'], r) for r in job['done'] if not r.get('error'))
+		mine = (rows.get(int(n)) or {}).get('params') or {}
+		values = dict((name, gridValues(name, text)) for name, text in (job.get('grid') or {}).items())
+		out = []
+		for row in rows.values():
+			other = row.get('params') or {}
+			apart = [k for k in set(mine) | set(other) if str(mine.get(k, '')) != str(other.get(k, ''))]
+			if row['n'] == int(n) or len(apart) != 1:
+				continue
+			axis = [str(v) for v in values.get(apart[0], ())]
+			a, b = str(mine.get(apart[0], '')), str(other.get(apart[0], ''))
+			if a in axis and b in axis and abs(axis.index(a) - axis.index(b)) == 1:
+				out.append({'n': row['n'], 'params': other,
+							'pf': (row.get('report') or {}).get('profitFactor')})
+		return sorted(out, key=lambda r: r['n'])
+
+	def holdoutReadBy(self, instrument, cut):
+		"""The saved sets and runs on `instrument` that read past `cut`: {sets, runs, until}."""
+		at, sets, runs, until = holdout.millis(cut), 0, 0, None
+		for meta in self.sweeps():
+			if meta.get('instrument') != instrument:
+				continue
+			stopped = (meta.get('holdout') or {}).get('cut')
+			end = holdout.millis(stopped) - 1 if stopped else (
+				millis(parseDate(meta['to'], 'to', end=True)) if meta.get('to') else float('inf'))
+			if end >= at:
+				sets += 1
+				until = max(until or 0, end)
+		for meta in self.runs():
+			if meta.get('instrument') == instrument and (meta.get('to') or 0) >= at:
+				runs += 1
+				until = max(until or 0, meta['to'])
+		return {'sets': sets, 'runs': runs,
+				'until': None if until in (None, float('inf')) else holdout.day(until),
+				'whole': until == float('inf')}
+
+	def reference(self, dev, held):
+		"""
+		A card's reference: development and holdout together - what demo and
+		live are judged by (C1b, C6) - with their band and losing streak.
+		"""
+		closed = sorted((t for t in (dev.get('trades') or []) + (held.get('trades') or []) if t.get('pl') is not None),
+						key=lambda t: (t.get('exitTime') or 0))
+		made = report_module.report(closed)
+		values = montecarlo.returns(closed, dev.get('balance'))
+		months = max((held.get('to') or 0) - (dev.get('from') or 0), 1) / (30.44 * 86400000.0)
+		pcts = [p for p in ((dev.get('kpi') or {}).get('maxDrawdownPct'), (held.get('kpi') or {}).get('maxDrawdownPct'))
+				if p is not None]
+		return {'trades': made['closedTrades'], 'pf': made['profitFactor'], 'expectancy': made['expectancy'],
+				'expectancyR': made['expectancyR'], 'winRate': made['winRate'], 'maxDD': made['maxDrawdown'],
+				'maxDDpct': max(pcts) if pcts else None, 'worstStreak': made['maxConsecutiveLosses'],
+				'tradesPerMonth': made['closedTrades'] / months, 'band': montecarlo.band(values),
+				'sample': {'from': dev.get('from'), 'to': held.get('to')}}
+
+	def gate(self, sweep, n, by=None, job=None):
+		"""
+		The gate SIM -> DEMO of run `n` of a set (docs/PIANO-FASE1.md C3): its
+		version's card made, the checks on the development period, and only
+		if they all pass the same form once on the holdout. The verdict goes
+		on the card - with the reference when it passed - and in the journal.
+		A version reads its holdout once; trying again or discarding it is the
+		user's call.
+		"""
+		stage = (lambda name: job.update(stage=name)) if job is not None else (lambda name: None)
+		fields, _, _ = self.simulated({'kind': 'sweep', 'id': sweep, 'n': n})
+		card = cards.make(self.setup, fields, source={'sweep': sweep, 'n': int(n)}, by=by)
+		if (card.get('holdout') or {}).get('opened'):
+			raise ServiceError("%s read its holdout on %s: its verdict is on its card, and a version reads it once"
+							   % (card['label'], holdout.day(card['holdout']['at'])))
+		args = backtestArgs(lambda name: _text(fields.get(name)))
+		known = self.check(args['instrument'], args['granularity'], args['strategy'])
+		held = self.window(known, args['granularity'])
+		cut = holdout.cut(self.setup, args['instrument'], args['strategy'], held)
+		if cut is None:
+			raise ServiceError("%s has too little history for a holdout: %d days aside and as many to develop on"
+							   % (args['instrument'], holdout.minDays(self.setup)))
+		stage('development')
+		dev = self.backtest(confirmed=True, **args)
+		stage('random entries')
+		chance = baseline.baseline(dev.get('trades') or [], dev.get('candles') or [])
+		rows = gate_module.development(dev, self.neighbours(self.savedSweep(sweep), n), chance, self.setup)
+		verdict = {'development': rows, 'holdout': None, 'cut': cut, 'at': journal.now(),
+				   'baseline': chance and dict((k, chance[k]) for k in ('pf', 'percentile', 'reps')),
+				   'readBy': self.holdoutReadBy(args['instrument'], cut)}
+		if gate_module.passed(rows):
+			stage('holdout')
+			hold = self.backtest(confirmed=True, readHoldout=True,
+								 **dict(args, dtfrom=moment(holdout.millis(cut)), dtto=None))
+			verdict['holdout'] = gate_module.holdout(dev, hold, self.setup)
+			verdict['openings'] = holdout.opened(self.setup, args['instrument'], args['strategy'])
+			card['holdout'] = {'cut': cut, 'opened': True, 'at': verdict['at'], 'openings': verdict['openings'],
+							   'ok': gate_module.passed(verdict['holdout']),
+							   'trades': len([t for t in hold.get('trades') or [] if t.get('pl') is not None])}
+			if card['holdout']['ok']:
+				card['reference'] = self.reference(dev, hold)
+		verdict['ok'] = bool(verdict['holdout']) and gate_module.passed(verdict['holdout'])
+		card['gate'] = verdict
+		cards.save(self.setup, card)
+		journal.record(self.setup, fields.get('strategy'), 'gate', 'milestone',
+					   {'label': card['label'], 'ok': verdict['ok'], 'cut': cut, 'openings': verdict.get('openings'),
+						'failed': [r['check'] for r in rows + (verdict['holdout'] or []) if not r['ok']]},
+					   fields, version=card['id'], link={'kind': 'sweep-run', 'id': sweep, 'n': int(n), 'fields': fields},
+					   by=by)
+		return dict(verdict, card=dict((k, card[k]) for k in ('id', 'label', 'state')))
+
+	def startGate(self, sweep, n, by=None):
+		"""The gate of a run of a set, in the background: gateStatus() follows it."""
+		self.need('test')
+		self.simulated({'kind': 'sweep', 'id': sweep, 'n': n})
+		with self._jobLock:
+			if getattr(self, '_gate', None) and self._gate.get('running'):
+				raise ServiceError("a gate is running already")
+			self._gate = {'running': True, 'sweep': sweep, 'n': int(n), 'stage': 'starting', 'result': None,
+						  'error': None}
+		thread = threading.Thread(target=self._runGate, args=(self._gate, by))
+		thread.daemon = True
+		thread.start()
+		return self.gateStatus()
+
+	def _runGate(self, job, by):
+		try:
+			job['result'] = self.gate(job['sweep'], job['n'], by, job)
+		except (ServiceError, cards.CardError, holdout.HoldoutError) as exc:
+			job['error'] = str(exc)
+		except Exception as exc:
+			self.logger.exception("the gate of %s/%s" % (job['sweep'], job['n']))
+			job['error'] = "%s: %s" % (type(exc).__name__, exc)
+		finally:
+			job['running'] = False
+
+	def gateStatus(self):
+		return dict(getattr(self, '_gate', None) or {'running': False})
+
+	def holdouts(self):
+		"""Every instrument's holdout (web/holdout.py) with the sets and runs that read past it."""
+		stores = dict((i['instrument'], i) for i in self.instruments())
+		out = []
+		for instrument, one in sorted(holdout.registry(self.setup).items()):
+			out.append(dict(one, instrument=instrument, readBy=self.holdoutReadBy(instrument, one['cut']),
+							last=max((g['to'] for g in (stores.get(instrument) or {}).get('granularities') or []),
+									 default=None)))
+		return {'instruments': out}
+
+	def moveHoldout(self, body, by=None):
+		"""{instrument, cut, strategy}: a cut moved by hand, the instrument's or a strategy's own."""
+		instrument = str(body.get('instrument') or '')
+		rows = ((dict((i['instrument'], i) for i in self.instruments()).get(instrument) or {})
+				.get('granularities') or [])
+		if not rows:
+			raise ServiceError("no candles of %r here" % instrument)
+		try:
+			holdout.move(self.setup, instrument, str(body.get('cut') or ''), max(g['to'] for g in rows),
+						 min(g['from'] for g in rows), strategy=body.get('strategy') or None, by=by)
+		except holdout.HoldoutError as exc:
+			raise ServiceError(str(exc))
+		return self.holdouts()
 
 	def startVerify(self, mix):
 		"""Check every run of a mix again in the background; verifyStatus() follows it."""
@@ -1479,7 +1644,7 @@ class Service(object):
 				 newsImpacts=None, maxBars=None, strategyArgs=None,
 				 slScale=None, tpScale=None, inverse=False, trailing=None,
 				 trailProfit=False, trailPips=None, cachedOnly=False, confirmed=False,
-				 leverage=None, hold=None):
+				 leverage=None, hold=None, readHoldout=False):
 		"""
 		Run one backtest and return the payload the page reads, with the
 		margin its account needed at `leverage` (withMargin). cachedOnly
@@ -1490,6 +1655,10 @@ class Service(object):
 		yes, and a reload of that run is the same run. hold, an Event, pauses
 		the run at its next progress report while it is clear (a sweep's
 		pause): the time it waits counts neither in elapsed nor in the rate.
+
+		No run reads past the instrument's holdout cut (web/holdout.py): one
+		that asks to stops the day before, and says so in its payload's
+		'holdout'. readHoldout is the gate's and verify's, which read it.
 		"""
 		known = self.check(instrument, granularity, strategy)
 
@@ -1503,6 +1672,9 @@ class Service(object):
 		dtto = dtto or moment(held['to'])
 		if dtto <= dtfrom:
 			raise ServiceError("the window ends before it starts")
+		clipped = None
+		if not readHoldout:
+			dtto, clipped = self.clip(instrument, strategy, held, dtfrom, dtto)
 
 		bars = self.span(known, granularity, dtfrom, dtto,
 						 capped=not (confirmed or cachedOnly))
@@ -1632,9 +1804,27 @@ class Service(object):
 			payload = self.payload(result, time.time() - started,
 								   self.indicatorSpecs(strategy, params),
 								   self.setupBars(strategy))
+			payload['holdout'] = clipped
 			payload = self.withMargin(payload, leverage)
 			self.remember(key, payload)
 			return payload
+
+	def clip(self, instrument, strategy, held, dtfrom, dtto):
+		"""
+		(dtto, note) of a run stopped at the holdout's cut: the day before it,
+		and {cut, asked} when it asked for more; the cut fixed now if it is
+		the instrument's first run. One all in the holdout is refused.
+		"""
+		cut = holdout.cut(self.setup, instrument, strategy, held)
+		if cut is None:
+			return dtto, None
+		start = moment(holdout.millis(cut))
+		if dtfrom >= start:
+			raise ServiceError("this run is all in the holdout, which starts %s: only the gate reads it - "
+							   "start it before" % cut)
+		if dtto < start:
+			return dtto, None
+		return start - datetime.timedelta(milliseconds=1), {'cut': cut, 'asked': millis(dtto)}
 
 	def withMargin(self, payload, leverage=None):
 		"""
@@ -2030,8 +2220,13 @@ class Service(object):
 		for combo in combos:
 			merged = dict(fields, **combo)
 			runs.append((combo, backtestArgs(lambda name: _text(merged.get(name)))))
-		self.check(runs[0][1]['instrument'], runs[0][1]['granularity'],
-				   runs[0][1]['strategy'])
+		first = runs[0][1]
+		known = self.check(first['instrument'], first['granularity'], first['strategy'])
+		# where its runs stop, the holdout's cut: said by the set, refused
+		# now when it is all in the holdout (clip)
+		held = self.window(known, first['granularity'])
+		_, clipped = self.clip(first['instrument'], first['strategy'], held,
+							   first['dtfrom'] or moment(held['from']), first['dtto'] or moment(held['to']))
 		cards.codeSeen(self.setup, fields)
 		with self._jobLock:
 			if getattr(self, '_sweep', {}).get('running'):
@@ -2044,7 +2239,7 @@ class Service(object):
 						   'current': None, 'cancel': False,
 						   'varied': [name for name in grid
 									  if len(gridValues(name, grid[name])) > 1],
-						   'started': time.time()}
+						   'holdout': clipped, 'started': time.time()}
 			self._sweepGoing.set()
 		thread = threading.Thread(target=self._runSweep, args=(self._sweep, runs))
 		thread.daemon = True
@@ -2144,7 +2339,9 @@ class Service(object):
 				# KPI table orders them by
 				'bestScore': max(scores) if scores else None,
 				# who pushed it here, for a set simulated on another server
-				'origin': (job.get('origin') or {}).get('client')}
+				'origin': (job.get('origin') or {}).get('client'),
+				# the holdout's cut its runs stopped at, when they reached it
+				'holdout': job.get('holdout')}
 
 	def _write(self, path, body):
 		# aside and renamed, so the list never reads half a file
@@ -3448,8 +3645,14 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendJSON({'entries': journal.search(setup, self.one(query, 'q'))})
 			if route == '/api/journal':
 				strategy = self.one(query, 'strategy') or ''
-				return self.sendJSON({'strategy': strategy, 'entries': journal.read(setup, strategy),
-									  'cards': cards.cards(setup, strategy)})
+				entries = journal.read(setup, strategy)
+				return self.sendJSON({'strategy': strategy, 'entries': entries, 'cards': cards.cards(setup, strategy),
+									  'holdouts': [h for h in (holdout.status(setup, i, strategy) for i in sorted(set(
+										  e['instrument'] for e in entries if e.get('instrument')))) if h]})
+			if route == '/api/gate':
+				return self.sendJSON(self.service.gateStatus())
+			if route == '/api/holdout':
+				return self.sendJSON(self.service.holdouts())
 			if route == '/api/cards':
 				return self.sendJSON({'cards': cards.cards(setup, self.one(query, 'strategy'))})
 			if route.startswith('/api/cards/'):
@@ -3762,6 +3965,20 @@ class Handler(BaseHTTPRequestHandler):
 			if route == '/api/live/stop-all':
 				# the kill switch: every session running, stopped and closed
 				return self.sendJSON(self.service.live.stopAll())
+			if route in ('/api/gate', '/api/holdout'):
+				# {"sweep", "n"}: the gate of a run of a set; {"instrument", "cut",
+				# "strategy"}: a holdout cut moved by hand (web/holdout.py)
+				length = int(self.headers.get('Content-Length') or 0)
+				try:
+					body = json.loads(self.rfile.read(length) or b'{}')
+				except ValueError:
+					body = None
+				if not isinstance(body, dict):
+					raise ServiceError('the body is a JSON object')
+				if route == '/api/gate':
+					return self.sendJSON(self.service.startGate(str(body.get('sweep') or ''), body.get('n'),
+																access.user(self) or 'user'))
+				return self.sendJSON(self.service.moveHoldout(body, access.user(self) or 'user'))
 			if route in ('/api/journal/note', '/api/cards/move'):
 				# {"strategy", "text", "about", "mark"} a note; {"id", "to", "why"} a
 				# version to another state, by whoever is signed in (DEAD only so)

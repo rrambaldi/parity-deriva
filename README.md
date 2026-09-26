@@ -1549,6 +1549,55 @@ location ~ ^/parity/(phone|phone-sw\.js|phone-manifest\.json|api/phone/.*|static
 }
 ```
 
+## A strategy's journal, the holdout and the gate
+
+Every strategy has a journal (the journal page, `web/journal.py`): the
+platform writes an entry for everything done with it - a set finished or
+deleted, a run, a favourite and its note, its code changing (its syntax tree:
+a comment is no change), a mix, verify, a push to a trade server with the
+verdict that came back, a session started or stopped, an alert. Nobody has to
+write a line; a note on any entry, or a free one, is there for whoever wants
+it. One file a strategy, `DATA_DIR/journal/<strategy>.jsonl`, only ever added
+to; `scripts/journal_backfill.py` writes, once, the entries of what was on
+disk before. Assistants read the journals over MCP (`list_journals`,
+`get_journal`, `search_journals`) and add notes (`add_note`, not on a real
+money server).
+
+The last stretch of each instrument's history is its holdout
+(`web/holdout.py`): no backtest or set reads past its cut - one that asks to
+stops the day before, and says so - but the gate. The first run on an
+instrument fixes the cut, the same for every timeframe: the last quarter of the
+history, and at least a year of it. It moves only by hand, from the settings
+page (market data tab), and a strategy may have a cut of its own, from its
+journal.
+
+```
+export PARITY_DERIVA_HOLDOUT_SHARE=0.25
+export PARITY_DERIVA_HOLDOUT_MIN_DAYS=365
+export PARITY_DERIVA_GATE_MIN_TRADES=100
+export PARITY_DERIVA_GATE_PF_LOW=1.0
+export PARITY_DERIVA_GATE_BASELINE_PCT=95
+export PARITY_DERIVA_GATE_HOLDOUT_PF_RATIO=0.7
+export PARITY_DERIVA_GATE_HOLDOUT_DD_RATIO=1.5
+```
+
+The gate is a button on the run page of a starred run of a set
+(`performance/gate.py`). On the development period: 100 trades, a bootstrap
+profit factor above 1, the set's neighbouring runs (one step of one parameter
+away) profitable too, a profit factor above 1 without the 3 best trades, and
+random entries with the strategy's profile beaten at the 95th percentile
+(`performance/baseline.py`). Only if all pass, the same form once on the
+holdout: a profit, a profit factor of at least 0.7 of the development's, a
+drawdown of at most 1.5 times it. The verdict goes on the version's card
+(`web/cards.py`, `DATA_DIR/cards/`): a version is the code and the frozen
+parameters, labelled like `M1502-SBR v3`; one that passed carries its
+reference - the numbers and the Monte Carlo band of its trades
+(`performance/montecarlo.py`, drawn in grey on the run page) - which a real
+money server judges its demo record by. A version reads its holdout once; the
+dialog says how often that cut was opened and whether saved sets already read
+past it. Trying again, or discarding the version, is the user's call: nothing
+here discards one by itself.
+
 ## Old simulations off the disk: an S3 bucket, a Google Drive, a OneDrive
 
 The runs of a set - the trades the run page draws, a few MB each - are what

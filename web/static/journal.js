@@ -139,6 +139,7 @@ async function open(strategy, keep) {
     state.strategy = strategy;
     state.entries = held.entries;
     state.cards = held.cards;
+    state.holdouts = held.holdouts || [];
     state.sessions = live.sessions.filter((s) => family((s.fields || {}).strategy || '') === family(strategy));
     if (!keep) {
       state.ticked = [];
@@ -203,6 +204,33 @@ function drawNow() {
     now.appendChild(box);
   }
   if (!now.children.length) now.textContent = 'no version past the gate and no session running';
+  for (const h of state.holdouts) now.appendChild(holdoutBox(h));
+}
+
+// the holdout the strategy's runs stop at, on each instrument it was tried on
+// (web/holdout.py): the instrument's, or a cut of its own set here (D4)
+function holdoutBox(h) {
+  const box = document.createElement('div');
+  box.className = 'journal-card';
+  const line = document.createElement('div');
+  line.textContent = h.own ? `holdout on ${h.instrument} from ${h.cut}, its own \u00b7 opened ${h.openings} times`
+    : `holdout on ${h.instrument} from ${h.cut}, the instrument's \u00b7 opened ${h.openings} times`;
+  box.appendChild(line);
+  const when = document.createElement('input');
+  when.type = 'date';
+  when.value = h.cut;
+  when.setAttribute('aria-label', `its own holdout on ${h.instrument} from`);
+  const move = async (cut) => {
+    try {
+      await post('api/holdout', { instrument: h.instrument, cut, strategy: state.strategy });
+      open(state.strategy, true);
+    } catch (error) {
+      $('journal-note').textContent = String(error.message || error);
+    }
+  };
+  box.append(when, button('its own cut', 'yes', () => move(when.value)));
+  if (h.own) box.appendChild(button("the instrument's cut", 'rerun', () => move('')));
+  return box;
 }
 
 function noteForm(entry) {

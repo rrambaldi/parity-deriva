@@ -63,8 +63,8 @@ C1a  net ≥ 0 e trade minimi in promote()  fatto (7d93728)
 C7c  colonna R nei trade                  fatto (0ca8c06)
 C8   avvisi + pagina per il telefono      fatto (21cc77b)
 C2   diario + scheda                      fatto (e21e911)
-C5   banda Monte Carlo + baseline         fatto
-C3   holdout + gate SIM → DEMO            usa C2 e C5
+C5   banda Monte Carlo + baseline         fatto (0cc433b)
+C3   holdout + gate SIM → DEMO            fatto
 C1b  banda e serie di perdite in promote  usa C2 e C5
 C7d  push e verify senza mix              prima della prima demo vera
 C4   motore correlazioni + filtri         usa C3 (solo periodo di sviluppo)
@@ -313,7 +313,10 @@ e scrive il verdetto nella scheda.
     2025-01-10`. È un'informazione, non un blocco.
   - Ogni backtest e ogni sweep con `to` oltre il taglio viene **tagliato**, con
     un avviso sulla pagina: `holdout starts 2024-03-01: the run stops there`.
-    Solo il gate può leggere oltre.
+    Il taglio sta in `_backtest`, da cui passano pagina, sweep e MCP; un run
+    tutto nell'holdout è rifiutato, e un set lo è prima di partire. Leggono
+    oltre solo il gate e `verify`, che rifà un run spinto da un altro server
+    così com'era.
   - Gli sweep sul periodo di sviluppo non hanno limiti e non si contano.
   - **Il gate**, pulsante sulla pagina di un run preferito. In ordine:
     1. controlli sullo sviluppo: ≥ 100 trade; limite basso del bootstrap del

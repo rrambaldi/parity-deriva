@@ -2590,6 +2590,8 @@ function show(data) {
     ? { sweep: where.get('sweep'), run: Number(where.get('run')) } : null;
   renderStar();
   loadBand();
+  $('holdout-note').hidden = !data.holdout;
+  if (data.holdout) $('holdout-note').textContent = `holdout starts ${data.holdout.cut}: the run stops there`;
   $('journal-link').href = 'journal?strategy=' + encodeURIComponent(data.strategy);
   $('journal-link').hidden = !data.strategy;
   $('chart-title').textContent = (id ? `[${id}] ` : '')
@@ -3030,7 +3032,73 @@ function renderStar() {
   const source = currentSource();
   $('fav-star').hidden = !source;
   if (source) paintStar($('fav-star'), !!favouriteOf(source));
+  // the gate is for a starred run of a set: its neighbours are the plateau
+  $('gate-run').hidden = !(state.sweepRef && source && favouriteOf(source));
 }
+
+/*
+ * The gate SIM -> DEMO of the run on show (api/gate, performance/gate.py):
+ * started here, followed while it runs its backtests, its verdict a line a
+ * check. A version reads its holdout once: the verdict stays on its card.
+ */
+function gateRow(row) {
+  const tr = document.createElement('tr');
+  for (const [text, cls] of [[row.ok ? '\u2713' : '\u2717', row.ok ? 'good' : 'bad'], [row.check],
+                             [row.value === null || row.value === undefined ? 'n/a' : String(row.value), 'num'],
+                             [row.need]]) {
+    const td = document.createElement('td');
+    td.textContent = text;
+    if (cls) td.className = cls;
+    tr.appendChild(td);
+  }
+  return tr;
+}
+
+function showGate(job) {
+  const r = job.result;
+  $('gate-sub').textContent = r ? `${r.card.label} \u00b7 holdout from ${r.cut}` : '';
+  $('gate-table').hidden = !r;
+  $('gate-notes').textContent = '';
+  if (job.running) {
+    $('gate-state').textContent = `checking: ${job.stage}\u2026`;
+    return;
+  }
+  if (job.error || !r) {
+    $('gate-state').textContent = job.error || '';
+    return;
+  }
+  $('gate-state').textContent = r.ok ? 'passed: the version is ready for demo, its reference on its card'
+    : r.holdout ? 'not passed on the holdout: the version stays in SIM - try again or discard it, your call'
+      : 'not passed on the development period: the holdout was not opened';
+  const body = $('gate-rows');
+  body.textContent = '';
+  for (const row of r.development) body.appendChild(gateRow(row));
+  for (const row of r.holdout || []) body.appendChild(gateRow(row));
+  const read = r.readBy || {};
+  $('gate-notes').textContent = [
+    r.openings ? `the holdout from ${r.cut} has been opened ${r.openings} times` : '',
+    read.sets || read.runs ? (read.whole ? `holdout read by ${read.sets} sets and ${read.runs} runs, up to the last bar`
+      : `holdout read by ${read.sets} sets and ${read.runs} runs, up to ${read.until}`) : '',
+  ].filter(Boolean).join(' \u00b7 ');
+}
+
+$('gate-run').addEventListener('click', async () => {
+  const ref = state.sweepRef;
+  if (!ref) return;
+  $('gate-dialog').showModal();
+  showGate({ running: true, stage: 'starting' });
+  try {
+    let job = await post('api/gate', JSON.stringify({ sweep: ref.sweep, n: ref.run }));
+    while (job.running) {
+      showGate(job);
+      await new Promise((done) => setTimeout(done, 1500));
+      job = await ask('api/gate');
+    }
+    showGate(job);
+  } catch (error) {
+    $('gate-state').textContent = String(error.message || error);
+  }
+});
 
 async function loadFavourites() {
   state.favourites = (await ask('api/favourites')).favourites || [];

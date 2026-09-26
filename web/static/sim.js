@@ -416,6 +416,9 @@ function follow(job) {
   $('stop').hidden = $('pause').hidden = !running;
   $('rerun').hidden = running || !job.total;
   $('delete').hidden = running || !job.id;
+  // the runs stop at the holdout's cut (web/holdout.py): said while it is on show
+  $('holdout-note').hidden = !job.holdout;
+  if (job.holdout) $('holdout-note').textContent = `holdout starts ${job.holdout.cut}: the runs stop there`;
   const strategy = (job.fields || {}).strategy;
   $('journal-link').hidden = !strategy;
   if (strategy) $('journal-link').href = 'journal?strategy=' + encodeURIComponent(strategy);

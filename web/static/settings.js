@@ -1127,6 +1127,43 @@ $('mcp-disconnect').addEventListener('click', async () => {
 });
 
 showMcp().catch((error) => mcpSay(String(error.message || error)));
+/* ---------------------------------------------------------- the holdout */
+
+// each instrument's cut (web/holdout.py): where it is, how often the gate
+// read past it, which saved sets and runs did, and a date to move it to
+function showHoldout(held) {
+  const rows = $('holdout-rows');
+  rows.textContent = '';
+  $('holdout-table').hidden = !held.instruments.length;
+  $('holdout-say').textContent = held.instruments.length ? ''
+    : 'no holdout yet: the first backtest or set on an instrument fixes its cut';
+  for (const one of held.instruments) {
+    const row = document.createElement('tr');
+    const read = one.readBy.sets || one.readBy.runs
+      ? `${one.readBy.sets} sets, ${one.readBy.runs} runs` : 'none';
+    const own = Object.entries(one.strategies || {}).map(([name, s]) => `${name} ${s.cut}`).join(', ') || '-';
+    for (const [text, cls] of [[one.instrument], [one.cut], [String(one.openings), 'num'], [own], [read]]) {
+      const cell = document.createElement('td');
+      cell.textContent = text;
+      if (cls) cell.className = cls;
+      row.appendChild(cell);
+    }
+    const cell = document.createElement('td');
+    const when = document.createElement('input');
+    when.type = 'date';
+    when.value = one.cut;
+    when.setAttribute('aria-label', `the holdout of ${one.instrument} from`);
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.textContent = 'move';
+    go.addEventListener('click', () => post('api/holdout', JSON.stringify({ instrument: one.instrument, cut: when.value }))
+      .then(showHoldout).catch((error) => { $('holdout-say').textContent = String(error.message || error); }));
+    cell.append(when, go);
+    row.appendChild(cell);
+    rows.appendChild(row);
+  }
+}
+
 /* ------------------------------------------------------ alerts and phones */
 
 // where the urgent alerts go (web/notify.py) and the phones paired (web/phone.py)
@@ -1239,6 +1276,7 @@ follow();
 
 showLanguages().catch((error) => { $('lang-note').textContent = String(error.message || error); });
 ask('api/server').then(showServer).catch(serverSay);
+ask('api/holdout').then(showHoldout).catch((error) => { $('holdout-say').textContent = String(error.message || error); });
 ask('api/phones').then(showPhones).catch((error) => { $('phone-note').textContent = String(error.message || error); });
 ask('api/storage').then(showStorage).catch(backupSay);
 ask('api/market').then((state) => { showMarket(state); showQuality(state); if (marketRunning) followMarket(); })

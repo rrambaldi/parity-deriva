@@ -56,6 +56,27 @@
 
 <!-- how the chart is read: what its marks are, and what a click, the wheel
      and a drag do on it. Opened by the (?) at the end of the legend -->
+<dialog id="gate-dialog" class="sheet" aria-labelledby="gate-title">
+  <form method="dialog" class="dialog-head">
+    <div class="dialog-heading">
+      <h2 class="dialog-title" id="gate-title">the gate</h2>
+      <p class="dialog-sub" id="gate-sub"></p>
+    </div>
+    <div class="dialog-tools">
+      <span class="kbd" aria-hidden="true">esc</span>
+      <button type="submit" class="dialog-close" aria-label="close"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+  </form>
+  <div class="dialog-body">
+    <p id="gate-state" role="status"></p>
+    <table id="gate-table" hidden>
+      <thead><tr><th></th><th>check</th><th class="num">value</th><th>needs</th></tr></thead>
+      <tbody id="gate-rows"></tbody>
+    </table>
+    <p id="gate-notes" class="dim"></p>
+  </div>
+</dialog>
+
 <dialog id="help-dialog" class="sheet" aria-labelledby="help-title">
   <form method="dialog" class="dialog-head">
     <div class="dialog-heading">
@@ -107,9 +128,14 @@
          Hidden until what is on show is something saved, see renderStar() -->
     <button type="button" id="fav-star" class="fav-star" aria-pressed="false" title="mark it a favourite" hidden>&#9734;</button>
     <a id="journal-link" href="journal" title="everything done with this strategy" hidden>journal</a>
+    <!-- the gate SIM -> DEMO of a starred run of a set (performance/gate.py):
+         the development's checks, then once its holdout -->
+    <button type="button" id="gate-run" data-icon="shield" hidden
+      title="the checks before demo, then once the holdout: the verdict goes on the version's card">gate</button>
   </div>
   <div id="chart-tools">
     <span id="chart-zoom"></span>
+    <span id="holdout-note" class="hint" hidden></span>
     <span id="slope-note"></span>
     <!--
       What the chart is drawn at, which is not what the run was made on. The

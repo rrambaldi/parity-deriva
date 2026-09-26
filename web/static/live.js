@@ -1107,7 +1107,10 @@ $('push-form').addEventListener('submit', async (event) => {
     const v = told.verdict;
     $('push-note').textContent = [...told.lines, !v ? `pushed to ${target.name}`
       : v.ok ? `promoted: ${v.days} days, ${v.trades} trades, no parity alarm - it can start on ${target.name}`
-        : `not promoted yet: it needs ${v.need.join(', ')}`].join(' · ');
+        : `not promoted yet: it needs ${v.need.join(', ')}`,
+    // a demo without the gate is allowed (D6); real money will want the card
+    ...(told.gate ? [] : ['no gate: this form has no card from the gate - it may go to demo, not to real money'])]
+      .join(' · ');
   } catch (error) { $('push-note').textContent = String(error.message || error); }
   $('push-go').disabled = false;
 });

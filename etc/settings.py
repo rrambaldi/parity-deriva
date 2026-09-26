@@ -98,6 +98,22 @@ SMTP_TO = dotenv('PARITY_DERIVA_SMTP_TO')
 TELEGRAM_TOKEN = dotenv('PARITY_DERIVA_TELEGRAM_TOKEN')
 TELEGRAM_CHAT = dotenv('PARITY_DERIVA_TELEGRAM_CHAT')
 ALERT_STALE_BARS = int(dotenv('PARITY_DERIVA_ALERT_STALE_BARS', '3'))
+# The holdout and the gate SIM -> DEMO (web/holdout.py, performance/gate.py):
+# the last HOLDOUT_SHARE of an instrument's history, and at least
+# HOLDOUT_MIN_DAYS of it, is read by no simulation but the gate's, once a
+# version. The gate asks the development period for GATE_MIN_TRADES trades, a
+# bootstrap profit factor above GATE_PF_LOW, profitable neighbours in the set,
+# a PF above it without the 3 best trades, random entries beaten at the
+# GATE_BASELINE_PCT percentile; then the holdout for a profit, a PF of at
+# least GATE_HOLDOUT_PF_RATIO of the development's and a drawdown of at most
+# GATE_HOLDOUT_DD_RATIO of it.
+HOLDOUT_SHARE = float(dotenv('PARITY_DERIVA_HOLDOUT_SHARE', '0.25'))
+HOLDOUT_MIN_DAYS = int(dotenv('PARITY_DERIVA_HOLDOUT_MIN_DAYS', '365'))
+GATE_MIN_TRADES = int(dotenv('PARITY_DERIVA_GATE_MIN_TRADES', '100'))
+GATE_PF_LOW = float(dotenv('PARITY_DERIVA_GATE_PF_LOW', '1.0'))
+GATE_BASELINE_PCT = float(dotenv('PARITY_DERIVA_GATE_BASELINE_PCT', '95'))
+GATE_HOLDOUT_PF_RATIO = float(dotenv('PARITY_DERIVA_GATE_HOLDOUT_PF_RATIO', '0.7'))
+GATE_HOLDOUT_DD_RATIO = float(dotenv('PARITY_DERIVA_GATE_HOLDOUT_DD_RATIO', '1.5'))
 
 DOMAIN = "real" if ACCOUNTS == 'real' else "practice"
 STREAM_DOMAIN = ENVIRONMENTS["streaming"][DOMAIN]

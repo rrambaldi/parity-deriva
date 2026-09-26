@@ -322,6 +322,17 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
     <span id="data-progress-text"></span>
   </div>
   <pre id="data-log" hidden></pre>
+  <!-- the holdout of each instrument (web/holdout.py, docs/PIANO-FASE1.md C3) -->
+  <h3 class="panel-title">holdout</h3>
+  <p class="dim">The last stretch of each instrument's history, which no simulation reads but the gate, once a
+    version. The first run on an instrument fixes it, the same for every timeframe; it moves only from here,
+    back or forward, always leaving a year after it, and a cut moved starts with no openings. A strategy can have
+    a cut of its own, from its journal.</p>
+  <table id="holdout-table" hidden>
+    <thead><tr><th>instrument</th><th>holdout from</th><th class="num">opened</th><th>own cuts</th><th>read past it</th><th>move it to</th></tr></thead>
+    <tbody id="holdout-rows"></tbody>
+  </table>
+  <p id="holdout-say" role="status"></p>
 </section>
 
 <!--

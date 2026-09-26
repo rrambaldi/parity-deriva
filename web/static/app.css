@@ -1190,3 +1190,7 @@ dialog.sheet::backdrop { background: var(--backdrop); } /* token in tokens.css: 
 .alert-banner button { flex: none; }
 #phone-qr { margin: 12px 0; }
 #phone-qr-img { image-rendering: pixelated; background: #fff; padding: 8px; border-radius: var(--radius-s); }
+#gate-rows td.good { color: var(--up); }
+#gate-rows td.bad { color: var(--down); }
+/* the run's trades: fifteen columns, which a narrow window scrolls rather than the page */
+#trades-panel { overflow-x: auto; }
