@@ -1,14 +1,25 @@
-# The simulation engine
+# The engine: simulation and live trading
+
+One engine does both jobs. It **simulates** a strategy on the candles in the
+store, and it **trades** it on a broker's account, moved by the broker's
+candles as each one closes. It is not a backtester with a live mode added on,
+nor a trading bot with a simulator beside it: the strategy, the money manager
+and the rules are the same objects in both cases.
 
 Everything that happens is an **event** on one bus, and every component is a
 **handler**: it reads the events it cares about and puts new ones on the bus.
-A candle comes in, a strategy turns it into a signal, the money manager turns
+A candle closes, a strategy turns it into a signal, the money manager turns
 the signal into an order, and a broker (or the simulator, playing one) fills
-it.
+it. **The clock is the candle**: nothing moves until a bar closes, in a
+backtest or on the account.
 
-The same handlers run live and in a backtest. Three things change between the
-two: where the candles come from, which driver moves the events, and who plays
-the broker.
+Three things change between the two modes:
+
+| | backtest | live |
+|---|---|---|
+| where the candles come from | the store, read in one go | the broker, each bar as it closes |
+| which driver moves the events | `backtest/driver.py`, one candle at a time | `trading/engine.py`, threads and a queue |
+| who plays the broker | the simulator, through `SimulatedBroker` | the broker; the simulator runs beside it as a shadow |
 
 ## Events
 
@@ -38,7 +49,7 @@ simulator issued about its own book would reach the real account.
 
 | handler | file | reads | puts |
 |---|---|---|---|
-| candle source | `data/replay.py` (`ForexCandles`, offline) · the provider's stream (live) | – | `CANDLE` |
+| candle source | `data/replay.py` (`ForexCandles`, offline) · the provider's poller or stream (live) | – | `CANDLE` |
 | strategy | `strategy/*.py` | `CANDLE` of its own granularity | `SIGNAL` |
 | money manager | `portfolio/moneymanager.py` | `SIGNAL`, `CLIENTORDER`, `TRANSACTION`, `ORDERCANCEL`, `STATUS` | `ORDER`, `ORDERCANCEL` |
 | trailer | `portfolio/trailer.py` | `CANDLE` | `STOPMODIFY` |
@@ -47,7 +58,7 @@ simulator issued about its own book would reach the real account.
 | simulated broker | `backtest/offline.py` (`SimulatedBroker`) | `SIMULATED*` | `CLIENTORDER`, `TRANSACTION`, `ORDERCANCEL` |
 | ledger | `backtest/ledger.py` | all of the above | nothing: it writes the trades down |
 | execution (live) | `execution/*.py` | `ORDER`, `ORDERCANCEL`, and `STOPMODIFY` / `CLOSETRADE` where the broker can | sends them to the broker |
-| transactions (live) | the provider's stream | – | `TRANSACTION` |
+| transactions (live) | the provider's stream or poller | – | `TRANSACTION` |
 | parity monitor (live) | `trading/parity.py` | the real side and the simulated side | an alarm |
 | event saver | `event/saver.py` | everything | one JSON line per event |
 
@@ -104,6 +115,51 @@ sequenceDiagram
     B->>MM: TRANSACTION ORDER_FILL
     Note over MM: a trade is open: new signals are refused
 ```
+
+## Live: the broker's candles drive it
+
+A live session is one process, `scripts/live.py`, started from the live page
+(`web/livesessions.py`) with the form it trades (strategy, instrument,
+granularity, parameters, account options) and the account it trades on.
+Stopping it from the page cancels that session's resting orders, closes its
+open trades at market, and then ends the process; nothing else on the account
+is touched.
+
+Each broker is a **provider** (`trading/providers.py`) that says which
+handlers read its candles, send its orders and report its transactions, and
+declares what the broker cannot do. A wiring that needs something the broker
+lacks (ask and bid on every bar, a stop that can be moved) refuses to start
+rather than run wrong.
+
+| provider | candles | transactions |
+|---|---|---|
+| `oanda` | polled, OANDA marks a bar complete (`data/candles.py`) | pushed on a stream (`data/transaction.py`) |
+| `etoro` | polled; one price series, ask and bid from a spread model (`data/etoro.py`) | polled |
+| `ig`, `capital` | polled, ask and bid as IG serves them (`data/ig.py`) | polled |
+| `ib` | polled (`data/ib.py`) | polled |
+| `mt5` | complete bars from the MetaTrader 5 terminal, through its bridge (`data/mt5.py`) | polled |
+| `twelvedata` | polled once per bar (`data/twelvedata.py`): the **paper** session, where the simulator is the broker | `SimulatedBroker`, as in a backtest |
+
+**A bar is sent only once it has closed.** OANDA says so itself; for the
+others the newest bar is the one still forming, so a bar counts as closed at
+its own start plus its interval. Sending a forming bar would let a strategy
+signal on a high that is not yet the high.
+
+Then the chain is the backtest's:
+
+1. the source puts a `CANDLE` for the bar that just closed;
+2. the strategy reads it and may put a `SIGNAL`;
+3. the money manager checks the account rules and sizes it: `ORDER`;
+4. the execution handler sends the order to the broker;
+5. the broker's reply and later its fills, cancels and rejections come back as
+   `CLIENTORDER` and `TRANSACTION`, and the money manager follows them;
+6. the simulator gets the same `ORDER` and the same candles, and fills its own
+   copy: the **shadow**, which the parity monitor compares with the account.
+
+Every event goes to the session's JSONL log (`EventSaver`), and every bar to
+the candle database (`CandleRecorder`, `data/candledb.py`), so the brokers'
+bars can be set side by side later. The first bar a signal may come from is
+the one still forming when the session started (`notBefore`).
 
 ## Same components, two wirings
 
@@ -244,4 +300,5 @@ than ignored.
 6. `portfolio/moneymanager.py`: from a signal to an order.
 7. `backtest/shadow.py` and `backtest/resolution.py`: fine bars under coarse
    ones.
-8. `scripts/live.py` and `trading/parity.py`: the live wiring and its shadow.
+8. `trading/providers.py`, `scripts/live.py` and `trading/parity.py`: the
+   brokers, the live wiring and its shadow.
