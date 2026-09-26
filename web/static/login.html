@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>parity-deriva sign in</title>
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="static/fonts.css">
+<link rel="stylesheet" href="static/tokens.css">
+<link rel="stylesheet" href="static/app.css">
+<link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="static/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="static/apple-touch-icon.png">
+<!-- the theme the switch forced, before the first paint: see settings.html -->
+<script>
+  try {
+    const theme = localStorage.getItem('parity-deriva.theme');
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  } catch (error) { /* nothing kept: the system's theme */ }
+</script>
+<style>
+  #login-panel { max-width: 30em; }
+  #login-buttons { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+  #login-buttons a { display: flex; align-items: center; height: var(--control-h); padding: 0 var(--space-3);
+                     border: 1px solid var(--border); border-radius: var(--radius-s); color: var(--text);
+                     text-decoration: none; font-weight: 500; }
+  #login-buttons a:hover { border-color: var(--text-2); }
+  #login-error { color: var(--down); }
+  @media (max-width: 640px) { #login-panel { margin-left: var(--space-4); margin-right: var(--space-4); } }
+</style>
+</head>
+<body>
+
+<header>
+  <div id="brand">
+    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="179" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="179" height="28"></h1>
+    <span id="page-name" class="page-title">sign in</span>
+  </div>
+</header>
+
+<!--
+  The way in when this server signs people in itself (web/access.py, mode
+  oauth): one button a provider set up at the first start. Who may enter is
+  the server's list; a provider only says who you are.
+-->
+<section id="login-panel">
+  <h2 class="panel-title">sign in</h2>
+  <p id="login-error" role="alert" hidden></p>
+  <div id="login-buttons"></div>
+  <p id="login-note" role="status"></p>
+</section>
+
+<script src="static/i18n.js"></script>
+<script src="static/login.js"></script>
+</body>
+</html>

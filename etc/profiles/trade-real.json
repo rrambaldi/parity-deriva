@@ -1,0 +1,10 @@
+{
+ "profile": "parity-deriva",
+ "version": 1,
+ "name": "Trade with real money",
+ "auth": {"mode": "cert"},
+ "roles": ["trade"],
+ "accounts": "real",
+ "archive": {"url": "https://archive.example.com/mcp"},
+ "market": {"candles": "upstream", "calendar": "upstream"}
+}

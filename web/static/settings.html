@@ -44,6 +44,7 @@
   <button type="button" role="tab" id="tab-quality" aria-controls="quality-panel" aria-selected="false" tabindex="-1">data quality</button>
   <button type="button" role="tab" id="tab-mcp" aria-controls="mcp-panel" aria-selected="false" tabindex="-1">AI assistants</button>
   <button type="button" role="tab" id="tab-lang" aria-controls="lang-panel" aria-selected="false" tabindex="-1">languages</button>
+  <button type="button" role="tab" id="tab-access" aria-controls="access-panel" aria-selected="false" tabindex="-1">access</button>
 </div>
 
 <!--
@@ -239,6 +240,43 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
     <button type="button" id="lang-upload" data-icon="upload">upload</button>
   </div>
   <p id="lang-note" role="status"></p>
+</section>
+
+<!--
+  Who may open these pages (web/access.py): the way chosen at the first
+  start, the list of who may enter and the sign-in providers, a client
+  certificate for one more person, and this server's profile to set up the
+  next one like it. The way itself is not changed here: a page that could
+  change it could lock everybody out.
+-->
+<section id="access-panel" role="tabpanel" aria-labelledby="tab-access" hidden>
+  <h2 class="panel-title">access</h2>
+  <p id="access-state"></p>
+  <div id="access-oauth" hidden>
+    <div class="market-row">
+      <label>this server's public address
+        <input type="url" id="access-url" spellcheck="false" placeholder="https://host" style="width: min(28em, 100%)"></label>
+    </div>
+    <div id="access-providers"></div>
+    <div class="market-row">
+      <label>who may enter, one a line
+        <textarea id="access-allow" rows="5" spellcheck="false" style="width: min(40em, 100%); box-sizing: border-box; font: var(--fs-body) var(--font-mono); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-s); padding: var(--space-2)"
+          placeholder="someone@example.com&#10;@example.com&#10;github:login"></textarea></label>
+      <button type="button" id="access-save" data-icon="yes">save</button>
+    </div>
+  </div>
+  <div id="access-cert" hidden>
+    <div class="market-row">
+      <label>issue a certificate for <input type="text" id="access-cert-name" maxlength="60" placeholder="Mario Rossi"></label>
+      <button type="button" id="access-cert-go" data-icon="add">issue</button>
+    </div>
+    <p id="access-cert-out" hidden><a id="access-p12" download="parity-deriva.p12">download the certificate</a>
+      · <span>password</span> <code id="access-p12-pass"></code></p>
+  </div>
+  <div class="market-row" style="margin-top: 12px">
+    <a class="button" href="api/access/profile" download>download this server's profile</a>
+  </div>
+  <p id="access-note" role="status"></p>
 </section>
 
 <!--
@@ -495,5 +533,6 @@ class MyEma(H4):
 <script src="static/i18n.js"></script>
 <script src="static/menu.js"></script>
 <script src="static/settings.js"></script>
+<script src="static/access.js"></script>
 </body>
 </html>

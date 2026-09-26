@@ -1,0 +1,10 @@
+{
+ "profile": "parity-deriva",
+ "version": 1,
+ "name": "Trade on demo accounts",
+ "auth": {"mode": "cert"},
+ "roles": ["trade"],
+ "accounts": "demo",
+ "archive": {"url": "https://archive.example.com/mcp"},
+ "market": {"candles": "upstream", "calendar": "upstream"}
+}

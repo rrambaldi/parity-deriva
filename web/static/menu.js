@@ -276,6 +276,29 @@ function marginText(m) {
     toggle.appendChild(button);
   }
   brand.appendChild(toggle);
+  // who is in, when the server knows (web/access.py): the name before the
+  // theme switch, and a way out when it signed them in itself
+  plain('api/access').then((reply) => reply.json()).then((access) => {
+    if (!access.user) return;
+    const who = document.createElement('span');
+    who.id = 'who';
+    who.title = access.user;
+    // the name gives way on a narrow screen, the way out does not
+    who.style.cssText = 'display: inline-flex; gap: 0.4em; min-width: 0; max-width: 20em; '
+      + 'font-size: var(--fs-small); color: var(--text-3); white-space: nowrap';
+    const name = document.createElement('span');
+    name.style.cssText = 'overflow: hidden; text-overflow: ellipsis; min-width: 0';
+    name.textContent = access.user;
+    who.append(name);
+    if (access.mode === 'oauth') {
+      const out = document.createElement('a');
+      out.href = 'logout';
+      out.textContent = 'log out';
+      out.style.flexShrink = '0';
+      who.append('·', out);
+    }
+    brand.insertBefore(who, toggle);
+  }).catch(() => { /* no answer, no name: the page is the same */ });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redraw);
   // the canvases measure their labels in the font they are given: until Plex
   // Mono is in they measure the fallback, so they are drawn again once it is

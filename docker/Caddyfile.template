@@ -1,0 +1,32 @@
+# The Caddy in front of parity-deriva (docker-compose.yml, profile https).
+#
+# The service writes /data/Caddyfile from this at start and whenever its access
+# changes (web/access.py). It puts PARITY_DERIVA_DOMAIN as the site's name and,
+# in cert mode only, these four lines inside tls { } (nothing otherwise):
+#
+#		client_auth {
+#			mode verify_if_given
+#			trust_pool file /parity/ca/ca.crt
+#		}
+#
+# The two markers it replaces appear once each, below, and nowhere in this
+# comment: a replace would reach into it too.
+#
+# Caddy runs with --watch, so a new file is its new configuration. It reads the
+# same volume at /parity, which is why the CA is /parity/ca/ca.crt here and
+# /data/ca/ca.crt in the service.
+#
+# verify_if_given: a certificate from another authority is refused at the
+# handshake, and no certificate at all passes - the MCP and OAuth routes need
+# that, the assistants calling them have none. The service refuses the other
+# routes when X-Client-Subject is empty. header_up replaces whatever a client
+# sent under that name, with an empty value when there is no certificate.
+
+@@DOMAIN@@ {
+	tls {
+@@CLIENT_AUTH@@
+	}
+	reverse_proxy parity:8731 {
+		header_up X-Client-Subject {http.request.tls.client.subject}
+	}
+}

@@ -1,0 +1,9 @@
+{
+ "profile": "parity-deriva",
+ "version": 1,
+ "name": "Test on a PC",
+ "auth": {"mode": "none"},
+ "roles": ["test"],
+ "archive": {"url": "https://archive.example.com/mcp"},
+ "market": {"candles": "upstream", "calendar": "upstream"}
+}

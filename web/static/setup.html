@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>parity-deriva setup</title>
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="static/fonts.css">
+<link rel="stylesheet" href="static/tokens.css">
+<link rel="stylesheet" href="static/app.css">
+<link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="static/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="static/apple-touch-icon.png">
+<!-- the theme the switch forced, before the first paint: see settings.html -->
+<script>
+  try {
+    const theme = localStorage.getItem('parity-deriva.theme');
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  } catch (error) { /* nothing kept: the system's theme */ }
+</script>
+<style>
+  .setup section { max-width: 52em; }
+  .setup section p { max-width: 75ch; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin: 10px 0; }
+  .choice { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+  .choice label, label.inline { flex-direction: row; align-items: center; gap: 8px; font-size: var(--fs-body);
+                                text-transform: none; letter-spacing: 0; color: var(--text); }
+  .box { margin: 10px 0 0; padding: 10px 0 0 12px; border-left: 2px solid var(--line); }
+  .box[hidden], .provider-fields[hidden] { display: none; }
+  .provider { margin: 8px 0; }
+  .provider-fields { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin: 6px 0 0 24px; }
+  .callback { flex-basis: 100%; font-size: var(--fs-small); color: var(--text-3); overflow-wrap: anywhere; }
+  .callback code, .done code { font-family: var(--font-mono); color: var(--text); overflow-wrap: anywhere; }
+  textarea { font: var(--fs-body) var(--font-mono); color: var(--text); background: var(--bg); width: min(40em, 100%);
+             box-sizing: border-box; border: 1px solid var(--border); border-radius: var(--radius-s); padding: var(--space-2); }
+  input[type="url"], input[type="password"], input[type="text"] { width: min(28em, 100%); box-sizing: border-box; }
+  .note { margin: 10px 0 0; }
+  .note.error { color: var(--down); }
+  .warn { color: var(--down); font-weight: 500; }
+  .done dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 8px 0; }
+  .done dt { color: var(--text-3); }
+  .done dd { margin: 0; }
+  @media (max-width: 640px) { .setup section { margin-left: var(--space-4); margin-right: var(--space-4); } }
+</style>
+</head>
+<body class="setup">
+
+<header>
+  <div id="brand">
+    <h1><img class="logo-light" src="static/logo-chiaro.svg" alt="parity-deriva" width="179" height="28"><img class="logo-dark" src="static/logo-scuro.svg" alt="parity-deriva" width="179" height="28"></h1>
+    <span id="page-name" class="page-title">setup</span>
+  </div>
+</header>
+
+<!--
+  The first start (web/access.py, setup mode): who may open the pages, what
+  this server does, where its market data comes from. Everything is sent at
+  the end in one go; then the server starts again with it.
+-->
+<section id="step-code">
+  <h2 class="panel-title">1 · setup code</h2>
+  <p>The code is in the server's log: run <code>docker compose logs parity</code> and look for the line
+    "parity-deriva setup code".</p>
+  <div class="row">
+    <label>code <input type="text" id="code" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX"></label>
+    <button type="button" id="code-go" class="primary" data-icon="yes">continue</button>
+  </div>
+  <p id="code-note" class="note" role="status"></p>
+</section>
+
+<div id="steps" hidden>
+
+<section id="step-profile">
+  <h2 class="panel-title">2 · start from a profile</h2>
+  <p>Optional. A profile fills in the answers below. It never holds a secret: passwords, tokens and
+    certificates are asked again.</p>
+  <div class="row">
+    <label>profile <select id="profile-pick"><option value="">none: start empty</option></select></label>
+    <label>or a file <input type="file" id="profile-file" accept=".json,application/json"></label>
+  </div>
+  <div class="row">
+    <label>this server's name <input type="text" id="name" maxlength="60" placeholder="PC at home"></label>
+  </div>
+  <p id="profile-note" class="note" role="status"></p>
+</section>
+
+<section id="step-access">
+  <h2 class="panel-title">3 · who may open the pages</h2>
+  <div class="choice" role="radiogroup" aria-label="access">
+    <label><input type="radio" name="mode" value="cert"> a client certificate in the browser</label>
+    <label><input type="radio" name="mode" value="oauth"> sign in with Google, Microsoft or GitHub</label>
+    <label><input type="radio" name="mode" value="none" id="mode-none-radio"> no sign-in: only on this PC</label>
+  </div>
+
+  <div id="mode-cert" class="box" hidden>
+    <p>The proxy in front (Caddy or nginx) checks the certificate and tells this server who it is.</p>
+    <div class="choice" role="radiogroup" aria-label="certificate authority">
+      <label><input type="radio" name="ca" value="make" checked> make a new certificate authority here</label>
+      <label><input type="radio" name="ca" value="pem"> use my own authority</label>
+    </div>
+    <div id="ca-make" class="row">
+      <label>first certificate for <input type="text" id="ca-name" maxlength="60" placeholder="Mario Rossi"></label>
+    </div>
+    <div id="ca-pem-box" class="row" hidden>
+      <label>your authority's certificate (PEM)
+        <textarea id="ca-pem" rows="6" spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----"></textarea></label>
+    </div>
+  </div>
+
+  <div id="mode-oauth" class="box" hidden>
+    <div class="row">
+      <label>this server's public address <input type="url" id="public-url" spellcheck="false" placeholder="https://host"></label>
+    </div>
+    <p>Each provider needs an app of yours, made on its site, with the callback address below.</p>
+    <div id="providers"></div>
+    <div class="row">
+      <label>who may enter, one a line
+        <textarea id="allow" rows="5" spellcheck="false"
+          placeholder="someone@example.com&#10;@example.com&#10;github:login"></textarea></label>
+    </div>
+    <p>An address, a whole domain (@example.com), or a GitHub user (github:login).</p>
+  </div>
+
+  <div id="mode-none" class="box" hidden>
+    <p>Anyone who can reach the port is in. Use it on your own PC, where the port is on 127.0.0.1 only.</p>
+  </div>
+  <p id="none-proxied" class="warn" hidden>This page came through a proxy, so the server can be reached from
+    outside: no sign-in is not allowed here.</p>
+  <p id="access-note" class="note" role="status"></p>
+</section>
+
+<section id="step-role">
+  <h2 class="panel-title">4 · what this server does</h2>
+  <div class="choice" aria-label="roles">
+    <label><input type="checkbox" name="role" value="archive"> archive: keeps the strategies, the simulations and the market data for the others</label>
+    <label><input type="checkbox" name="role" value="test"> test: simulates, and takes the AI assistants' drafts</label>
+    <label><input type="checkbox" name="role" value="trade"> trade: trades on the accounts</label>
+  </div>
+
+  <div id="trade-box" class="box" hidden>
+    <div class="choice" role="radiogroup" aria-label="accounts">
+      <label><input type="radio" name="accounts" value="demo" checked> demo accounts</label>
+      <label><input type="radio" name="accounts" value="real"> real money</label>
+    </div>
+    <p id="real-warn" class="warn" hidden>Real money: every live session on this server places real orders.
+      No page can change this later; only a new setup can.</p>
+  </div>
+
+  <div id="archive-box" class="box" hidden>
+    <p>This server is not the Archive: it takes from one.</p>
+    <div class="row">
+      <label>the Archive's MCP address <input type="url" id="archive-url" spellcheck="false" placeholder="https://host/parity/mcp"></label>
+    </div>
+    <div class="row">
+      <label><span id="archive-token-kind">a "pc" token made on the Archive</span>
+        <input type="password" id="archive-token" autocomplete="off"></label>
+      <button type="button" id="archive-check" data-icon="yes">check</button>
+    </div>
+    <p>On the Archive: settings, AI assistants, new program token.</p>
+    <p id="archive-note" class="note" role="status"></p>
+  </div>
+  <p id="role-note" class="note" role="status"></p>
+</section>
+
+<section id="step-market">
+  <h2 class="panel-title">5 · market data</h2>
+  <div class="row">
+    <label>candles
+      <select id="candles">
+        <option value="upstream">from the Archive</option>
+        <option value="manual">my own files</option>
+        <option value="providers">a broker's API</option>
+      </select></label>
+    <label>calendar
+      <select id="calendar">
+        <option value="upstream">from the Archive</option>
+        <option value="manual">my own files</option>
+      </select></label>
+  </div>
+  <p>My own files: put the CSV exports in the import folder (/data/import), or upload them on the settings page.
+    A broker's API needs the broker's keys in the server's .env.</p>
+  <p id="market-note" class="note" role="status"></p>
+</section>
+
+<section id="step-finish">
+  <h2 class="panel-title">6 · finish</h2>
+  <p>The answers are saved and the server starts again with them.</p>
+  <div class="row">
+    <button type="button" id="finish" class="primary" data-icon="yes">finish setup</button>
+  </div>
+  <p id="finish-note" class="note" role="status"></p>
+
+  <div id="done" class="done" hidden>
+    <div id="done-cert" hidden>
+      <p>Your certificate: import it in the browser, then open the app.</p>
+      <dl>
+        <dt>file</dt><dd><a id="p12-link" download="parity-deriva.p12">download parity-deriva.p12</a></dd>
+        <dt>password</dt><dd><code id="p12-pass"></code></dd>
+      </dl>
+    </div>
+    <div id="done-promote" hidden>
+      <p>On the Archive: settings, trade servers, add this server with:</p>
+      <dl>
+        <dt>name</dt><dd>one of your choice</dd>
+        <dt>MCP address</dt><dd><code id="done-mcp"></code></dd>
+        <dt>token</dt><dd><code id="done-token"></code></dd>
+      </dl>
+    </div>
+    <div class="row">
+      <button type="button" id="profile-save" data-icon="import">download this profile</button>
+    </div>
+    <p id="restart" role="status"></p>
+  </div>
+</section>
+
+</div>
+
+<script src="static/i18n.js"></script>
+<script src="static/setup.js"></script>
+</body>
+</html>

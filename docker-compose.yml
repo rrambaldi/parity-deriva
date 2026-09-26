@@ -1,0 +1,51 @@
+# parity-deriva with Docker.
+#
+#   on a PC:        docker compose up -d
+#                   then http://localhost:8731/setup, the code is in
+#                   docker compose logs parity
+#   on a server:    PARITY_DOMAIN=parity.example.com in a .env next to this file
+#                   docker compose --profile https up -d
+#                   then https://parity.example.com/setup
+#
+# The service is published on 127.0.0.1 only: from outside the machine it is
+# reached through Caddy, which holds the TLS certificate (Let's Encrypt) and, in
+# cert mode, checks the client certificates.
+services:
+  parity:
+    image: ghcr.io/rrambaldi/parity-deriva:latest
+    build: .
+    restart: unless-stopped
+    volumes:
+      - parity-data:/data
+    ports:
+      - "127.0.0.1:8731:8731"
+    environment:
+      # when set, the service writes /data/Caddyfile for the caddy below
+      PARITY_DERIVA_DOMAIN: ${PARITY_DOMAIN:-}
+
+  caddy:
+    image: caddy:2
+    profiles: [https]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      # the service's volume, read only: the Caddyfile it writes and its CA
+      - parity-data:/parity:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    # --watch: a Caddyfile the service rewrites is the new configuration. A file
+    # Caddy cannot parse stops the watching (the old configuration stays):
+    # docker compose restart caddy
+    command: >
+      sh -c 'until [ -f /parity/Caddyfile ]; do sleep 2; done;
+      exec caddy run --config /parity/Caddyfile --adapter caddyfile --watch'
+    depends_on:
+      - parity
+
+volumes:
+  parity-data:
+  caddy-data:
+  caddy-config:

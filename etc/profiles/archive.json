@@ -1,0 +1,8 @@
+{
+ "profile": "parity-deriva",
+ "version": 1,
+ "name": "Archive and test in the cloud",
+ "auth": {"mode": "oauth", "allow": [], "providers": {}},
+ "roles": ["archive", "test"],
+ "market": {"candles": "manual", "calendar": "manual"}
+}

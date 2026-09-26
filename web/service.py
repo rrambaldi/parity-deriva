@@ -82,7 +82,7 @@ from parity_deriva.lib import indicators
 from parity_deriva.lib import news as news_module
 from parity_deriva.performance import report as report_module
 from parity_deriva.strategy import plugins, uploaded
-from parity_deriva.web import i18n, livesessions, mcp, oauth
+from parity_deriva.web import access, i18n, livesessions, mcp, oauth
 from parity_deriva.web import logs as logs_page
 
 
@@ -3058,6 +3058,9 @@ class Handler(BaseHTTPRequestHandler):
 		query = urllib.parse.parse_qs(parsed.query)
 
 		try:
+			# who may come in first (web/access.py), then its sign-in and setup
+			if access.gate(self, 'GET', route, query) or access.route(self, 'GET', route, query):
+				return
 			if mcp.route(self, 'GET', route, query) or i18n.route(self, 'GET', route, query):
 				return
 			if logs_page.route(self, 'GET', route, query):
@@ -3227,6 +3230,8 @@ class Handler(BaseHTTPRequestHandler):
 		route = parsed.path
 		query = urllib.parse.parse_qs(parsed.query)
 		try:
+			if access.gate(self, 'POST', route, query) or access.route(self, 'POST', route, query):
+				return
 			# MCP and OAuth have their own door, and the settings page's
 			# MCP routes check the header themselves
 			if mcp.route(self, 'POST', route, query) or i18n.route(self, 'POST', route, query):
@@ -3471,6 +3476,8 @@ def serve(host='127.0.0.1', port=8731, setup=None, max_candles=MAX_CANDLES):
 	other work, and quietly taking the port everything else also wants is a
 	bad neighbour.
 	"""
-	handler = type('BoundHandler', (Handler,),
-				   {'service': Service(setup=setup, max_candles=max_candles)})
+	service = Service(setup=setup, max_candles=max_candles)
+	# the Caddyfile, and the setup's code in the log on a first start
+	access.begin(service.setup)
+	handler = type('BoundHandler', (Handler,), {'service': service})
 	return ThreadingHTTPServer((host, port), handler)

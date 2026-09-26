@@ -71,6 +71,57 @@ the thanks.
   pulled from the account.
 * **Tests** - 1081 tests, no network access required.
 
+# Docker
+
+The image is `ghcr.io/rrambaldi/parity-deriva`, built from `main` and from each
+version tag by `.github/workflows/docker.yml`. All it needs is
+`docker-compose.yml` from this repository.
+
+**On a PC.** `docker compose up -d`, then open http://localhost:8731/setup. The
+setup asks for a code, which is in the container's log:
+`docker compose logs parity`. The port is published on `127.0.0.1` only.
+
+**On a server with a domain.** Put `PARITY_DOMAIN=parity.example.com` in a
+`.env` next to `docker-compose.yml`, point the domain at the server, then
+`docker compose --profile https up -d` and open https://parity.example.com/setup.
+The `https` profile adds Caddy in front: it gets the certificate from Let's
+Encrypt and reads its configuration from a file the service writes.
+
+The setup asks three things: how people get in, what the server is for
+(archive, test, trade on demo accounts or with real money), and where its
+market data comes from (the archive, or your own files). Then the service
+restarts on what you chose. A profile (`etc/profiles/*.json`, or one downloaded
+from another server's settings) fills the answers in, secrets aside.
+
+How people get in:
+
+* **certificate** - a client certificate in the browser, from an authority the
+  setup makes (it hands out the first `.p12`) or one you already have.
+  Caddy checks it.
+* **Google, Microsoft 365 or GitHub** - sign in with one of them, and only the
+  addresses, domains (`@example.com`) or GitHub users (`github:name`) on the
+  list get in. You register the app with the provider; the setup shows the
+  callback address to give it.
+* **none** - for a PC only: it refuses anything that came through a proxy.
+
+Whatever the choice, `/mcp`, `/oauth/` and `/.well-known/` stay open: the AI
+assistants and the other parity servers reach them with their own tokens.
+
+Everything the server keeps is in the `parity-data` volume, mounted at `/data`:
+runs, live sessions, market data, `server.json`, `market.json`. `/data/.env` is
+read at every start. The setup writes to it, and a broker's keys go in it too
+(the names are in `etc/settings.py`); the image has no editor, so append:
+`docker compose exec parity sh -c "echo \"export OANDA_API_ACCESS_TOKEN='...'\" >> /data/.env"`,
+then `docker compose restart parity`.
+CSV files to import go in `/data/import`.
+
+Not in the image: the MetaTrader 5 bridge under Wine (provider `mt5`), the
+private strategies of `strategy/private` and the `candle_forecast` stores.
+
+Once, after the first run of the action: the package on ghcr.io starts out
+private. Make it public in the package's settings on GitHub (Package settings,
+Change visibility), or `docker compose pull` asks for a login.
+
 # Installation and Usage
 
 1) Visit http://www.oanda.com/ and setup an account to obtain the API authentication credentials, which you will need to carry out live trading. I explain how to carry this out in this article: https://www.quantstart.com/articles/Forex-Trading-Diary-1-Automated-Forex-Trading-with-the-OANDA-API.
