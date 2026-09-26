@@ -51,7 +51,7 @@ ALIVE = `LIVE`.
 in poi cambiare codice o parametri crea una nuova versione, che riparte da
 `SIM`. Le versioni si contano (`v1`, `v2`, …), senza limite.
 
-**Il diario.** 🔧 Ogni strategia ha un diario tenuto da parity-deriva: set,
+**Il diario.** ✅ Ogni strategia ha un diario tenuto da parity-deriva: set,
 preferiti, codice cambiato, mix, gate, versioni, demo, live, protezioni,
 ognuno con data, numeri e link. L'utente può annotare qualsiasi voce, se
 vuole. Per ora il diario sta sul server dove succedono le cose; su più
@@ -87,11 +87,11 @@ Una strategia è **codice + parametri**.
 - Gli indicatori degli assistenti (`submit_indicator`) vengono controllati
   in sandbox e abilitati dalla pagina settings. ✅
 - Nel `DESCRIPTION` della classe stanno le regole. ✅ In più servono due
-  righe: 🔧
+  righe: ✅
   - **Ipotesi**: perché dovrebbe funzionare.
   - **Non opera quando**: in quali condizioni deve stare ferma.
 - Alla prima simulazione nasce il **diario** della strategia, con l'idea
-  come prima voce. 🔧
+  come prima voce. ✅
 
 Dati su cui gira: candele ask/bid vere dalla cartella di mercato, calendario
 economico, archivio delle barre servite dai broker. ✅
@@ -109,7 +109,7 @@ strategia → sweep → correlazioni → nuovo filtro = nuovo parametro → swee
                                    gate su holdout
 ```
 
-### 3.1 Sviluppo e holdout 🔧
+### 3.1 Sviluppo e holdout ✅
 
 Lo storico si taglia in due:
 
@@ -121,7 +121,7 @@ Di default il taglio è **uno per strumento**: la stessa data per tutte le
 granularità e tutte le strategie, così nessuno sweep guarda lì. Lo sposti tu
 quando vuoi, e a una strategia puoi dare il suo taglio; resta sempre almeno
 1 anno di holdout, e ogni spostamento va nel diario. Se il nuovo holdout
-contiene dati già letti da qualche sweep, il gate lo dice. 🔧
+contiene dati già letti da qualche sweep, il gate lo dice. ✅
 
 L'holdout si apre **una volta per versione**. Se la versione non passa,
 torna a `SIM`: riprovare con una versione nuova o scartare la strategia
@@ -153,7 +153,7 @@ Cosa si può variare:
 - lo strumento
 
 Ore e giorni **non sono una fase**: sono opzioni dello sweep. Le ore ci sono
-già (`session`); il giorno della settimana è da aggiungere. 🔧
+già (`session`), e anche il giorno della settimana. ✅
 
 ### 3.3 Leggere i risultati ✅
 
@@ -167,7 +167,7 @@ già (`session`); il giorno della settimana è da aggiungere. 🔧
 Regola: scegliere un **altopiano** (parametri vicini buoni anche loro), non
 il picco isolato.
 
-### 3.4 Correlazioni indicatori ↔ profit/loss 🔧
+### 3.4 Correlazioni indicatori ↔ profit/loss ✅
 
 Il motore che manca. Trova valori di indicatori all'ingresso che separano i
 trade buoni da quelli cattivi.
@@ -200,24 +200,24 @@ Sul **periodo di sviluppo**:
 
 | Controllo | Soglia | Stato |
 |---|---|---|
-| numero di trade | ≥ 100 | 🔧 |
-| PF, limite basso del bootstrap al 90% | > 1 | 🔧 |
-| altopiano: i vicini nella griglia | PF > 1 | 🔧 (oggi si guarda a occhio) |
-| PF togliendo i 3 trade migliori | > 1 | 🔧 |
-| baseline casuale: stessi exit e sizing, ingressi a caso alla stessa ora | PF sopra il 95° percentile dei casuali | 🔧 |
+| numero di trade | ≥ 100 | ✅ |
+| PF, limite basso del bootstrap al 90% | > 1 | ✅ |
+| altopiano: i vicini nella griglia | PF > 1 | ✅ |
+| PF togliendo i 3 trade migliori | > 1 | ✅ |
+| baseline casuale: stessi exit e sizing, ingressi a caso alla stessa ora | PF sopra il 95° percentile dei casuali | ✅ |
 
 Sull'**holdout**, aperto una volta:
 
 | Controllo | Soglia | Stato |
 |---|---|---|
-| net | > 0 | 🔧 |
-| PF holdout | ≥ 0.7 × PF sviluppo | 🔧 |
-| max DD holdout | ≤ 1.5 × max DD sviluppo | 🔧 |
+| net | > 0 | ✅ |
+| PF holdout | ≥ 0.7 × PF sviluppo | ✅ |
+| max DD holdout | ≤ 1.5 × max DD sviluppo | ✅ |
 
 Costi: lo spread c'è già, perché i fill sono sui veri ask/bid. ✅
-Commissioni e financing oggi sono a zero. 🔧
+Commissioni e financing sono nel simulatore, a tassi fissi da `.env`. ✅
 
-### 3.7 La scheda di riferimento 🔧
+### 3.7 La scheda di riferimento ✅
 
 Esce dal gate. È il metro con cui si giudicano la demo e il live:
 
@@ -243,7 +243,7 @@ Quello che va a tradare è esattamente quello che è stato simulato.
 
 Oggi push e verify passano dal mix: `sync.py push` manda i mix, e verify sta
 nella pagina del mix. Per una strategia sola si fa un **mix con un solo run**,
-e funziona. ✅ Push e verify di un run senza mix: piccolo cantiere. 🔧
+e funziona. ✅ Push e verify di un run senza mix. ✅
 
 ---
 
@@ -260,13 +260,13 @@ e funziona. ✅ Push e verify di un run senza mix: piccolo cantiere. 🔧
 4. L'archivio legge le sessioni del server demo ogni 5 minuti e le mostra
    sulla sua pagina live. ✅
 5. Confronto della demo con la scheda di riferimento (banda, serie di
-   perdite). 🔧
+   perdite). ✅
 
 Parametri congelati: se cambiano è una nuova versione, e si torna a SIM.
 
 In demo si può andare anche **senza gate**, per provare in fretta: la
 pagina lo dice ("no gate"). Senza gate però non c'è la scheda, e senza
-scheda il server reale non promuove. 🔧
+scheda il server reale non promuove. ✅
 
 ---
 
@@ -286,20 +286,20 @@ reale**, non chi la chiede.
 | 5 | Server reale | salva il giudizio come prova (`promotions/*.json`), con la lista di cosa manca se è bocciato | ✅ |
 | 6 | Server reale | il codice della strategia arriva come bozza: si abilita a mano | ✅ |
 | 7 | Server reale | avvio: rifiuta un form non promosso e chiede di confermare il capitale a rischio | ✅ |
-| 8 | Server reale | propone il ramp: 25% del capitale, se lo lasci acceso | 🔧 |
+| 8 | Server reale | propone il ramp: 25% del capitale, se lo lasci acceso | ✅ |
 
 ### 6.2 La checklist del gate DEMO → LIVE
 
 | Controllo | Soglia | Stato | Se non passa |
 |---|---|---|---|
 | giorni in demo | ≥ 20 (`PROMOTE_DAYS`) | ✅ | resta in DEMO |
-| trade chiusi in demo | ≥ 30 (`PROMOTE_TRADES`); oppure ≥ 10 dopo 90 giorni, per i timeframe lenti | ✅ 30 · 🔧 10 in 90 giorni | resta in DEMO |
+| trade chiusi in demo | ≥ 30 (`PROMOTE_TRADES`); oppure ≥ 10 dopo 90 giorni, per i timeframe lenti | ✅ | resta in DEMO |
 | allarmi di parità | 0 | ✅ | sistemare l'esecuzione, resta in DEMO |
-| scheda: gate SIM → DEMO passato | sì | 🔧 | rifiutato: prima il gate |
+| scheda: gate SIM → DEMO passato | sì | ✅ | rifiutato: prima il gate |
 | solo account demo nel record | sì | ✅ | rifiutato |
-| net in demo | ≥ 0 | 🔧 | non promossa; poi decidi tu: più demo, SIM o DEAD |
-| curva demo dentro la banda Monte Carlo | mai sotto il 5° percentile | 🔧 | non promossa; poi decidi tu |
-| serie di perdite | ≤ la peggiore della scheda | 🔧 | non promossa; poi decidi tu |
+| net in demo | ≥ 0 | ✅ | non promossa; poi decidi tu: più demo, SIM o DEAD |
+| curva demo dentro la banda Monte Carlo | mai sotto il 5° percentile | ✅ | non promossa; poi decidi tu |
+| serie di perdite | ≤ la peggiore della scheda | ✅ | non promossa; poi decidi tu |
 
 **Il buco più importante oggi:** `promote()` controlla giorni, trade e
 allarmi, ma non il risultato. Il net viene calcolato e nessuno lo guarda.
@@ -321,7 +321,7 @@ Una strategia in perdita in demo può passare. Primo cantiere.
 
 ## 7. LIVE
 
-### 7.1 Ramp 🔧
+### 7.1 Ramp ✅
 
 - Lo scegli tu all'avvio del live. È acceso di default.
 - Acceso: **25% del capitale** fino al primo tra 30 trade e 60 giorni. Su D1
@@ -340,15 +340,15 @@ Una strategia in perdita in demo può passare. Primo cantiere.
 | server | perdita del giorno ≥ 3% | stop di tutte le sessioni fino al giorno dopo | ✅ |
 | server | a mano | stop all | ✅ |
 | sessione | live diverso dalla simulazione | allarme di parità (warn / halt) | ✅ |
-| strategia | DD > 1.5 × max DD della scheda | `SUSPENDED`, con la proposta di scartarla | 🔧 |
-| strategia | curva sotto il 5° percentile della banda | `SUSPENDED` | 🔧 |
-| strategia | serie di perdite > 1.5 × la peggiore della scheda | `SUSPENDED` | 🔧 |
+| strategia | DD > 1.5 × max DD della scheda | `SUSPENDED`, con la proposta di scartarla | ✅ |
+| strategia | curva sotto il 5° percentile della banda | `SUSPENDED` | ✅ |
+| strategia | serie di perdite > 1.5 × la peggiore della scheda | `SUSPENDED` | ✅ |
 
 ### 7.3 Monitoraggio
 
 - Curva del capitale per sessione sulla pagina live. ✅
-- Ogni settimana: ultimi 50 trade contro la scheda. 🔧
-- Avvisi 🔧, oggi non c'è nessun canale di notifica:
+- Ogni settimana: ultimi 50 trade contro la scheda. ✅
+- Avvisi ✅:
   - banner nelle pagine e nel log, sempre;
   - per gli urgenti (sessione morta, candele ferme, ordini rifiutati,
     protezioni, loss limit, parità in halt) anche email, Telegram e
@@ -370,15 +370,18 @@ seconda sospensione, ma non lo applica.
 | Passaggio | Controlli | Chi decide |
 |---|---|---|
 | idea → SIM | regole scritte in modo che il codice le esegua senza dubbi; ipotesi; "non opera quando" | chi scrive la strategia |
-| SIM → DEMO | ≥ 100 trade; PF bootstrap basso > 1; altopiano; PF senza i 3 migliori > 1; batte la baseline casuale; holdout: net > 0, PF ≥ 0.7×, DD ≤ 1.5× | la piattaforma 🔧 (oggi a occhio); la demo senza gate si può, il live no |
-| DEMO → LIVE | ≥ 20 giorni; ≥ 30 trade (o ≥ 10 dopo 90 giorni); 0 allarmi; solo demo ✅; net ≥ 0; dentro la banda; serie di perdite ok 🔧 | il server reale |
-| ramp → 100% | fine del ramp (30 trade o 60 giorni), o prima con conferma; nessun trade aperto | tu 🔧 |
-| LIVE → SUSPENDED | sotto la banda; serie di perdite oltre 1.5×; DD oltre 1.5× | la piattaforma 🔧 |
+| SIM → DEMO | ≥ 100 trade; PF bootstrap basso > 1; altopiano; PF senza i 3 migliori > 1; batte la baseline casuale; holdout: net > 0, PF ≥ 0.7×, DD ≤ 1.5× | la piattaforma ✅; la demo senza gate si può, il live no |
+| DEMO → LIVE | ≥ 20 giorni; ≥ 30 trade (o ≥ 10 dopo 90 giorni); 0 allarmi; solo demo ✅; net ≥ 0; dentro la banda; serie di perdite ok ✅ | il server reale |
+| ramp → 100% | fine del ramp (30 trade o 60 giorni), o prima con conferma; nessun trade aperto | tu ✅ |
+| LIVE → SUSPENDED | sotto la banda; serie di perdite oltre 1.5×; DD oltre 1.5× | la piattaforma ✅ |
 | qualunque stato → DEAD | quando vuoi; la pagina lo propone dopo un DD oltre 1.5× o una seconda sospensione | tu |
 
 ---
 
-## 9. Cosa manca, in ordine
+## 9. I cantieri della fase 1
+
+Tutti fatti sul branch `dev` il 2026-09-26, non ancora in produzione. In
+ordine di lavoro, con i commit, in [PIANO-FASE1.md](PIANO-FASE1.md#2-ordine-di-lavoro).
 
 1. **Gate performance in `promote()`** + scheda di riferimento. Piccolo.
 2. **Diario della strategia + scheda della versione**: tutto quello che si

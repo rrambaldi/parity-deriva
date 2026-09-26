@@ -2326,6 +2326,8 @@ function renderReport() {
          pl(r.net), r.net > 0 ? 'good' : r.net < 0 ? 'bad' : ''),
     stat('profit factor', r.profitFactor === null ? 'n/a' : r.profitFactor.toFixed(2)),
     stat('expectancy R', rText(r.expectancyR) || 'n/a'),
+    // commissions and financing, already in the net (backtest/oanda.py costs)
+    ...(r.costs ? [stat('costs', pl(r.costs), r.costs < 0 ? 'bad' : '')] : []),
     stat('avg win', pl(r.averageWin)),
     stat('avg loss', pl(r.averageLoss)),
     stat('max drawdown', pl(r.maxDrawdown), 'bad'),

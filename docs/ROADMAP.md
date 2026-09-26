@@ -2,7 +2,7 @@
 
 | fase | cosa | stato |
 |---|---|---|
-| 1 | **singola strategia**: da un'idea a un trade live | in corso · [PROCESSO.md](PROCESSO.md), piano in [PIANO-FASE1.md](PIANO-FASE1.md) |
+| 1 | **singola strategia**: da un'idea a un trade live | fatta su dev il 2026-09-26, non ancora in produzione · [PROCESSO.md](PROCESSO.md), piano in [PIANO-FASE1.md](PIANO-FASE1.md) |
 | 2 | **mix**: più strategie sullo stesso strumento | dopo la fase 1 · qui sotto |
 | 3 | **più strumenti**: correlazioni tra strumenti diversi | più avanti · qui sotto |
 | – | **diario su più server**: la storia di una strategia in un posto solo | quando si lavora su più server · qui sotto |

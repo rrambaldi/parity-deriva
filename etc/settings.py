@@ -98,6 +98,15 @@ RAMP_TRADES = int(dotenv('PARITY_DERIVA_RAMP_TRADES', '30'))
 RAMP_DAYS = int(dotenv('PARITY_DERIVA_RAMP_DAYS', '60'))
 LIVE_DD_RATIO = float(dotenv('PARITY_DERIVA_LIVE_DD_RATIO', '1.5'))
 LIVE_STREAK_RATIO = float(dotenv('PARITY_DERIVA_LIVE_STREAK_RATIO', '1.5'))
+# What the simulator books besides a trade's move (backtest/oanda.py costs):
+# a commission a side, 'X/lot' per 100,000 units or 'X/trade', in the quote
+# currency - COMMISSION in the backtest, PARITY_DERIVA_COMMISSION_<PROVIDER>
+# in a live session's shadow of that broker - and each instrument's yearly
+# financing, long and short in %, 'EUR_USD:-2.5/0.8,GBP_USD:-3.1/1.2', on the
+# notional every night held (17:00 New York). Fixed rates, not their history;
+# nothing by default.
+COMMISSION = dotenv('PARITY_DERIVA_COMMISSION')
+FINANCING = dotenv('PARITY_DERIVA_FINANCING')
 DAILY_LOSS_PCT = float(dotenv('PARITY_DERIVA_DAILY_LOSS_PCT', '3'))
 # The alerts of the live sessions (web/notify.py): a banner on the pages
 # always, and an urgent one also by email and by Telegram, each once it is

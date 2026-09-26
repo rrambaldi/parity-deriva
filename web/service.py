@@ -2912,6 +2912,7 @@ class Service(object):
 				'outcome': trade['outcome'],
 				'pl': number(trade['pl']),
 				'r': number(trade.get('r')),
+				'costs': number(trade.get('costs')),
 				'balance': number(trade['balance']),
 				# where to zoom: the run's bar the fill fell in
 				'entryIndex': index(entry),

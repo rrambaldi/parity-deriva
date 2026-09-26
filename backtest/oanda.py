@@ -1,6 +1,7 @@
 import json
 import datetime
 import logging
+from zoneinfo import ZoneInfo
 
 from parity_deriva.etc import settings
 from parity_deriva.trading.handler import ExecutionHandler
@@ -39,6 +40,13 @@ class OANDABacktester(ExecutionHandler):
 		#: instrument -> the last candle seen on that stream. A gap is only
 		#: visible against the bar before it: see fillAt().
 		self.last = {}
+		#: the commission a side ('X/lot', 'X/trade'; COMMISSION) and the
+		#: yearly financing by instrument (FINANCING): see costs()
+		self.commission = None
+		self._set(args, 'commission')
+		if self.commission is None:
+			self.commission = getattr(self.setup, 'COMMISSION', None)
+		self.financing = parseFinancing(getattr(self.setup, 'FINANCING', None))
 
 	def dumpOrders(self):
 		for o in self.orders:
@@ -215,7 +223,8 @@ class OANDABacktester(ExecutionHandler):
 			# Now: (exit - entry) * the units of the trade. Identical on every
 			#      bracket whose stop never moves, which is all of AG01 and
 			#      AG02.
-			gain = (o.price - o.orig.price) * o.orig.units
+			commission, financing = self.costs(o.orig, o.price, e.time)
+			gain = (o.price - o.orig.price) * o.orig.units + commission + financing
 			o.state = 'CLOSED'
 			o.orig.state = 'CLOSED'
 			# one of the two took the trade, so the other is off the book:
@@ -237,7 +246,8 @@ class OANDABacktester(ExecutionHandler):
 				'price': o.price,
 				'time': e.time,
 				'pl': gain,
-				'financing': 0.0,
+				'financing': financing,
+				'commission': commission,
 				'accountBalance': self.balance,
 				'reason': o.type,
 				'tradesClosed': [{'tradeID': o.orig.id, 'realizedPL': gain}],
@@ -270,6 +280,31 @@ class OANDABacktester(ExecutionHandler):
 			o.TPOrder = self.createOrder(new)
 			self.logger.debug("== ADDED TAKE PROFIT @%f" % new.price)
 
+
+	def costs(self, trade, price, when):
+		"""
+		(commission, financing) of a trade closed at `price` on `when`, both
+		negative for a cost and in the quote currency, as the move is: the
+		commission on the way in and on the way out, and the instrument's
+		yearly rate for its side on the notional each night it was held.
+		"""
+		units = abs(float(getattr(trade, 'units', 0) or 0))
+		commission = 0.0
+		text = str(self.commission or '').strip()
+		if text:
+			amount, _, per = text.partition('/')
+			try:
+				amount = float(amount)
+			except ValueError:
+				amount = 0.0
+			commission = -2 * (amount if per.strip() == 'trade' else amount * units / 100000.0)
+		rates = self.financing.get(getattr(trade, 'instrument', None))
+		financing = 0.0
+		opened = getattr(trade, 'filledAt', None)
+		if rates and opened is not None and when is not None:
+			rate = rates[0] if float(getattr(trade, 'units', 0) or 0) > 0 else rates[1]
+			financing = nights(opened, when) * rate / 100.0 / 365.0 * units * float(price)
+		return commission, financing
 
 	def reportFill(self, o, event):
 		"""
@@ -495,6 +530,7 @@ class OANDABacktester(ExecutionHandler):
 					# neither made nor lost
 					o.price = at
 				o.state='FILLED'
+				o.filledAt = event.time
 				self.logger.info("===== FILLED %s ORDER# %s %f [ %f %f ]"
 					% ('BUY' if o.units>0 else 'SELL', o.id, o.price,
 					   book['l'], book['h']))
@@ -535,7 +571,8 @@ class OANDABacktester(ExecutionHandler):
 				continue
 			book = bar.bid if o.units > 0 else bar.ask
 			price = float(book['c'])
-			gain = (price - o.price) * o.units
+			commission, financing = self.costs(o, price, getattr(event, 'time', None) or bar.time)
+			gain = (price - o.price) * o.units + commission + financing
 			o.state = 'CLOSED'
 			self.retire(getattr(o, 'SLOrder', None))
 			self.retire(getattr(o, 'TPOrder', None))
@@ -556,7 +593,8 @@ class OANDABacktester(ExecutionHandler):
 				'price': price,
 				'time': getattr(event, 'time', None) or bar.time,
 				'pl': gain,
-				'financing': 0.0,
+				'financing': financing,
+				'commission': commission,
 				'accountBalance': self.balance,
 				'reason': reason,
 				'tradesClosed': [{'tradeID': o.id, 'realizedPL': gain}],
@@ -612,3 +650,37 @@ ORDER:
 ,"takeProfitOnFill":{"price":"11680.2"}
 }}
 		'''
+
+
+NEW_YORK = ZoneInfo('America/New_York')
+
+
+def parseFinancing(text):
+	"""'EUR_USD:-2.5/0.8,GBP_USD:...' as {instrument: (long %, short %)}; bad parts are left out."""
+	out = {}
+	for part in str(text or '').split(','):
+		name, _, rates = part.strip().partition(':')
+		lon, _, sho = rates.partition('/')
+		try:
+			out[name.strip()] = (float(lon), float(sho or 0))
+		except ValueError:
+			continue
+	return out
+
+
+def nights(opened, closed):
+	"""
+	How many 17:00s New York - the forex day's end, where a position held pays
+	its financing - fall after `opened` and by `closed` (naive UTC).
+	"""
+	# ponytail: one charge a night, not Wednesday's triple for the weekend
+	start = opened.replace(tzinfo=datetime.timezone.utc).astimezone(NEW_YORK)
+	end = closed.replace(tzinfo=datetime.timezone.utc).astimezone(NEW_YORK)
+	count, day = 0, start.date()
+	while True:
+		roll = datetime.datetime.combine(day, datetime.time(17), NEW_YORK)
+		if roll > end:
+			return count
+		if roll > start:
+			count += 1
+		day += datetime.timedelta(days=1)

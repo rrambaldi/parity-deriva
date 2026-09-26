@@ -69,8 +69,8 @@ C1b  banda e serie di perdite in promote  fatto (6e69885)
 C7d  push e verify senza mix              fatto (96668e1)
 C4   motore correlazioni + filtri         fatto (352bec2)
 C6   live: ramp, protezioni               fatto (564fc96)
-C7a  giorno della settimana               fatto
-C7b  commissioni e financing              quando si vuole
+C7a  giorno della settimana               fatto (cc0b5d9)
+C7b  commissioni e financing              fatto
 ```
 
 ---
@@ -566,7 +566,9 @@ quando esce da quello che la simulazione permetteva.
   l'ombra live, quindi la parità resta.
 - Financing: tasso overnight fisso per strumento, long e short, da
   `settings`; default 0. `ponytail:` tassi fissi, non storici.
-- Il report mostra il totale dei costi.
+- Il report mostra il totale dei costi. Il P&L di un trade è già netto: nel
+  backtest e nell'ombra del live, così la parità resta. Una notte è un
+  passaggio delle 17:00 di New York; il mercoledì non conta triplo.
 - File: `backtest/oanda.py`, `etc/settings.py`, `performance/report.py`.
   Test: un trade tenuto tre notti paga tre volte il financing.
 

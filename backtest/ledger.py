@@ -397,6 +397,9 @@ class Ledger(ExecutionHandler):
 		leg['outcome'] = getattr(event, 'reason', None)
 		leg['pl'] = _float(getattr(event, 'pl', None))
 		leg['balance'] = _float(getattr(event, 'accountBalance', None))
+		# what the P&L already holds besides the move (backtest/oanda.py costs)
+		leg['costs'] = (_float(getattr(event, 'commission', None)) or 0.0) \
+			+ (_float(getattr(event, 'financing', None)) or 0.0)
 
 	def onStopModify(self, event):
 		"""
@@ -487,6 +490,7 @@ class Ledger(ExecutionHandler):
 					# the result in risk units: -1 is a trade that lost what
 					# its initial stop put at risk, whatever the size
 					'r': rMultiple(leg['pl'], leg['entryPrice'], leg['stopLoss'], leg['units']),
+					'costs': leg.get('costs'),
 					'balance': leg['balance'],
 				})
 		out.sort(key=lambda t: (t['entryTime'], t['key']))

@@ -138,6 +138,8 @@ def report(trades):
 		'grossProfit': gross_profit,
 		'grossLoss': gross_loss,
 		'net': gross_profit - gross_loss,
+		# the commissions and the financing the net already holds (backtest/oanda.py costs)
+		'costs': sum(t.get('costs') or 0.0 for t in done),
 		'profitFactor': (gross_profit / gross_loss) if gross_loss else None,
 		'expectancy': (sum(values) / len(done)) if done else None,
 		# the mean R (backtest/ledger.rMultiple), over the trades with a stop

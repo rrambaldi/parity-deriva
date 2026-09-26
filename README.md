@@ -1621,6 +1621,21 @@ dialog says how often that cut was opened and whether saved sets already read
 past it. Trying again, or discarding the version, is the user's call: nothing
 here discards one by itself.
 
+## Commissions and financing
+
+The simulator books what a trade costs besides its move (`backtest/oanda.py`
+costs), in its P&L and the report's `costs`: a commission a side, per lot of
+100,000 units or per trade, and each instrument's yearly financing, long and
+short, on the notional every night held (17:00 New York). A live session's
+shadow of a broker takes that broker's commission, so the two still compare.
+Fixed rates, not their history; nothing by default:
+
+```
+export PARITY_DERIVA_COMMISSION=3.5/lot            # or 2/trade; a side
+export PARITY_DERIVA_COMMISSION_IG=0/trade         # a live shadow of IG
+export PARITY_DERIVA_FINANCING=EUR_USD:-2.5/0.8,GBP_USD:-3.1/1.2
+```
+
 ## Entry filters and the entry analysis
 
 An account option like the hours and the news: `filters`, conditions on the

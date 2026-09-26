@@ -159,7 +159,11 @@ class Provider(object):
 		which is the point of running the two side by side.
 		"""
 		from parity_deriva.backtest.oanda import OANDABacktester
+		from parity_deriva.etc import settings
 		args.setdefault('setup', self.setup)
+		# this broker's commission, else the backtest's (backtest/oanda.py costs)
+		args.setdefault('commission', settings.dotenv('PARITY_DERIVA_COMMISSION_%s' % self.name.upper())
+						or getattr(self.setup, 'COMMISSION', None))
 		return OANDABacktester(**args)
 
 	# --------------------------------------------------------------- naming
