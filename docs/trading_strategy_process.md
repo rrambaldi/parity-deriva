@@ -38,7 +38,8 @@ Lo storico si divide in due pezzi:
 
 - **sviluppo**: la parte vecchia. Sweep e correlazioni vedono solo questa.
 - **holdout**: l'ultimo ~25% dello storico, almeno 1 anno. Nessuno lo guarda
-  durante il loop.
+  durante il loop. Il taglio resta fisso finché non lo sposti tu: solo in
+  avanti, lasciando almeno 1 anno.
 
 L'holdout si apre **una volta per versione**, al gate SIM → DEMO. Se la versione non passa,
 torna a `SIM`: riprovare con una versione nuova o scartare la strategia
@@ -155,6 +156,8 @@ holdout e usata in demo e live:
   di **esecuzione**, non di edge: si sistema l'esecuzione e si resta in
   `DEMO`.
 - Parametri congelati.
+- Si può andare in demo anche senza gate, per provare in fretta: la pagina
+  lo dice. Senza gate non c'è la scheda, e senza scheda niente live.
 
 ### Gate DEMO → LIVE (`promote()`, `web/livesessions.py`)
 
@@ -166,6 +169,7 @@ Già fatto:
 
 Da aggiungere:
 
+- la scheda: gate SIM → DEMO passato
 - net ≥ 0
 - la curva demo **mai sotto il 5° percentile** della banda Monte Carlo
 - serie di perdite ≤ la peggiore della scheda

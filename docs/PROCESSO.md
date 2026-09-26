@@ -112,6 +112,9 @@ Lo storico si taglia in due:
 - **holdout**: l'ultimo ~25%, almeno 1 anno. Nessuno lo guarda durante il
   loop.
 
+Il taglio resta fisso finché non lo sposti tu: solo in avanti, lasciando
+almeno 1 anno di holdout. Lo spostamento va nel diario. 🔧
+
 L'holdout si apre **una volta per versione**. Se la versione non passa,
 torna a `SIM`: riprovare con una versione nuova o scartare la strategia
 (`DEAD`) lo decidi tu. La piattaforma conta quante volte l'holdout di quello
@@ -253,6 +256,10 @@ e funziona. ✅ Push e verify di un run senza mix: piccolo cantiere. 🔧
 
 Parametri congelati: se cambiano è una nuova versione, e si torna a SIM.
 
+In demo si può andare anche **senza gate**, per provare in fretta: la
+pagina lo dice ("no gate"). Senza gate però non c'è la scheda, e senza
+scheda il server reale non promuove. 🔧
+
 ---
 
 ## 6. Prima di andare live – il dettaglio
@@ -280,6 +287,7 @@ reale**, non chi la chiede.
 | giorni in demo | ≥ 20 (`PROMOTE_DAYS`) | ✅ | resta in DEMO |
 | trade chiusi in demo | ≥ 30 (`PROMOTE_TRADES`) | ✅ | resta in DEMO |
 | allarmi di parità | 0 | ✅ | sistemare l'esecuzione, resta in DEMO |
+| scheda: gate SIM → DEMO passato | sì | 🔧 | rifiutato: prima il gate |
 | solo account demo nel record | sì | ✅ | rifiutato |
 | net in demo | ≥ 0 | 🔧 | non promossa; poi decidi tu: più demo, SIM o DEAD |
 | curva demo dentro la banda Monte Carlo | mai sotto il 5° percentile | 🔧 | non promossa; poi decidi tu |
@@ -341,7 +349,7 @@ seconda sospensione, ma non lo applica.
 | Passaggio | Controlli | Chi decide |
 |---|---|---|
 | idea → SIM | regole scritte in modo che il codice le esegua senza dubbi; ipotesi; "non opera quando" | chi scrive la strategia |
-| SIM → DEMO | ≥ 100 trade; PF bootstrap basso > 1; altopiano; PF senza i 3 migliori > 1; batte la baseline casuale; holdout: net > 0, PF ≥ 0.7×, DD ≤ 1.5× | la piattaforma 🔧 (oggi a occhio) |
+| SIM → DEMO | ≥ 100 trade; PF bootstrap basso > 1; altopiano; PF senza i 3 migliori > 1; batte la baseline casuale; holdout: net > 0, PF ≥ 0.7×, DD ≤ 1.5× | la piattaforma 🔧 (oggi a occhio); la demo senza gate si può, il live no |
 | DEMO → LIVE | ≥ 20 giorni; ≥ 30 trade; 0 allarmi; solo demo ✅; net ≥ 0; dentro la banda; serie di perdite ok 🔧 | il server reale |
 | ramp → 100% | 30 trade dentro la banda | la piattaforma 🔧 |
 | LIVE → SUSPENDED | sotto la banda; serie di perdite oltre 1.5×; DD oltre 1.5× | la piattaforma 🔧 |
@@ -399,7 +407,7 @@ Freccia verso l'Archivio etichettata "record demo", poi verso la corsia REAL eti
 
 In basso a destra due riquadri: "SUSPENDED" (ambra) e "DEAD" (rosso). Verso SUSPENDED frecce tratteggiate dai riquadri LIVE, etichettate "fuori banda / serie di perdite / DD oltre 1.5×". Verso DEAD frecce tratteggiate dal Gate holdout e da SUSPENDED, con l'icona di una persona e l'etichetta "decidi tu".
 
-Una freccia di ritorno dal Gate holdout alla Strategia etichettata "bocciata: nuova versione, se vuoi". Una freccia da SUSPENDED a DEMO etichettata "riverifica, se vuoi".
+Una freccia di ritorno dal Gate holdout alla Strategia etichettata "bocciata: nuova versione, se vuoi". Una freccia da SUSPENDED a DEMO etichettata "riverifica, se vuoi". Una freccia sottile tratteggiata dal riquadro SIM direttamente a DEMO, etichettata "senza gate: demo sì, live no".
 
 Legenda in basso: linea piena = c'è già, linea tratteggiata = da fare.
 orientation is landscape
