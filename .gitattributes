@@ -1,0 +1,3 @@
+# LF in the checkout on every system: the image runs the shell scripts, and
+# a CRLF one does not start (Git for Windows checks out CRLF by default)
+*.sh text eol=lf

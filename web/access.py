@@ -699,11 +699,46 @@ def checkArchive(asked):
 	url, token = str(asked.get('url') or '').strip(), str(asked.get('token') or '').strip()
 	if not url.startswith(('https://', 'http://')) or not token:
 		raise AccessError("the archive's MCP address, https://.../mcp, and a token made on it")
+	upstream = {'url': url, 'token': token}
 	try:
-		found = sources.rpc({'url': url, 'token': token}, 'market_status', {}, timeout=30)
+		found = sources.rpc(upstream, 'market_status', {}, timeout=30)
 	except sources.SourceError as exc:
 		raise AccessError(str(exc))
-	return {'ok': True, 'instruments': len(found.get('instruments') or [])}
+	out = {'ok': True, 'instruments': len(found.get('instruments') or []),
+		   'events': (found.get('calendar') or {}).get('events') or 0,
+		   'spread': None, 'strategies': None, 'indicators': None}
+	# what else it gives: None where the archive is older or the token may not
+	try:
+		out['spread'] = len((sources.rpc(upstream, 'pull_spread', {}, timeout=30) or {}).get('instruments') or {})
+	except sources.SourceError:
+		pass
+	try:
+		code = sources.rpc(upstream, 'pull_code', {}, timeout=60)
+		out['strategies'], out['indicators'] = len(code.get('strategies') or []), len(code.get('indicators') or [])
+	except sources.SourceError:
+		pass
+	return out
+
+
+def take(upstream, roles, setup):
+	"""
+	What the archive holds beyond the candles and the calendar, taken at the
+	setup's end: its spread set, and for a Test its strategies and indicators,
+	as drafts to enable. What went wrong is a line, never the setup's failure:
+	the candles and the calendar come on the timer anyway.
+	"""
+	lines = []
+	try:
+		sources.pullSpread(setup, upstream, lines.append)
+	except (sources.SourceError, market.MarketError, OSError) as exc:
+		lines.append("the spread set: %s" % exc)
+	if 'test' in roles:
+		from parity_deriva.scripts import sync
+		try:
+			sync.pull(upstream, dataDir(setup), lines.append)
+		except (sources.SourceError, OSError) as exc:
+			lines.append("the strategies and indicators: %s" % exc)
+	return lines
 
 
 def cleanAllow(allow, empty=False):
@@ -853,6 +888,7 @@ def finish(handler, answer):
 		env['PARITY_DERIVA_ARCHIVE_URL'] = url
 		if 'test' in roles:
 			env['PARITY_DERIVA_SYNC_TOKEN'] = token
+		out['taken'] = take({'url': url, 'token': token}, roles, setup)
 	envKeep(env, setup)
 	name = ' '.join(str(answer.get('name') or '').split())[:60]
 	if name:

@@ -327,6 +327,10 @@ TOOLS = [
 					"call's start, null at the end." % 5000,
 	 'inputSchema': {'type': 'object', 'properties': {
 		 'since': {'type': 'string'}, 'start': {'type': 'integer'}}}},
+	{'name': 'pull_spread',
+	 'description': "For another parity server, not for an assistant: the shared spread set "
+					"(spread.json, from scripts/spread_profile.py) as it is, {} without one.",
+	 'inputSchema': {'type': 'object', 'properties': {}}},
 	{'name': 'push_sweep',
 	 'description': "For the PC's sync (scripts/sync.py), not for an assistant: a simulation "
 					"set as runs/sweeps/<id>.json.gz holds it, or with n one of its runs "
@@ -991,6 +995,17 @@ def getRun(service, args, base):
 	return dict(out, **tradeRows(payload.get('trades') or []))
 
 
+def pullSpread(service, args, client):
+	"""The shared spread set as the market folder keeps it, {} without one."""
+	puller(client)
+	from parity_deriva.lib import spread
+	try:
+		with open(spread.path(service.setup)) as handle:
+			return json.load(handle)
+	except (OSError, ValueError):
+		return {}
+
+
 def pullCode(service, args, client):
 	"""The enabled strategies and indicators, for a Test's sync to take as drafts."""
 	if role(client) not in ('token', 'pc'):
@@ -1437,7 +1452,7 @@ def sandboxed(service, job, timeout=None):
 
 
 #: another parity server copying the market data
-PULLS = ('market_status', 'pull_candles', 'pull_calendar')
+PULLS = ('market_status', 'pull_candles', 'pull_calendar', 'pull_spread')
 #: the market data coming in
 PUSHES = ('push_calendar', 'push_candles')
 #: what a program's token may call, by its role: the PC everything but the
@@ -1516,6 +1531,8 @@ def call(service, name, args, base, client):
 		return pullCandles(service, args, client)
 	if name == 'pull_calendar':
 		return pullCalendar(service, args, client)
+	if name == 'pull_spread':
+		return pullSpread(service, args, client)
 	if name == 'push_sweep':
 		return pushSweep(service, args, client)
 	if name == 'push_mix':

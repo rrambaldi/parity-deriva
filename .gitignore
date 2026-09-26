@@ -43,3 +43,6 @@ etc/settings_local.py
 # lives here; strategy/plugins.py is the only thing that looks for it, and
 # everything works with it absent.
 strategy/private/
+
+# written by docker/pc.ps1 on a PC: the data folder there
+docker-compose.override.yml

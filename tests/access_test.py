@@ -20,8 +20,24 @@ import unittest
 import urllib.parse
 from unittest import mock
 
+from parity_deriva.data import sources
+from parity_deriva.scripts import sync
 from parity_deriva.web import access, servers
 from parity_deriva.web import service as service_module
+
+#: what the made-up Archive answers, by tool
+ARCHIVE = {
+    'market_status': {'instruments': [{'instrument': 'EUR_USD', 'granularities': []}],
+                      'calendar': {'events': 12}},
+    'pull_spread': {'instruments': {'EUR_USD': {'etoro': 0.0001}}},
+    'pull_code': {'strategies': [{'code': 'MY-EMA 3', 'source': 'class MyEma(object):\n    pass\n', 'meta': {}}],
+                  'indicators': []}}
+
+
+def archive(upstream, name, args, timeout=180):
+    if upstream['token'] == 'mirror-token' and name == 'pull_code':
+        raise sources.SourceError("a mirror token may not call pull_code")
+    return json.loads(json.dumps(ARCHIVE[name]))
 
 
 class Answer(object):
@@ -46,6 +62,10 @@ class Case(unittest.TestCase):
         env = mock.patch.dict(os.environ, {}, clear=False)
         env.start()
         self.addCleanup(env.stop)
+        # no Archive is called: this one answers
+        for patch in (mock.patch.object(sources, 'rpc', archive), mock.patch.object(sync, 'rpc', archive)):
+            patch.start()
+            self.addCleanup(patch.stop)
         for key in ('PARITY_DERIVA_WIZARD', 'PARITY_DERIVA_DOMAIN', 'X_PARITY'):
             os.environ.pop(key, None)
 
@@ -286,12 +306,24 @@ class SetupTest(Case):
 
     def test_a_test_pc_with_the_archives_data(self):
         cookie = self.enter()
+        found = json.loads(self.call('POST', '/api/setup/archive', {
+            'url': 'https://archive.example/parity/mcp', 'token': 'pc-token'}, headers=cookie)[2])
+        self.assertEqual(found, {'ok': True, 'instruments': 1, 'events': 12, 'spread': 1,
+                                 'strategies': 1, 'indicators': 0})
         answer = {'name': ' PC  at home ', 'auth': {'mode': 'none'}, 'roles': ['test'],
                   'archive': {'url': 'https://archive.example/parity/mcp', 'token': 'pc-token'},
                   'market': {'candles': 'upstream', 'calendar': 'upstream'}}
         status, _, raw = self.call('POST', '/api/setup/finish', answer, headers=cookie)
         self.assertEqual(status, 200, raw)
         self.assertEqual(json.loads(raw)['promote'], None)
+        # the rest of what the Archive holds, taken before the restart
+        self.assertEqual(json.loads(raw)['taken'], [
+            'spread set: 1 instruments from upstream',
+            'MY-EMA 3: pulled, a draft here - enable it on the settings page', '1 pulled'])
+        from parity_deriva.strategy import uploaded
+        self.assertEqual(list(uploaded.drafts(self.home)), ['MY-EMA 3'])
+        with open(os.path.join(self.home, 'spread.json')) as handle:
+            self.assertEqual(json.load(handle), ARCHIVE['pull_spread'])
         self.assertEqual(servers.read(self.setup), {'roles': ['test'], 'auth': {'mode': 'none'}, 'name': 'PC at home'})
         env = access.envRead(self.setup)
         self.assertEqual((env['PARITY_DERIVA_ARCHIVE_URL'], env['PARITY_DERIVA_SYNC_TOKEN']),
@@ -314,6 +346,9 @@ class SetupTest(Case):
 
     def test_a_real_money_trade_server_behind_certificates(self):
         cookie = self.enter()
+        # a mirror token: the Archive's code is not for it
+        self.assertEqual(json.loads(self.call('POST', '/api/setup/archive', {
+            'url': 'https://archive.example/parity/mcp', 'token': 'mirror-token'}, headers=cookie)[2])['strategies'], None)
         answer = {'auth': {'mode': 'cert'}, 'ca': {'make': True, 'name': 'Mario Rossi'},
                   'roles': ['trade'], 'accounts': 'real',
                   'archive': {'url': 'https://archive.example/parity/mcp', 'token': 'mirror-token'},
@@ -324,6 +359,8 @@ class SetupTest(Case):
                                    headers=dict(cookie, **{'X-Forwarded-For': '1.2.3.4'}))
         self.assertEqual(status, 200, raw)
         done = json.loads(raw)
+        # a trade server takes the spread set, and no code: that comes by the Archive's push
+        self.assertEqual(done['taken'], ['spread set: 1 instruments from upstream'])
         self.assertEqual(access.envRead(self.setup)['PARITY_DERIVA_ACCOUNTS'], 'real')
         self.assertNotIn('PARITY_DERIVA_SYNC_TOKEN', access.envRead(self.setup))
         self.assertEqual(self.service.oauth.keyOf(done['promote'])['role'], 'promote')

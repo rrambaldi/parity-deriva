@@ -144,6 +144,22 @@ class SourcesTest(unittest.TestCase):
         self.assertEqual(len(pd.read_hdf(mine, 'M5')), 13)
         self.assertEqual(self.run_source('calendar'), ['calendar: 1 events from upstream, 0 new'])
 
+    def test_the_spread_set_comes_with_the_candles_and_only_to_a_server(self):
+        from parity_deriva.lib import spread
+        from parity_deriva.web import mcp
+        path = market.store('EUR_USD', self.upstream.setup)
+        import_csv.merge(path, '/M5', bars('2025-09-11', 2))
+        held = {'built': '2026-09-26', 'instruments': {'EUR_USD': {'etoro': 0.0001}, 'GBP_USD': {'etoro': 0.0002}}}
+        with open(spread.path(self.upstream.setup), 'w') as handle:
+            json.dump(held, handle)
+        self.assertEqual(self.run_source('candles'),
+                         ['EUR_USD M5: 2 bars from upstream', 'spread set: 2 instruments from upstream'])
+        with open(spread.path(self.local.setup)) as handle:
+            self.assertEqual(json.load(handle), held)
+        self.assertEqual(spread.profile(self.local.setup)['GBP_USD'], {'etoro': 0.0002})
+        with self.assertRaises(mcp.ToolError):
+            mcp.call(self.upstream, 'pull_spread', {}, 'https://up', 'claude.ai')
+
     def test_the_candles_come_from_a_brokers_api_after_the_last_bar(self):
         from parity_deriva.event.event import CandleEvent
         from parity_deriva.trading import providers

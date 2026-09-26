@@ -15,6 +15,7 @@ program of its own, and it pushes (push_calendar) like any other outside one.
 import datetime
 import json
 import logging
+import os
 import threading
 import time
 import urllib.request
@@ -102,6 +103,21 @@ def pullCandles(service, kept, report):
 					added += service.mergeBars(instrument, granularity, pd.concat(frames))
 					frames, held = [], 0
 			report("%s %s: %d bars from upstream" % (instrument, granularity, added))
+	pullSpread(service.setup, upstream, report)
+
+
+def pullSpread(setup, upstream, report):
+	"""The upstream's shared spread set in place of this server's, when it has one."""
+	from parity_deriva.lib import spread
+	got = rpc(upstream, 'pull_spread', {})
+	if not isinstance(got, dict) or not got.get('instruments'):
+		return
+	where = spread.path(setup)
+	market.guard(where, setup)
+	with open(where + '.part', 'w') as handle:
+		json.dump(got, handle)
+	os.replace(where + '.part', where)
+	report("spread set: %d instruments from upstream" % len(got['instruments']))
 
 
 def pullCalendar(service, kept, report):

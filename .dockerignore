@@ -5,3 +5,4 @@
 strategy/private
 candle_forecast/stores
 **/*.hd5
+docker-compose.override.yml

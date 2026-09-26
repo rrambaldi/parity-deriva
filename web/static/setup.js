@@ -89,6 +89,7 @@ function show() {
   $('trade-box').hidden = !held.includes('trade');
   $('real-warn').hidden = checked('accounts')[0] !== 'real';
   $('archive-box').hidden = archive || !held.length;
+  $('archive-self').hidden = !archive;
   const kind = held.includes('test') ? TOKEN_PC : TOKEN_MIRROR;
   if ($('archive-token-kind').dataset.kind !== kind) {
     $('archive-token-kind').dataset.kind = kind;
@@ -170,7 +171,7 @@ function answer() {
   if (!out.roles.includes('archive')) {
     const url = $('archive-url').value.trim();
     const token = $('archive-token').value.trim();
-    if (!url || !token) throw wrong('role-note', "Write the Archive's MCP address and its token.");
+    if (!url || !token) throw wrong('remote-note', "Write the Archive's MCP address and its token.");
     out.archive = { url, token };
   }
   return out;
@@ -228,6 +229,14 @@ function finished(body, done) {
     $('p12-link').href = `data:application/x-pkcs12;base64,${done.p12}`;
     $('p12-pass').textContent = done.password || '';
     $('done-cert').hidden = false;
+  }
+  if ((done.taken || []).length) {
+    for (const line of done.taken) {
+      const item = document.createElement('li');
+      item.textContent = line;
+      $('taken-list').appendChild(item);
+    }
+    $('done-taken').hidden = false;
   }
   if (done.promote) {
     $('done-mcp').textContent = done.mcp || '';
@@ -299,16 +308,26 @@ $('profile-file').addEventListener('change', async () => {
   }
 });
 
+// what the Archive gives, each piece a text of its own for the translation
 $('archive-check').addEventListener('click', async () => {
-  say('archive-note', 'Checking…');
+  say('archive-note', 'Connecting…');
   try {
     const found = await call('api/setup/archive', { url: $('archive-url').value.trim(), token: $('archive-token').value.trim() });
-    say('archive-note', `The Archive answers: ${found.instruments} instruments.`);
+    const parts = [`${found.instruments} instruments`, `${found.events} calendar events`];
+    if (found.spread) parts.push(`a spread set for ${found.spread} instruments`);
+    if (found.strategies !== null) parts.push(`${found.strategies} strategies and ${found.indicators} indicators`);
+    say('archive-note', 'Connected. The Archive gives:');
+    for (const text of parts.concat(['all taken at the end of the setup'])) {
+      const piece = document.createElement('span');
+      piece.textContent = text;
+      $('archive-note').append(' ', piece, ' ·');
+    }
+    $('archive-note').lastChild.remove();
   } catch (error) { say('archive-note', error.message, true); }
 });
 
 $('finish').addEventListener('click', async () => {
-  for (const id of ['access-note', 'role-note', 'finish-note']) say(id, '');
+  for (const id of ['access-note', 'role-note', 'remote-note', 'finish-note']) say(id, '');
   let body;
   try {
     body = answer();
@@ -337,5 +356,13 @@ call('api/access').then((access) => {
     $('code').disabled = $('code-go').disabled = true;
     return;
   }
-  enter().catch(() => $('code').focus());
+  enter().catch(() => {
+    // docker/pc.ps1 opens the page with the code from the log: #code=XXXX-XXXX
+    const code = new URLSearchParams(location.hash.slice(1)).get('code');
+    if (code) {
+      $('code').value = code;
+      history.replaceState(null, '', location.pathname);
+      $('code-go').click();
+    } else $('code').focus();
+  });
 }).catch((error) => say('code-note', error.message, true));
