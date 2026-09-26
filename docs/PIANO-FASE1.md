@@ -28,6 +28,9 @@ Per ogni cantiere: obiettivo, scelte, file, dati, pagine/API/MCP, test,
   una sessione e propone; non scarta mai una strategia da sola.
 - **Gli sweep in SIM sono liberi**: nessun limite al numero di set e nessun
   conteggio che pesi sul giudizio.
+- **Ogni azione lascia una voce nel diario** (C2). Chi aggiunge un'azione
+  nuova (un pulsante, un controllo, una protezione) aggiunge anche la sua
+  voce.
 
 ---
 
@@ -42,6 +45,7 @@ proposta.
 | D2 | Il **ramp** dal 25% al 100%: automatico o con un click? | Con un click. Dopo 30 trade dentro la banda la pagina live dice "ready for full size" e un pulsante riavvia il form al 100%, con la stessa conferma del capitale di oggi. Sono soldi veri: decide una persona. | C6 |
 | D3 | Che **canale** usano gli avvisi? | Sempre nella pagina (banner su live e logs) e nel log. In più l'email con `smtplib` (stdlib) se in `.env` ci sono i campi `SMTP_*`. Telegram eventualmente dopo. | C6 |
 | D4 | L'holdout è **per strumento** o **per strategia**? | Per strumento + granularità: una data di taglio sola, uguale per tutte le strategie su quello strumento. È più semplice e più severo: nessuna strategia viene provata su quel pezzo di storico. | C3 |
+| D5 | Un diario per **strategia** o per strategia + strumento? | Per strategia, cioè per nome del codice. Ogni voce dice strumento e granularità e la pagina filtra: "va su FX, non sulle azioni" si legge nello stesso posto. Le versioni restano per strategia + strumento + granularità (D1). | C2 |
 
 ---
 
@@ -52,7 +56,7 @@ L'ordine segue le dipendenze, non il numero del cantiere:
 ```text
 C1a  gate "net ≥ 0" in promote()          subito, non dipende da niente
 C7c  colonna R nei trade                  serve a C4 e C5
-C2   scheda strategia                     serve a C1b, C3, C6
+C2   diario + scheda                      serve a C1b, C3, C6
 C5   banda Monte Carlo + baseline         serve a C1b, C3, C6
 C3   holdout + gate SIM → DEMO            usa C2 e C5
 C1b  banda e serie di perdite in promote  usa C2 e C5
@@ -109,61 +113,148 @@ né una che in demo è andata peggio di quanto la simulazione permetteva.
 
 ---
 
-## C2. Scheda strategia (M)
+## C2. Diario della strategia + scheda della versione (L)
 
-**Obiettivo.** Ogni versione ha una scheda che dice in che stato è, da dove
-viene, con che numeri va giudicata e cosa le è successo.
+**Obiettivo.** Ogni strategia ha un **diario tenuto da parity-deriva**: ogni
+cosa fatta su quella strategia vi resta scritta, con data, numeri e link,
+dall'idea fino al live o allo scarto. L'utente può annotare le voci, se
+vuole. Ogni versione che passa il gate ha una **scheda**: lo stato e i numeri
+con cui va giudicata.
 
 - **Scelte.**
-  - Identità (D1): `id = sha1(codeHash + groupKey(fields))[:16]`. L'etichetta
-    `M1502 v3` è contata per strategia + strumento + granularità.
-    `codeHash` è lo sha1 dei sorgenti senza commenti e righe vuote
-    (`tokenize` della stdlib): un commento non crea una versione.
-  - Un modulo solo cambia lo stato: `cards.move(id, to, why, by)`. Aggiunge
-    una riga allo storico e rifiuta i passaggi che non esistono (la tabella
-    di PROCESSO.md § 8). `DEAD` lo accetta solo da un utente (pulsante
-    "discard" sulla scheda), mai da un controllo automatico.
-  - La scheda viaggia con la strategia: PC → archivio con `sync.py push`,
-    archivio → server di trade con il push del form. I server di trade
-    aggiornano lo stato (promozione, SUSPENDED, DEAD); l'archivio lo legge
-    con `live_status` e aggiorna la sua copia.
-  - Conflitti: vince la riga di storico più recente, e le righe si uniscono
-    senza doppioni. `ponytail:` fusione per data; un proprietario per stato
-    se due server cambiano la stessa scheda nello stesso minuto.
-- **Dati.** `DATA_DIR/cards/<id>.json`:
+  - **Un server solo.** Il diario registra quello che succede sul server
+    dove gira. Le azioni verso un altro server (push in demo, push al server
+    reale con il verdetto che torna) sono voci di questo server; quello che
+    succede sull'altro server resta nel diario di quello. Unire i diari di
+    più server è nella [roadmap](ROADMAP.md#il-diario-su-più-server).
+  - **Un diario per strategia** (D5), cioè per nome del codice: `M1502`. Ogni
+    voce dice strumento e granularità; la pagina filtra.
+  - **Lo scrive parity-deriva.** L'utente non deve scrivere niente. Le note
+    sono facoltative: attaccate a una voce o libere, con un segno facoltativo
+    👍 / 👎 / ➖.
+  - **Si aggiunge e basta**: una voce non si modifica e non si cancella; una
+    nota corretta è una nota nuova. L'id è casuale (`uuid4`), così quando si
+    uniranno i diari di più server non ci saranno collisioni.
+    `ponytail:` un file per strategia; se diventa troppo grande, uno per
+    anno.
+  - **Nasce da solo** con la prima voce di una strategia. La prima voce è
+    l'idea: il `DESCRIPTION` della classe.
+  - Una voce porta i suoi numeri principali: si legge anche quando il set è
+    cancellato o nella cantina. Il link lo riprende dalla cantina.
+  - Una voce salva `kind` e numeri, non una frase: la frase la compone la
+    pagina, in inglese o tradotta con `it.json`.
+  - Il live non scrive una voce per trade: la pagina fa il riassunto per
+    settimana dai trade delle sessioni, quando si apre. Nessun cron.
+- **Le voci e chi le scrive.**
 
-  ```json
-  {
-    "id": "3f2a…", "label": "M1502 v3",
-    "strategy": "M1502", "codeHash": "…", "fields": {"instrument": "EUR_USD", "granularity": "M15", "…": "…"},
-    "state": "SIM",
-    "history": [{"at": 1759000000000, "from": null, "to": "SIM", "why": "frozen from set 20260926-…/41", "by": "pc"}],
-    "source": {"sweep": "20260926-…", "n": 41},
-    "reference": {
-      "trades": 214, "pf": 1.38, "expectancy": 12.1, "expectancyR": 0.18,
-      "winRate": 0.46, "maxDD": 812.0, "maxDDpct": 7.9, "worstStreak": 7,
-      "band": {"p5": [], "p50": [], "p95": []},
-      "sample": {"from": "2015-01-01", "to": "2024-03-01"}
-    },
-    "holdout": {"cut": "2024-03-01", "opened": true, "verdict": {}, "openings": 2}
-  }
-  ```
+  | voce | livello | scritta da |
+  |---|---|---|
+  | idea (`DESCRIPTION`) | tappa | prima voce della strategia |
+  | bozza da un assistente, bozza abilitata | tappa | `submit_strategy` in `web/mcp.py`; abilitazione dalla pagina settings |
+  | codice cambiato, con il sorgente | esperimento | backtest e sweep, quando `codeHash` è diverso da quello dell'ultima voce |
+  | set finito o fermato: nome, griglia, combinazioni, miglior score e PF | esperimento | `saveSweep` |
+  | set cancellato | esperimento | `deleteSweep` |
+  | run salvato | esperimento | `saveRun` |
+  | preferito messo, tolto, nota del preferito | esperimento | `addFavourite`, `dropFavourite`, `noteFavourite` |
+  | entrata in un mix, mix cancellato | tappa | `saveMix`, `dropMix` |
+  | verify: uguale, o il primo trade diverso | tappa | `verify` |
+  | gate: verdetto riga per riga | tappa | gate (C3) |
+  | nuova versione, cambio di stato | tappa | `cards.move` |
+  | push a un server di trade, verdetto della promozione | tappa | `servers.push`, `servers.record` |
+  | sessione avviata o fermata, con account e capitale | tappa | `livesessions.start`, `stop`, `stopAll` |
+  | protezione scattata, loss limit, allarme di parità | tappa | `guard`, `watch`, monitor di parità, protezioni (C6) |
+  | nota dell'utente | – | pagina o MCP |
 
-- **File.** Nuovo `web/cards.py` (salva, legge, `move`, id);
-  `web/service.py` (`/api/cards`, `/api/cards/<id>`); `scripts/sync.py` (la
-  scheda con il run); `web/servers.py` (la scheda con il form); `web/mcp.py`
-  (`list_cards`, `get_card` in lettura per gli assistenti; il tool di push
-  accetta la scheda); `web/static/run.html` e `app.js` (etichetta e stato del
-  run, pannello con lo storico); `web/static/live.js` (stato accanto a ogni
-  form); `i18n/it.json`.
-- **Test.** Nuovo `tests/cards_test.py`: id stabile; passaggi validi e non
-  validi; storico che si unisce senza doppioni; la scheda arriva dal PC
-  all'archivio e dall'archivio al server di trade (con i server finti che
-  `servers_test.py` usa già).
-- **Fatto quando.** Un run si congela in una scheda, la scheda arriva fino al
-  server reale con lo storico intero, e ogni cambio di stato vi resta
-  scritto.
-- **Dipende da.** D1.
+- **La scheda della versione.**
+  - Nasce al gate (D1). Identità: `id = sha1(codeHash + groupKey(fields))[:16]`.
+    `codeHash` è lo sha1 del sorgente della strategia e degli indicatori che
+    importa (trovati con `ast`), senza commenti e righe vuote (`tokenize`):
+    un commento non crea una versione. L'etichetta `M1502 v3` è contata per
+    strategia + strumento + granularità.
+  - Un modulo solo cambia lo stato: `cards.move(id, to, why, by)`. Rifiuta i
+    passaggi che non esistono (la tabella di PROCESSO.md § 8), accetta `DEAD`
+    solo da un utente (pulsante "discard"), mai da un controllo automatico,
+    e scrive ogni cambio nel diario. Lo storico sta nel diario, non nella
+    scheda.
+  - La scheda va con il push al server di trade, come riferimento: C1b e C6
+    la leggono lì. Ogni server tiene lo stato della sua copia; allinearli è
+    nella roadmap, insieme al diario.
+- **Dati.**
+  - `DATA_DIR/journal/<strategia>.jsonl`, una riga per voce:
+
+    ```json
+    {"id": "9c1e…", "at": 1759000000000, "kind": "sweep", "level": "experiment",
+     "instrument": "EUR_USD", "granularity": "M15", "version": null,
+     "data": {"name": "atr exit", "combos": 48, "bestScore": 71, "pf": 1.31},
+     "link": {"kind": "sweep", "id": "20260921-…"}, "by": "parity-deriva"}
+    ```
+
+    Una nota: `{"kind": "note", "about": "9c1e…", "mark": "up", "text": "…", "by": "<utente>"}`.
+    Codice cambiato: `data.source` tiene i sorgenti, così il diff è tra due
+    voci e non serve altro.
+  - `DATA_DIR/cards/<id>.json`:
+
+    ```json
+    {
+      "id": "3f2a…", "label": "M1502 v3",
+      "strategy": "M1502", "codeHash": "…", "fields": {"instrument": "EUR_USD", "granularity": "M15", "…": "…"},
+      "state": "DEMO",
+      "source": {"sweep": "20260926-…", "n": 41},
+      "reference": {
+        "trades": 214, "pf": 1.38, "expectancy": 12.1, "expectancyR": 0.18,
+        "winRate": 0.46, "maxDD": 812.0, "maxDDpct": 7.9, "worstStreak": 7,
+        "band": {"p5": [], "p50": [], "p95": []},
+        "sample": {"from": "2015-01-01", "to": "2024-03-01"}
+      },
+      "holdout": {"cut": "2024-03-01", "opened": true, "verdict": {}, "openings": 2}
+    }
+    ```
+
+- **Pagine.** Nuove `journal.html` e `journal.js`, voce "Journal" nel menu.
+  - La lista dei diari: strategia, ultima attività, righe "in corso".
+  - Un diario:
+    - in cima le righe **in corso**: le versioni con il loro stato, le
+      sessioni aperte, i mix che la contengono;
+    - sotto la **storia**, con i filtri tappe / esperimenti / tutto e per
+      strumento;
+    - una nota su qualsiasi voce;
+    - il diff del codice tra due voci "codice cambiato";
+    - il riassunto settimanale del live.
+  - La ricerca su tutti i diari, anche quelli delle strategie `DEAD`.
+  - Un link "journal" dalle pagine di un set, di un run, di un mix e live.
+- **API.** `/api/journals`, `/api/journal/<strategia>`,
+  `/api/journal/<strategia>/note` (POST), `/api/journals/search?q=`;
+  `/api/cards`, `/api/cards/<id>`.
+- **MCP.** In lettura `list_journals`, `get_journal`, `search_journals`,
+  `list_cards`, `get_card`. `add_note` su tutti i server tranne quello reale.
+- **Dati che ci sono già.** `scripts/journal_backfill.py`, da lanciare una
+  volta: ricostruisce i diari da set, run salvati, preferiti, mix e sessioni
+  già su disco, con le loro date. Gli id vengono dalla sorgente (sha1 del
+  file e della riga), così rilanciarlo non crea doppioni.
+- **File.** Nuovi `web/journal.py` (`add`, `read`, `search`, `note`),
+  `web/cards.py`, `scripts/journal_backfill.py`, `web/static/journal.html`,
+  `web/static/journal.js`. Da toccare: `web/service.py` (`journal.add` nelle
+  funzioni della tabella, le route), `web/livesessions.py`, `web/servers.py`,
+  `web/mcp.py`, `web/static/menu.js`, `run.html`, `app.js`, `live.js`,
+  `i18n/it.json`.
+- **Test.**
+  - Nuovo `tests/journal_test.py`:
+    - ogni funzione della tabella lascia la sua voce, senza che l'utente
+      scriva niente;
+    - "codice cambiato" solo se l'hash cambia: un commento non conta;
+    - una nota si attacca a una voce;
+    - la ricerca trova voci e note;
+    - il backfill rilanciato non crea doppioni;
+    - una voce si legge anche dopo aver cancellato il suo set.
+  - Nuovo `tests/cards_test.py`: id stabile; passaggi validi e non validi;
+    `DEAD` solo da un utente; ogni cambio di stato scrive nel diario; la
+    scheda arriva al server di trade con il push (con i server finti di
+    `servers_test.py`).
+  - `tests/app_check.js` per `menu.js`.
+- **Fatto quando.** Parti da una strategia nuova e fai set, preferiti, un
+  mix, il gate, la demo: il diario ha tutto, in ordine, senza che tu abbia
+  scritto una riga. Puoi annotare qualsiasi voce.
+- **Dipende da.** D1, D5.
 
 ---
 
@@ -421,11 +512,13 @@ quando esce da quello che la simulazione permetteva.
 
 ## 3. Cosa la fase 1 non fa
 
-Mix, portafoglio e più strumenti: [ROADMAP.md](ROADMAP.md). La fase 1 è
+Mix, portafoglio, più strumenti e il diario su più server:
+[ROADMAP.md](ROADMAP.md). La fase 1 è
 finita quando una strategia fa tutto il giro con i gate automatici:
 
 1. SIM, con holdout e correlazioni;
 2. gate, con la scheda;
 3. DEMO, con verify;
 4. promozione giudicata sui numeri;
-5. LIVE in ramp e poi piena, sotto protezione.
+5. LIVE in ramp e poi piena, sotto protezione;
+6. e il diario racconta tutto il giro, senza che nessuno l'abbia scritto.

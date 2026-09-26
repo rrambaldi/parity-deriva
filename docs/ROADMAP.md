@@ -5,6 +5,7 @@
 | 1 | **singola strategia**: da un'idea a un trade live | in corso · [PROCESSO.md](PROCESSO.md), piano in [PIANO-FASE1.md](PIANO-FASE1.md) |
 | 2 | **mix**: più strategie sullo stesso strumento | dopo la fase 1 · qui sotto |
 | 3 | **più strumenti**: correlazioni tra strumenti diversi | più avanti · qui sotto |
+| – | **diario su più server**: la storia di una strategia in un posto solo | quando si lavora su più server · qui sotto |
 
 Legenda: ✅ c'è già nel codice · 🔧 da fare. I numeri sono proposte, da tarare.
 
@@ -73,6 +74,9 @@ Oggi si manda un form alla volta. Con la fase 2:
 4. **Holdout del mix.** Piccolo, se c'è già l'holdout della fase 1.
 5. **Mix intero in demo e live**, con record e promozione per mix e tetto al
    rischio sommato. Medio.
+6. **Diario del mix**: lo stesso formato del diario della strategia, con i
+   link alle strategie che contiene. Nel diario di ogni strategia c'è già la
+   voce "entrata nel mix". Piccolo.
 
 ---
 
@@ -91,6 +95,33 @@ Oggi un mix lavora su un solo strumento. Con più strumenti servono:
   strategie live.
 
 Vale anche per l'azionario: un titolo è uno strumento come gli altri.
+
+---
+
+## Il diario su più server
+
+Nella fase 1 ogni server tiene il diario di quello che succede lì
+([PIANO-FASE1.md](PIANO-FASE1.md), C2). Se lavori su un server solo, il
+diario ha tutto. Con il test sul PC, la demo e il live in cloud, la storia di
+una strategia è divisa in tre diari: SIM sul PC, demo sul server demo, live
+sul server reale.
+
+Per averla in un posto solo:
+
+- **l'archivio tiene il diario completo**: è già il server che parla con
+  tutti gli altri;
+- **dal PC**: le voci viaggiano con `sync.py push`, insieme al run;
+- **dai server di trade**: l'archivio prende le voci nuove nel giro che già
+  fa ogni 5 minuti (`live_status`);
+- **niente conflitti**: le voci si aggiungono e basta e hanno un id casuale,
+  quindi unire due diari vuol dire metterli insieme e togliere i doppioni;
+- **la scheda allineata**: lo stato di una versione cambia sul server di
+  trade (promozione, SUSPENDED); l'archivio lo legge dalle voci e aggiorna la
+  sua copia;
+- **server reale**: le note si scrivono solo dalla sua pagina; via MCP gli
+  assistenti leggono e basta, come oggi.
+
+Cantiere unico, medio. Parte quando si usano davvero più server.
 
 ---
 

@@ -219,10 +219,10 @@ propone `DEAD`, ma non lo applica.
 | codice + regole + ipotesi | `strategy/`, `DESCRIPTION` |
 | sweep e run | `runs/sweeps/` (c'è già), cantina S3 / Drive (c'è già) |
 | soglie della policy | `etc/settings.py`, accanto a `PROMOTE_*` e `DAILY_LOSS_PCT` |
-| scheda strategia: stato, storico, riferimento, aperture dell'holdout | un JSON per versione in `DATA_DIR` (da fare) |
+| diario della strategia: tutto quello che si fa, scritto da parity-deriva, più le note dell'utente | un file per strategia in `DATA_DIR/journal/` (da fare) |
+| scheda della versione: stato, riferimento, aperture dell'holdout | un JSON per versione in `DATA_DIR/cards/` (da fare) |
 
-Storico della scheda: `[{data, da, a, perché}]`, scritto dalla piattaforma a
-ogni cambio di stato.
+Lo storico dei cambi di stato va nel diario.
 
 ---
 
@@ -230,7 +230,7 @@ ogni cambio di stato.
 
 1. **Gate performance in `promote()`** + scheda di riferimento dalla SIM.
    Piccolo. Oggi una strategia in perdita in demo passa.
-2. **Scheda strategia** con stato e storico. Piccolo.
+2. **Diario della strategia** + scheda della versione. Medio-grande.
 3. **Holdout nello sweep**: periodo sviluppo/holdout, holdout aperto una
    volta per versione. Medio.
 4. **Motore correlazioni** (1.3). Medio-grande.

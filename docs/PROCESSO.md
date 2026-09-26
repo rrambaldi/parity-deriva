@@ -51,6 +51,12 @@ ALIVE = `LIVE`.
 in poi cambiare codice o parametri crea una nuova versione, che riparte da
 `SIM`. Le versioni si contano (`v1`, `v2`, …), senza limite.
 
+**Il diario.** 🔧 Ogni strategia ha un diario tenuto da parity-deriva: set,
+preferiti, codice cambiato, mix, gate, versioni, demo, live, protezioni,
+ognuno con data, numeri e link. L'utente può annotare qualsiasi voce, se
+vuole. Per ora il diario sta sul server dove succedono le cose; su più
+server è nella [roadmap](ROADMAP.md#il-diario-su-più-server).
+
 ### Chi fa cosa (ruoli dei server)
 
 | Ruolo | Dove di solito | Nel processo |
@@ -79,6 +85,8 @@ Una strategia è **codice + parametri**.
   righe: 🔧
   - **Ipotesi**: perché dovrebbe funzionare.
   - **Non opera quando**: in quali condizioni deve stare ferma.
+- Alla prima simulazione nasce il **diario** della strategia, con l'idea
+  come prima voce. 🔧
 
 Dati su cui gira: candele ask/bid vere dalla cartella di mercato, calendario
 economico, archivio delle barre servite dai broker. ✅
@@ -206,9 +214,8 @@ Esce dal gate. È il metro con cui si giudicano la demo e il live:
 - **banda Monte Carlo**: rimescolando l'ordine dei trade si ottengono il 5°
   e il 95° percentile della curva di equity, trade per trade
 - quante volte l'holdout di quello strumento era già stato aperto (informazione)
-- storico dei cambi di stato: data, da, a, perché
-
-Un JSON per versione in `DATA_DIR`, scritto dalla piattaforma.
+Un JSON per versione in `DATA_DIR`, scritto dalla piattaforma. Lo storico
+dei cambi di stato (data, da, a, perché) va nel diario.
 
 ---
 
@@ -345,7 +352,8 @@ seconda sospensione, ma non lo applica.
 ## 9. Cosa manca, in ordine
 
 1. **Gate performance in `promote()`** + scheda di riferimento. Piccolo.
-2. **Scheda strategia**: stato, versione, storico dei cambi. Piccolo.
+2. **Diario della strategia + scheda della versione**: tutto quello che si
+   fa, scritto da parity-deriva; stato e numeri di ogni versione. Medio-grande.
 3. **Holdout nello sweep**, aperto una volta per versione. Medio.
 4. **Motore correlazioni** indicatori ↔ P/L. Medio-grande.
 5. **Banda Monte Carlo + baseline casuale**. Medio.
@@ -512,7 +520,7 @@ Quattro colonne, una per fase: "Strategia", "SIM", "DEMO", "LIVE".
 
 In ogni colonna una pila di tessere. Tessere verdi piene = "c'è già", tessere arancioni tratteggiate = "da fare".
 
-Strategia: verde "codice + DESCRIPTION", verde "bozze degli assistenti AI via MCP"; arancione "ipotesi e 'non opera quando'", arancione "scheda con stato e versione".
+Strategia: verde "codice + DESCRIPTION", verde "bozze degli assistenti AI via MCP"; arancione "ipotesi e 'non opera quando'", arancione "diario della strategia", arancione "scheda con stato e versione".
 SIM: verde "sweep fino a 500 combinazioni", verde "paramEffects e score", verde "pagina del run con heatmap"; arancione "holdout", arancione "motore correlazioni", arancione "baseline casuale", arancione "banda Monte Carlo".
 DEMO: verde "stesso broker del live", verde "verify sull'archivio", verde "monitor di parità", verde "record demo"; arancione "confronto con la scheda".
 LIVE: verde "promozione giudicata dal server reale", verde "loss limit 3%", verde "stop all"; arancione "gate su net e banda", arancione "ramp 25%", arancione "protezioni per strategia", arancione "avvisi".
