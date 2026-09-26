@@ -9,7 +9,7 @@ import collections
 import heapq
 import threading
 from parity_deriva.etc import settings
-from parity_deriva.data import store
+from parity_deriva.data import market, store
 
 import requests
 
@@ -121,7 +121,7 @@ class ForexCandles(StreamHandler):
 			# a granularity the store does not hold is built from the finest
 			# one it does, so a D run replays off an M5-only store. Read once
 			# per file and granularity for the whole process (frame())
-			path = os.path.join(self.setup.DATA_DIR, store_name)
+			path = market.store(p, self.setup)
 			self.label[p] = "%s %s%s" % (p, self.granularity,
 										 " (%s)" % self.role if self.role else "")
 			cached = any(k[:2] == (path, self.granularity) for k in list(FRAMES))

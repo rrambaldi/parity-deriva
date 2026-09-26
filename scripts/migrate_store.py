@@ -39,6 +39,7 @@ import numpy as np
 import pandas as pd
 import tables
 
+from parity_deriva.data import market
 from parity_deriva.etc import settings
 
 
@@ -126,6 +127,7 @@ def migrate(path, backup=True):
     file has been written and its row counts checked, so an interrupted run
     leaves the store as it was.
     """
+    market.guard(path)
     unit = target_unit()
     directory = os.path.dirname(os.path.abspath(path))
 
@@ -180,9 +182,9 @@ def main(argv=None):
                         help='do not leave a .bak copy')
     args = parser.parse_args(argv)
 
-    paths = args.stores or sorted(glob.glob(os.path.join(settings.DATA_DIR, '*.hd5')))
+    paths = args.stores or sorted(glob.glob(os.path.join(market.directory(), '*.hd5')))
     if not paths:
-        print("no stores found in %s" % settings.DATA_DIR)
+        print("no stores found in %s" % market.directory())
         return 1
 
     print("pandas %s, new timestamps at %s resolution"

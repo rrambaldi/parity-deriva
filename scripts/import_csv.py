@@ -47,6 +47,7 @@ import sys
 
 import pandas as pd
 
+from parity_deriva.data import market
 from parity_deriva.etc import settings
 
 LEGS = {'open': 'o', 'high': 'h', 'low': 'l', 'close': 'c'}
@@ -175,7 +176,19 @@ def merge(path, key, frame, dry_run=False, keep=False):
     the import does not cover. Returns (added, replaced, written). With `keep`
     the rows already there win instead, and only the missing ones go in: a
     push over MCP (web/mcp.py) adds to a store, it does not correct one.
+
+    The store is written as a copy that replaces it, with the market folder
+    locked, from the server that writes it only (data/market.py).
     """
+    if dry_run:
+        return _merge(path, key, frame, True, keep)
+    path = os.path.realpath(path)
+    market.guard(path)
+    with market.lock(os.path.dirname(path)):
+        return _merge(path, key, frame, False, keep)
+
+
+def _merge(path, key, frame, dry_run, keep):
     existing = None
     if os.path.exists(path):
         store = pd.HDFStore(path, mode='r')
@@ -203,16 +216,17 @@ def merge(path, key, frame, dry_run=False, keep=False):
     # rows that only extend the series are appended rather than rewritten.
     if existing is not None and merged.equals(existing):
         return added, replaced, False
-    store = pd.HDFStore(path, mode='a')
-    try:
-        if existing is not None and frame.index.min() > existing.index.max():
-            store.append(key, frame)
-        else:
-            # ponytail: a correction inside the series still rewrites the
-            # whole key and grows the file; ptrepack reclaims it
-            store.put(key, merged, format='table')
-    finally:
-        store.close()
+    with market.rewrite(path) as work:
+        store = pd.HDFStore(work, mode='a')
+        try:
+            if existing is not None and frame.index.min() > existing.index.max():
+                store.append(key, frame)
+            else:
+                # ponytail: a correction inside the series still rewrites the
+                # whole key and grows the file; ptrepack reclaims it
+                store.put(key, merged, format='table')
+        finally:
+            store.close()
     return added, replaced, True
 
 
@@ -247,13 +261,16 @@ def imported(path, key):
 
 def remember(path, key, name, digest):
     """Record a set as merged into key. put() drops attributes, so after it."""
-    sets = imported(path, key)
-    sets[name] = digest
-    store = pd.HDFStore(path, mode='a')
-    try:
-        store.get_storer(key).attrs.imported_sets = sets
-    finally:
-        store.close()
+    path = os.path.realpath(path)
+    market.guard(path)
+    with market.lock(os.path.dirname(path)), market.rewrite(path) as work:
+        sets = imported(work, key)
+        sets[name] = digest
+        store = pd.HDFStore(work, mode='a')
+        try:
+            store.get_storer(key).attrs.imported_sets = sets
+        finally:
+            store.close()
 
 
 def pairs(paths, report=print):
@@ -293,8 +310,8 @@ def main(argv=None, report=print, progress=None):
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('paths', nargs='*', default=[settings.CSV_DATA_DIR],
                         help='CSV files or directories (default: CSV_DATA_DIR)')
-    parser.add_argument('--data-dir', default=settings.DATA_DIR,
-                        help='where the .hd5 stores live')
+    parser.add_argument('--data-dir', default=market.directory(),
+                        help='where the .hd5 stores live (default: the market folder)')
     parser.add_argument('--swap-sides', action='store_true',
                         help='read the -BID file as ask and the -ASK file as '
                              'bid, for an export that labels them backwards')

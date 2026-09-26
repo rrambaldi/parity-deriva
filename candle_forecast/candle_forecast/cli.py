@@ -97,11 +97,11 @@ def load_prepared(cfg: dict[str, Any], instrument: str, timeframe: str) -> dict[
 
 
 def pack_stores(cfg: dict[str, Any], names: list[str]) -> None:
-    """Zippa gli store da parity_deriva settings.DATA_DIR in stores/ (da mettere in git)."""
-    from parity_deriva.etc import settings
+    """Zippa gli store dalla cartella market di parity_deriva in stores/ (da mettere in git)."""
+    from parity_deriva.data import market
     for name in names:
         inst = cfg["instruments"][name]
-        src = Path(settings.DATA_DIR) / inst["store"]
+        src = Path(market.directory()) / inst["store"]
         written = stores.pack(src, inst["store_zip"])
         size = inst["store_zip"].stat().st_size / 1e6
         print(f"{name}: {src} -> {inst['store_zip']} ({size:.1f} MB) "

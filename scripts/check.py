@@ -7,12 +7,13 @@ import datetime
 import parity_deriva.etc.settings as settings
 import logging
 import logging.config
+from parity_deriva.data import market
 from parity_deriva.data.bulksaver import BulkSaver
 from parity_deriva.lib.utils import granularityToTimedelta, getLogger
 logger = getLogger()
 
 
-for fil in  glob.glob(settings.DATA_DIR + '/DE*.hd5'):
+for fil in  glob.glob(market.directory() + '/DE*.hd5'):
 	h =  os.path.basename(fil)[:-4]
 
 	print(" === %s" % fil)

@@ -5,6 +5,7 @@ import json
 import time
 import os
 import sys
+from parity_deriva.data import market
 from parity_deriva.etc import settings
 
 import requests
@@ -28,7 +29,8 @@ class CandleSaver(ExecutionHandler):
 		if self.pairs is not None:
 			for p in self.pairs:
 				store_name  = "%s.hd5" % p
-				self.store[p]=pd.HDFStore(os.path.join(self.setup.DATA_DIR,store_name))
+				market.guard(market.store(p, self.setup), self.setup)
+				self.store[p]=pd.HDFStore(market.store(p, self.setup))
 
 
 	def execute_event(self, event):

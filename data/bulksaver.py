@@ -8,6 +8,7 @@ import logging.config
 import os
 import json
 import time
+from parity_deriva.data import market
 from parity_deriva.etc import settings
 from parity_deriva.lib.utils import granularityToTimedelta, getLogger
 
@@ -47,7 +48,7 @@ class BulkSaver(StreamHandler):
 			self.curr[p] = self.dtfrom
 			self.url[p] = "https://" + self.setup.API_DOMAIN + "/v3/instruments/" + p + "/candles"
 			self.store_name[p]  = "%s.hd5" % p
-			store=pd.HDFStore(os.path.join(self.setup.DATA_DIR,self.store_name[p]))
+			store=pd.HDFStore(market.store(p, self.setup))
 			try:
 				tmmin = store['/'+self.granularity].index.min()
 				tmmax = store['/'+self.granularity].index.max()
@@ -118,7 +119,8 @@ class BulkSaver(StreamHandler):
 	def save_dict(self, pair, block):
 		v=pd.DataFrame.from_dict(block,orient='index')
 		self.curr[pair] = v.index.max() + self.timedelta
-		store=pd.HDFStore(os.path.join(self.setup.DATA_DIR,self.store_name[pair]))
+		market.guard(market.store(pair, self.setup), self.setup)
+		store=pd.HDFStore(market.store(pair, self.setup))
 		store.append(self.granularity,v)
 		store.close()
 		self.logger.debug("%s saved %d candles from %s to %s"

@@ -33,7 +33,7 @@ import subprocess
 import sys
 import time
 
-from parity_deriva.data import calendar
+from parity_deriva.data import calendar, market
 from parity_deriva.etc import settings
 
 URL = 'https://www.forexfactory.com/calendar'
@@ -222,7 +222,7 @@ def main(argv=None, report=print, progress=None, reader=None):
                         help='first week to import (YYYY-MM-DD, default: this week)')
     parser.add_argument('--to', dest='dtto', default=None,
                         help='last week to import (default: today)')
-    parser.add_argument('--data-dir', default=settings.DATA_DIR,
+    parser.add_argument('--data-dir', default=market.directory(),
                         help='where calendar.csv goes (default: %(default)s)')
     parser.add_argument('--out', default=None,
                         help='the file itself, instead of <data-dir>/calendar.csv')

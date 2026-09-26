@@ -432,7 +432,11 @@ section {
 #mcp-source { margin: 0; overflow: auto; font-family: var(--font-mono); font-size: var(--fs-small); background: var(--raised); padding: 8px; border-radius: var(--radius-s); }
 /* the buttons sit on the line of the boxes, under the names of the ones that
    have one */
-#calendar-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+#calendar-actions, #market-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+#market-box { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+#market-state { margin-bottom: 6px; overflow-wrap: anywhere; }
+#market-dir { width: min(36em, 80vw); }
+#data-actions[hidden], #calendar-how[hidden], #calendar-actions[hidden] { display: none; }
 #calendar-format, #draft-format { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
 #calendar-format pre, #draft-format pre { margin: 0 0 12px; padding: 8px; font-family: var(--font-mono); overflow-x: auto; background: var(--raised); border-radius: var(--radius-s); font-size: var(--fs-small); }
 #calendar-format dl, #draft-format dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0 0 12px; }

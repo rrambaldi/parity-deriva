@@ -933,7 +933,7 @@ It refuses four things rather than doing something nobody asked for:
 
 | asked for | answer |
 | --- | --- |
-| an instrument with no store in `DATA_DIR` | refused, listing the ones there are |
+| an instrument with no store in the market folder | refused, listing the ones there are |
 | a granularity the store does not hold | refused, naming the ones it holds |
 | a window wider than `--max-candles` | refused, with the bar count and the limit |
 | a `BO` research engine | refused: they place no orders, so there is nothing to write down |
@@ -1229,10 +1229,29 @@ One pass fixes both, in place, keeping a ```.bak``` copy:
 
 ```
 python scripts/migrate_store.py --dry-run    # report, change nothing
-python scripts/migrate_store.py              # every store in DATA_DIR
+python scripts/migrate_store.py              # every store in the market folder
 ```
 
 It is idempotent, so a store that needs nothing is reported and skipped.
+
+## One market folder for several servers
+
+The candle stores (`<INSTRUMENT>.hd5`) and `calendar.csv` are the market's,
+not the server's: prod and dev on one host read the same folder, and only one
+of them writes it. `DATA_DIR/market.json` says which, and the settings page
+writes it (`/api/market`, `data/market.py`):
+
+```
+{"dir": "/mnt/HC_Volume_37718599/rrambaldi/MARKET", "writer": true}
+```
+
+Without it the market folder is `DATA_DIR` and the server writes it, as
+before. A reader refuses every write into the folder - the page's import, the
+calendar, the MCP pushes, the scripts - and hides the buttons for them. The
+writer merges into a copy that then replaces the store, under a lock on the
+folder: a reader in another process keeps the file it opened, and a writer
+killed halfway leaves the store as it was. Runs, strategies, favourites and
+live sessions stay in each server's own `DATA_DIR`.
 
 # Tests
 

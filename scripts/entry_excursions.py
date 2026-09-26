@@ -32,7 +32,7 @@ import sys
 import numpy as np
 import pandas as pd
 
-from parity_deriva.data import store
+from parity_deriva.data import market, store
 from parity_deriva.etc import settings
 from parity_deriva.lib.utils import pipSize
 from parity_deriva.scripts.nm_stats import atr14
@@ -252,7 +252,7 @@ if __name__ == '__main__':
 		ap.error('serve il file del run, o id del set e numero del run')
 	pd.set_option('display.width', 220)
 	payload = load(a.run)
-	m5 = m5frame(payload, os.path.join(settings.DATA_DIR, payload['instrument'] + '.hd5'))
+	m5 = m5frame(payload, market.store(payload['instrument']))
 	r = analyse(payload, m5, [int(x) for x in a.bars.split(',')] if a.bars else None)
 	print(f"######## {r['strategy']} {r['instrument']} {r['granularity']}  {pd.Timestamp(payload['from'], unit='ms'):%Y-%m-%d}"
 		  f" -> {pd.Timestamp(payload['to'], unit='ms'):%Y-%m-%d}  trade {r['trades']}")

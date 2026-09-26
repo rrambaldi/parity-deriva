@@ -34,6 +34,7 @@ import os
 import signal
 import sys
 
+from parity_deriva.data import market
 from parity_deriva.etc import settings
 from parity_deriva.lib.utils import getLogger
 from parity_deriva.web.service import LOGGER, MAX_CANDLES, serve
@@ -99,7 +100,7 @@ def main(argv=None):
             "can reach the port can run backtests on this machine's data"
             % args.host)
 
-    logger.info("reading candles from %s" % settings.DATA_DIR)
+    logger.info("reading candles from %s" % market.directory())
     logger.info("serving on http://%s:%d" % (args.host, args.port))
     print("parity-deriva backtest viewer on http://%s:%d  (ctrl-c to stop)"
           % (args.host, args.port))

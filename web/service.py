@@ -72,6 +72,7 @@ from parity_deriva.backtest import ledger
 from parity_deriva.backtest import shadow
 from parity_deriva.backtest.driver import Cancelled
 from parity_deriva.data import calendar as calendar_module
+from parity_deriva.data import market
 from parity_deriva.data import store
 from parity_deriva.data.candledb import CandleDB
 from parity_deriva.etc import settings
@@ -365,7 +366,7 @@ class Service(object):
 	# --------------------------------------------------------------- stores
 
 	def storePath(self, instrument):
-		return os.path.join(self.setup.DATA_DIR, "%s.hd5" % instrument)
+		return market.store(instrument, self.setup)
 
 	def instruments(self):
 		"""
@@ -376,11 +377,11 @@ class Service(object):
 		is the files that are there.
 		"""
 		out = []
-		directory = self.setup.DATA_DIR
+		directory = market.directory(self.setup)
 		try:
 			names = sorted(os.listdir(directory))
 		except OSError as exc:
-			raise ServiceError("cannot read DATA_DIR %s: %s" % (directory, exc))
+			raise ServiceError("cannot read the market folder %s: %s" % (directory, exc))
 		for name in names:
 			if not name.endswith('.hd5'):
 				continue
@@ -507,6 +508,7 @@ class Service(object):
 		complete set pending() lists - so a request cannot point the import
 		at a file outside IMPORT_DIR, or at a set it would only skip.
 		"""
+		market.guard(market.directory(self.setup), self.setup)
 		directory = self.importDir()
 		if not os.path.isdir(directory):
 			raise ServiceError("%s does not exist yet; upload a file or create "
@@ -545,7 +547,7 @@ class Service(object):
 		try:
 			with self._lock:
 				status = importer().main(
-					job['paths'] + ['--data-dir', self.setup.DATA_DIR],
+					job['paths'] + ['--data-dir', market.directory(self.setup)],
 					report=job['lines'].append, progress=progress)
 				self._cache.clear()
 				del self._order[:]
@@ -566,6 +568,19 @@ class Service(object):
 		out.pop('paths', None)
 		return out
 
+	def marketData(self):
+		"""The market folder, whether this server writes it, and DATA_DIR."""
+		return dict(market.config(self.setup), home=getattr(self.setup, 'DATA_DIR', '') or '.')
+
+	def setMarketData(self, body):
+		"""Point the stores and the calendar at another folder, or change the role."""
+		if self._job.get('running'):
+			raise ServiceError("an import is writing the stores: wait for it to finish")
+		market.save(body.get('dir'), body.get('writer'), self.setup)
+		self._cache.clear()
+		del self._order[:]
+		return self.marketData()
+
 	# -------------------------------------------------------------- refusals
 
 	def known(self, instrument, granularity=None):
@@ -580,7 +595,7 @@ class Service(object):
 		if instrument not in rows:
 			raise ServiceError(
 				"no store for %r in %s. It holds %s."
-				% (instrument, self.setup.DATA_DIR,
+				% (instrument, market.directory(self.setup),
 				   ", ".join(sorted(rows)) or "nothing"))
 		names = [g['granularity'] for g in rows[instrument]['granularities']]
 		if granularity is not None and granularity not in names:
@@ -1530,7 +1545,7 @@ class Service(object):
 			raise ServiceError("its time column is not made of times: %s" % exc)
 
 		where = calendar_module.path(self.setup)
-		with calendar_module.LOCK:
+		with calendar_module.writing(where, self.setup):
 			before = len(calendar_module.load(where))
 			frame = calendar_module.merge(
 				calendar_module.load(where),
@@ -2855,6 +2870,8 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendJSON(self.service.busy())
 			if route == '/api/imports':
 				return self.sendJSON(self.service.pending())
+			if route == '/api/market':
+				return self.sendJSON(self.service.marketData())
 			if route == '/api/imports/status':
 				return self.sendJSON(self.service.importStatus())
 			if route == '/api/runs':
@@ -2868,7 +2885,7 @@ class Handler(BaseHTTPRequestHandler):
 			if route.startswith('/static/'):
 				return self.sendFile(route[len('/static/'):])
 			return self.sendError("no route %s" % route, 404)
-		except (ServiceError, livesessions.LiveError) as exc:
+		except (ServiceError, livesessions.LiveError, market.MarketError) as exc:
 			return self.sendError(str(exc))
 		except ledger.LedgerError as exc:
 			return self.sendError(str(exc))
@@ -3048,6 +3065,16 @@ class Handler(BaseHTTPRequestHandler):
 				length = int(self.headers.get('Content-Length') or 0)
 				body = self.rfile.read(length).decode('utf-8', 'replace')
 				return self.sendJSON(self.service.importCalendar(body))
+			if route == '/api/market':
+				# {"dir": "/abs/folder", "writer": true|false}
+				length = int(self.headers.get('Content-Length') or 0)
+				try:
+					body = json.loads(self.rfile.read(length) or b'{}')
+				except ValueError:
+					body = None
+				if not isinstance(body, dict):
+					raise ServiceError('the body is {"dir": "/a/folder", "writer": true}')
+				return self.sendJSON(self.service.setMarketData(body))
 			if route == '/api/imports/run':
 				try:
 					length = int(self.headers.get('Content-Length') or 0)
@@ -3058,7 +3085,7 @@ class Handler(BaseHTTPRequestHandler):
 					raise ServiceError('the body is {"sets": [names]}')
 				return self.sendJSON(self.service.startImport(sets))
 			return self.sendError("no route %s" % route, 404)
-		except (ServiceError, livesessions.LiveError) as exc:
+		except (ServiceError, livesessions.LiveError, market.MarketError) as exc:
 			return self.sendError(str(exc))
 		except ledger.LedgerError as exc:
 			return self.sendError(str(exc))

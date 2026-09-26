@@ -28,7 +28,7 @@ from http.server import ThreadingHTTPServer
 import pandas as pd
 
 from parity_deriva.backtest import ledger
-from parity_deriva.data import calendar
+from parity_deriva.data import calendar, market
 from parity_deriva.event.event import CandleEvent
 from parity_deriva.strategy import uploaded
 from parity_deriva.tests.web_test import StoreCase
@@ -611,6 +611,12 @@ class MCPTest(StoreCase):
 											  ask=first, bid=first)[0])
 		with self.assertRaises(mcp.ToolError):
 			mcp.call(self.service, 'push_calendar', {'events': [event]}, self.base, 'claude.ai')
+		# a server that only reads the market data takes no push at all
+		market.save(self.settings.DATA_DIR, False, self.settings)
+		for name, args in (('push_calendar', {'events': [event]}),
+						   ('push_candles', {'instrument': 'EUR_USD', 'granularity': 'M5',
+											 'ask': first, 'bid': first})):
+			self.assertIn('only reads', self.tool(name, **args)[0])
 
 	def test_an_assistant_writes_an_indicator_a_strategy_takes_and_the_chart_draws(self):
 		self.bearer = self.service.oauth.newSecret()

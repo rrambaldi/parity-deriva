@@ -68,7 +68,7 @@ def main():
 			ledger.STRATEGIES[draft['name']] = uploaded.load(draft['name'], draft['path'])
 		if trial:
 			out = {'indicator': uploaded.examine(uploaded.loadIndicator(trial['name'], trial['path']),
-												 candles(dataDir))}
+												 candles())}
 		elif job.get('check'):
 			name = draft['name']
 			klass = ledger.load_strategy(name)
@@ -96,19 +96,20 @@ def main():
 	answer.close()
 
 
-def candles(dataDir):
+def candles():
 	"""
 	The last uploaded.TRIAL_BARS H1 candles of EUR_USD, or of the first store
 	there is, as a strategy is fed them: what an indicator is tried on.
 	"""
-	from parity_deriva.data import replay
+	from parity_deriva.data import market, replay
 	from parity_deriva.event.event import CandleEvent
-	stores = sorted(n for n in os.listdir(dataDir) if n.endswith('.hd5'))
+	folder = market.directory()
+	stores = sorted(n for n in os.listdir(folder) if n.endswith('.hd5'))
 	if not stores:
 		return []
 	name = 'EUR_USD.hd5' if 'EUR_USD.hd5' in stores else stores[0]
 	from parity_deriva.strategy import uploaded
-	frame = replay.frame(os.path.join(dataDir, name), 'H1')[0].iloc[-uploaded.TRIAL_BARS:]
+	frame = replay.frame(os.path.join(folder, name), 'H1')[0].iloc[-uploaded.TRIAL_BARS:]
 	columns = dict((column, frame[column].tolist()) for _s, _p, column in replay.COLUMNS)
 	volume = frame['volume'].tolist()
 	out = []

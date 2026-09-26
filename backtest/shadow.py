@@ -34,7 +34,7 @@ one bar would refuse every series there is.
 import os
 
 from parity_deriva.backtest.driver import Collector
-from parity_deriva.data import store
+from parity_deriva.data import market, store
 from parity_deriva.data.replay import ForexCandles
 from parity_deriva.etc import settings
 from parity_deriva.event.event import StatusEvent
@@ -62,7 +62,7 @@ def held(instrument, setup=None):
 	a finer series it holds (see data/store.py).
 	"""
 	cfg = setup if setup is not None else settings
-	path = os.path.join(cfg.DATA_DIR, "%s.hd5" % instrument)
+	path = market.store(instrument, cfg)
 	if not os.path.exists(path):
 		return {}
 	return store.indexes(path)

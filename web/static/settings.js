@@ -46,6 +46,29 @@ async function loadStores() {
   instruments = (await ask('api/stores')).instruments || [];
 }
 
+/* ----------------------------------------------------------- the market */
+
+// Where the stores and the calendar are, and whether this server writes them
+// (data/market.py). A server that only reads has nothing to import: the
+// writer does that, and the buttons for it go.
+function showMarket(state) {
+  $('market-dir').value = state.dir;
+  $('market-writer').checked = state.writer;
+  $('market-state').textContent = `candles and calendar in ${state.dir} \u00b7 `
+    + (state.writer ? 'this server writes them'
+      : 'read only: imports and pushes go to the server that writes them');
+  for (const id of ['data-actions', 'calendar-how', 'calendar-actions']) $(id).hidden = !state.writer;
+}
+
+$('market-save').addEventListener('click', () => dataAction(async () => {
+  showMarket(await post('api/market', JSON.stringify(
+    { dir: $('market-dir').value, writer: $('market-writer').checked })));
+  dataLog(['market data saved']);
+  await loadStores();
+  await loadImports();
+  showCalendar();
+}));
+
 /* --------------------------------------------------------- the calendar */
 
 /*
@@ -592,6 +615,7 @@ $('mcp-disconnect').addEventListener('click', async () => {
 });
 
 showMcp().catch((error) => mcpSay(String(error.message || error)));
+ask('api/market').then(showMarket).catch((error) => dataLog([String(error.message || error)]));
 showCalendar();
 loadStores().then(loadImports).catch((error) => dataLog([String(error.message || error)]));
 // an import started earlier, from this page or another, is picked up

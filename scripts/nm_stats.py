@@ -18,6 +18,7 @@ import sys
 import numpy as np
 import pandas as pd
 
+from parity_deriva.data import market
 from parity_deriva.etc import settings
 
 GRID = [(5, 20), (5, 40), (10, 40), (10, 80)]
@@ -29,7 +30,7 @@ def mid(raw):
 
 
 def load_store(name):
-    raw = pd.read_hdf(os.path.join(settings.DATA_DIR, name + ".hd5"), "/M5")
+    raw = pd.read_hdf(market.store(name), "/M5")
     m5 = mid(raw)
     # ponytail: H4 a blocchi fissi dalle 22:00 UTC, senza ora legale (d'estate la chiusura NY è alle 21)
     return name, raw, {"M5": m5,

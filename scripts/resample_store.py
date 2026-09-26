@@ -29,6 +29,7 @@ import sys
 
 import pandas as pd
 
+from parity_deriva.data import market
 from parity_deriva.etc import settings
 # the aggregation lives with the reader, which derives the same bars on the fly
 from parity_deriva.data.store import AGGREGATE, aggregation_map, resample  # noqa: F401
@@ -55,6 +56,7 @@ def process(path, source, target, force=False, dry_run=False):
     if dry_run:
         return None, "would build " + note
 
+    market.guard(path)
     store = pd.HDFStore(path, mode='a')
     try:
         if dst_key in store:
@@ -77,9 +79,9 @@ def main(argv=None):
                         help='report what would be built and stop')
     args = parser.parse_args(argv)
 
-    paths = args.stores or sorted(glob.glob(os.path.join(settings.DATA_DIR, '*.hd5')))
+    paths = args.stores or sorted(glob.glob(os.path.join(market.directory(), '*.hd5')))
     if not paths:
-        print("no stores found in %s" % settings.DATA_DIR)
+        print("no stores found in %s" % market.directory())
         return 1
 
     for path in paths:

@@ -33,21 +33,31 @@ strategy do not agree about either, and nothing here decides for them.
 """
 
 import bisect
+import contextlib
 import datetime
 import os
 import re
-import threading
 
 import pandas as pd
 
+from parity_deriva.data import market
 from parity_deriva.etc import settings
 
 COLUMNS = ('time', 'currency', 'impact', 'title')
 #: what a pushed event carries besides, empty on a row of four
 EXTRA = ('id', 'timed', 'actual', 'forecast', 'previous', 'revision', 'effect')
 
-#: one writer at a time: a push every two minutes, and the page's import
-LOCK = threading.Lock()
+@contextlib.contextmanager
+def writing(where, setup=None):
+	"""
+	One load-merge-save at a time, across processes too: a push every two
+	minutes and the page's import would lose each other's events. On the
+	server that writes the market data only (data/market.py).
+	"""
+	where = os.path.realpath(where)
+	market.guard(where, setup)
+	with market.lock(os.path.dirname(where)):
+		yield
 
 #: ForexFactory's four words, as they come
 HIGH = 'high'
@@ -68,8 +78,7 @@ FILENAME = 'calendar.csv'
 
 
 def path(setup=None):
-	cfg = setup if setup is not None else settings
-	return os.path.join(cfg.DATA_DIR, FILENAME)
+	return os.path.join(market.directory(setup), FILENAME)
 
 
 def empty():
@@ -137,6 +146,7 @@ def save(frame, where=None, setup=None):
 	# the file itself, not a link to it: dev's calendar.csv is prod's, and a
 	# replace on the link's name would put a copy of its own in its place
 	where = os.path.realpath(where or path(setup))
+	market.guard(where, setup)
 	columns = list(COLUMNS) + [c for c in EXTRA if c in frame]
 	# whole or not at all: a run or a live session may be reading it
 	frame.to_csv(where + '.part', index=False, columns=columns, date_format='%Y-%m-%d %H:%M:%S')

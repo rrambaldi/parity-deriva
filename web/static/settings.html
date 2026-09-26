@@ -39,6 +39,18 @@
   the service, so its report here is what it prints on the command line.
 -->
 <section id="data-panel">
+  <!--
+    Where the stores and the calendar are, and whether this server writes
+    them (data/market.py): prod and dev read one folder, one of them writes it.
+  -->
+  <div id="market-box">
+    <div id="market-state"></div>
+    <div id="market-actions">
+      <label>market folder <input type="text" id="market-dir" spellcheck="false"></label>
+      <label><input type="checkbox" id="market-writer"> this server writes it</label>
+      <button type="button" id="market-save" data-icon="yes">save</button>
+    </div>
+  </div>
   <!-- what the stores hold now: the series each one keeps, and the ones the
        viewer builds from them (data/store.py) -->
   <div id="data-loaded"></div>

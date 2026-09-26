@@ -33,6 +33,7 @@ import pandas as pd
 
 from parity_deriva.backtest import resolution
 from parity_deriva.backtest.driver import ReplayEngine
+from parity_deriva.data import market
 from parity_deriva.data.replay import ForexCandles
 from parity_deriva.etc import settings
 from parity_deriva.event.event import SignalEvent
@@ -84,7 +85,7 @@ def collect_signals(strategy_name, instrument, granularity, dtfrom, dtto):
 
 
 def load_bars(instrument, granularity):
-    path = os.path.join(settings.DATA_DIR, "%s.hd5" % instrument)
+    path = market.store(instrument)
     store = pd.HDFStore(path, mode='r')
     try:
         key = '/' + granularity.lstrip('/')

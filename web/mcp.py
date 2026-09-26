@@ -47,7 +47,7 @@ import urllib.request
 import pandas as pd
 
 from parity_deriva.backtest import ledger
-from parity_deriva.data import calendar
+from parity_deriva.data import calendar, market
 from parity_deriva.strategy import uploaded
 from parity_deriva.web import oauth, sandbox
 
@@ -450,17 +450,22 @@ PUSH_BARS = 10000
 GRANULARITIES = ('M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D', 'W')
 
 
-def pusher(client):
+def pusher(service, client):
 	"""
 	The data scripts hold the token itself; an assistant connected through
 	OAuth reads and backtests, it does not write the data every run reads.
+	And only to the server that writes the market data (data/market.py).
 	"""
 	if not str(client).startswith('token: '):
 		raise ToolError("pushing data is for a script with the token, not for an assistant")
+	try:
+		market.guard(market.directory(service.setup), service.setup)
+	except market.MarketError as exc:
+		raise ToolError(str(exc))
 
 
 def pushCalendar(service, args, client):
-	pusher(client)
+	pusher(service, client)
 	events = args.get('events')
 	if not isinstance(events, list) or not events or len(events) > PUSH_EVENTS:
 		raise ToolError("events: 1 to %d of ForexFactory's events" % PUSH_EVENTS)
@@ -469,7 +474,7 @@ def pushCalendar(service, args, client):
 	except (ValueError, TypeError, AttributeError) as exc:
 		raise ToolError("not saved: %s" % exc)
 	where = calendar.path(service.setup)
-	with calendar.LOCK:
+	with calendar.writing(where, service.setup):
 		before = calendar.load(where)
 		after = calendar.merge(before, rows)
 		calendar.save(after, where)
@@ -477,7 +482,7 @@ def pushCalendar(service, args, client):
 
 
 def pushCandles(service, args, client):
-	pusher(client)
+	pusher(service, client)
 	from parity_deriva.web.service import importer
 	csv = importer()
 	instrument = csv.instrument_name(str(args.get('instrument') or '').replace('/', '_'))
@@ -507,7 +512,7 @@ def pushCandles(service, args, client):
 	if not service._lock.acquire(timeout=240):
 		raise ToolError("a backtest has held the stores for 4 minutes: push again later")
 	try:
-		added, _, _ = csv.merge(os.path.join(dataDir(service), instrument + '.hd5'),
+		added, _, _ = csv.merge(market.store(instrument, service.setup),
 								'/' + granularity, frame, keep=True)
 		if added:
 			service._cache.clear()
