@@ -481,6 +481,9 @@ class SwitchTest(Case):
         # the first certificate named: the one issuing it goes on the list too
         issued = json.loads(self.call('POST', '/api/access/cert', {'name': 'Anna', 'can': 'read'}, headers=me)[2])
         self.assertTrue(issued['p12'] and issued['password'])
+        self.assertEqual([c['name'] for c in issued['settings']['issued']], ['Anna'])
+        self.assertTrue(issued['settings']['authority']['name'].startswith('parity-deriva CA'))
+        self.assertRegex(issued['settings']['authority']['until'], r'^20\d\d-\d\d-\d\d$')
         self.assertEqual(issued['settings']['allow'], [{'who': 'cert:Anna', 'can': 'read'}, {'who': 'cert:Claudia', 'can': 'write'}])
         self.assertEqual(self.call('GET', '/api/favourites', headers=me)[0], 200)
 

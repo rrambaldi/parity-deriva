@@ -273,12 +273,16 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
 -->
 <section id="access-panel" role="tabpanel" aria-labelledby="tab-access" hidden>
   <style>
-    #access-panel fieldset { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; min-width: 0;
-      border: 1px solid var(--line); border-radius: var(--radius-s); padding: 6px 12px 12px; }
-    #access-panel legend { color: var(--text-3); padding: 0 4px; }
+    /* one drop-down a part: the ones the mode uses open by themselves (access.js) */
+    #access-panel details { margin: 10px 0; min-width: 0; border: 1px solid var(--line);
+      border-radius: var(--radius-s); padding: 0 12px; }
+    #access-panel details[open] { padding-bottom: 12px; }
+    #access-panel summary { cursor: pointer; padding: 10px 0; overflow-wrap: anywhere; }
+    #access-panel summary .access-now { margin-left: 6px; color: var(--text-3); font-size: var(--fs-small); }
+    #access-panel .access-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    #access-panel .access-body > button { align-self: flex-start; }
     #access-panel label.pick { flex-direction: row; align-items: baseline; gap: 8px; text-transform: none;
       letter-spacing: normal; font-size: inherit; cursor: pointer; }
-    #access-panel fieldset > button { align-self: flex-start; }
     #access-panel p.dim { margin: 4px 0 0; color: var(--text-3); font-size: var(--fs-small); overflow-wrap: anywhere; }
     #access-panel input[type="text"], #access-panel input[type="url"], #access-panel input[type="password"] {
       width: min(22em, 100%); box-sizing: border-box; }
@@ -287,70 +291,86 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
     #access-ca-pem { width: min(40em, 100%); box-sizing: border-box; font: var(--fs-small) var(--font-mono);
       color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-s);
       padding: var(--space-2); }
+    #access-issued { border-collapse: collapse; font-size: var(--fs-small); }
+    #access-issued td { padding: 2px 12px 2px 0; vertical-align: top; overflow-wrap: anywhere; }
     #access-rows .market-row, #access-providers .market-row { margin-top: 8px; }
   </style>
   <h2 class="panel-title">access</h2>
   <p id="access-readonly" class="dim" hidden>You may look, not change: read only.</p>
 
-  <fieldset id="access-how">
-    <legend>how people get in</legend>
-    <p id="access-legacy" class="dim" hidden>Left to the proxy in front of this server: nothing is checked here yet.</p>
-    <label class="pick"><input type="radio" name="access-mode" value="cert"> a client certificate</label>
-    <label class="pick"><input type="radio" name="access-mode" value="oauth"> an account: Google, Microsoft 365, GitHub</label>
-    <label class="pick"><input type="radio" name="access-mode" value="both"> certificate and account (paranoid: both are needed)</label>
-    <label class="pick"><input type="radio" name="access-mode" value="none"> nothing: only this PC</label>
-    <p id="access-needs" class="dim"></p>
-    <p id="access-brings" class="dim"></p>
-    <button type="button" id="access-mode-save" data-icon="yes">change</button>
-  </fieldset>
-
-  <fieldset id="access-accounts">
-    <legend>accounts</legend>
-    <div class="market-row">
-      <label>this server's public address
-        <input type="url" id="access-url" spellcheck="false" placeholder="https://host"></label>
+  <details id="access-how" open>
+    <summary>how people get in <span class="access-now" id="access-how-now"></span></summary>
+    <div class="access-body">
+      <p id="access-legacy" class="dim" hidden>Left to the proxy in front of this server: nothing is checked here yet.</p>
+      <label class="pick"><input type="radio" name="access-mode" value="cert"> a client certificate</label>
+      <label class="pick"><input type="radio" name="access-mode" value="oauth"> an account: Google, Microsoft 365, GitHub</label>
+      <label class="pick"><input type="radio" name="access-mode" value="both"> certificate and account (paranoid: both are needed)</label>
+      <label class="pick"><input type="radio" name="access-mode" value="none"> nothing: only this PC</label>
+      <p id="access-needs" class="dim"></p>
+      <p id="access-brings" class="dim"></p>
+      <button type="button" id="access-mode-save" data-icon="yes">change</button>
     </div>
-    <div id="access-providers"></div>
-    <button type="button" id="access-accounts-save" data-icon="yes">save the accounts</button>
-  </fieldset>
+  </details>
 
-  <fieldset id="access-certs">
-    <legend>certificates</legend>
-    <div id="access-ca-none" hidden>
+  <details id="access-certs">
+    <summary>certificates <span class="access-now" id="access-certs-now"></span></summary>
+    <div class="access-body">
+      <p id="access-authority"></p>
+      <p id="access-mine" class="dim"></p>
+      <div id="access-ca-own" hidden>
+        <div class="market-row">
+          <label>issue a certificate for <input type="text" id="access-cert-name" maxlength="60" placeholder="Mario Rossi"></label>
+          <label>who may
+            <select id="access-cert-can"><option value="write">authorizing</option><option value="read">read only</option></select></label>
+          <button type="button" id="access-cert-go" data-icon="add">issue</button>
+        </div>
+        <p id="access-cert-out" hidden><a id="access-p12" download="parity-deriva.p12">download the certificate</a>
+          · <span>password</span> <code id="access-p12-pass"></code> · <span>import it in the browser, then reload</span></p>
+        <p class="dim">issued here</p>
+        <table id="access-issued"></table>
+      </div>
+      <p id="access-ca-external" class="dim" hidden>Its certificates are issued where the authority is: this server
+        only checks them.</p>
       <p id="access-ca-locked" class="dim" hidden>The authority is not changed while certificates are how people
         get in: the ones in use would stop working.</p>
-      <div class="market-row">
-        <button type="button" id="access-ca-make" data-icon="add">make an authority here</button>
-      </div>
-      <div class="market-row">
-        <label>or your own authority's certificate (PEM)
-          <textarea id="access-ca-pem" rows="5" spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----"></textarea></label>
-        <button type="button" id="access-ca-load" data-icon="upload">load it</button>
+      <div id="access-ca-change">
+        <p id="access-ca-change-note" class="dim"></p>
+        <div class="market-row">
+          <button type="button" id="access-ca-make" data-icon="add">make an authority here</button>
+        </div>
+        <div class="market-row">
+          <label>or your own authority's certificate (PEM)
+            <textarea id="access-ca-pem" rows="5" spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----"></textarea></label>
+          <button type="button" id="access-ca-load" data-icon="upload">load it</button>
+        </div>
       </div>
     </div>
-    <div id="access-ca-own" hidden>
-      <div class="market-row">
-        <label>issue a certificate for <input type="text" id="access-cert-name" maxlength="60" placeholder="Mario Rossi"></label>
-        <label>who may
-          <select id="access-cert-can"><option value="write">authorizing</option><option value="read">read only</option></select></label>
-        <button type="button" id="access-cert-go" data-icon="add">issue</button>
-      </div>
-      <p id="access-cert-out" hidden><a id="access-p12" download="parity-deriva.p12">download the certificate</a>
-        · <span>password</span> <code id="access-p12-pass"></code> · <span>import it in the browser, then reload</span></p>
-    </div>
-    <p id="access-ca-external" class="dim" hidden>Certificates are issued where the authority is.</p>
-  </fieldset>
+  </details>
 
-  <fieldset id="access-who">
-    <legend>who may enter</legend>
-    <div id="access-rows"></div>
-    <p class="dim">name@domain · @domain, every address of it · github:login · cert:Name on the certificate.</p>
-    <p class="dim">While no cert: entry is on the list, every certificate of the authority is in and may change things.</p>
-    <div class="market-row">
-      <button type="button" id="access-add" data-icon="add">add</button>
-      <button type="button" id="access-who-save" data-icon="yes">save the list</button>
+  <details id="access-accounts">
+    <summary>sign-in accounts <span class="access-now" id="access-accounts-now"></span></summary>
+    <div class="access-body">
+      <div class="market-row">
+        <label>this server's public address
+          <input type="url" id="access-url" spellcheck="false" placeholder="https://host"></label>
+      </div>
+      <div id="access-providers"></div>
+      <button type="button" id="access-accounts-save" data-icon="yes">save the accounts</button>
     </div>
-  </fieldset>
+  </details>
+
+  <details id="access-who">
+    <summary>who may enter <span class="access-now" id="access-who-now"></span></summary>
+    <div class="access-body">
+      <div id="access-rows"></div>
+      <p class="dim">name@domain · @domain, every address of it · github:login · cert:Name on the certificate.</p>
+      <p class="dim">While no cert: entry is on the list, every certificate of the authority is in and may change things.</p>
+      <div class="market-row">
+        <button type="button" id="access-add" data-icon="add">add</button>
+        <button type="button" id="access-who-save" data-icon="yes">save the list</button>
+      </div>
+    </div>
+  </details>
 
   <div class="market-row" style="margin-top: 12px">
     <a class="button" href="api/access/profile" download>download this server's profile</a>

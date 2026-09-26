@@ -4,6 +4,9 @@
  * server's certificate authority, and who may enter, each read only or
  * authorizing. The server refuses what would lock out the one saving and says
  * why: the page shows it. Loaded after settings.js, whose $, ask and post it uses.
+ *
+ * Each part is a drop-down: the ones the mode in use needs open by themselves
+ * on the first load, and picking a mode opens the ones it will need.
  */
 
 const ACCESS_PROVIDERS = [['google', 'Google'], ['microsoft', 'Microsoft 365'], ['github', 'GitHub']];
@@ -14,6 +17,13 @@ const ACCESS_NEEDS = {
   none: 'Needs this page opened from this PC, not through a proxy.',
 };
 
+const ACCESS_MODES = { cert: 'a client certificate', oauth: 'an account', both: 'certificate and account',
+  none: 'nothing: only this PC' };
+// the parts each mode needs, open when it is the one in use or the one picked
+const ACCESS_PARTS = { cert: ['access-certs', 'access-who'], oauth: ['access-accounts', 'access-who'],
+  both: ['access-certs', 'access-accounts', 'access-who'], none: [] };
+let accessOpened = false;
+
 const accessSay = (text) => { $('access-note').textContent = text || ''; };
 const accessFailed = (error) => accessSay(String(error.message || error));
 const accessMode = () => (document.querySelector('input[name="access-mode"]:checked') || {}).value || '';
@@ -21,6 +31,25 @@ const accessSpan = (text) => { const span = document.createElement('span'); span
 
 function accessNeeds() {
   $('access-needs').textContent = ACCESS_NEEDS[accessMode()] || '';
+}
+
+function accessOpen(mode) {
+  for (const id of ACCESS_PARTS[mode] || []) $(id).open = true;
+}
+
+function accessIssued(rows) {
+  const table = $('access-issued');
+  table.textContent = '';
+  if (!rows.length) {
+    table.insertRow().insertCell().textContent = 'none issued yet';
+    return;
+  }
+  for (const row of rows) {
+    const tr = table.insertRow();
+    tr.insertCell().textContent = row.when;
+    tr.insertCell().textContent = row.name;
+    tr.insertCell().textContent = String(row.serial || '').slice(0, 12);
+  }
 }
 
 function accessProviders(access) {
@@ -71,6 +100,17 @@ function showAccess(access) {
   for (const radio of document.querySelectorAll('input[name="access-mode"]')) radio.checked = radio.value === mode;
   $('access-legacy').hidden = !!mode;
   accessNeeds();
+  if (!accessOpened) {
+    // the first load only: afterwards what the user opened and closed stays
+    accessOpen(mode);
+    if (!mode && access.ca) $('access-certs').open = true;
+    accessOpened = true;
+  }
+  $('access-how-now').textContent = ACCESS_MODES[mode] ? t(ACCESS_MODES[mode]) : t('left to the proxy');
+  const set = ACCESS_PROVIDERS.filter(([key]) => ((access.providers || {})[key] || {}).secret).map(([, label]) => label);
+  $('access-accounts-now').textContent = set.length ? set.join(', ') : t('none set up');
+  $('access-who-now').textContent = t('{n} on the list', { n: (access.allow || []).length });
+  $('access-certs-now').textContent = access.authority ? access.authority.name : t('no authority');
   // what this browser brings: what the modes with a certificate or an account look at
   $('access-brings').replaceChildren(
     accessSpan(access.certificate ? `your certificate: ${access.certificate}` : 'no client certificate on this request'),
@@ -80,11 +120,24 @@ function showAccess(access) {
   $('access-url').value = access.public_url || '';
   accessProviders(access);
 
-  $('access-ca-none').hidden = !!access.ca;
+  const authority = access.authority;
+  $('access-authority').textContent = authority
+    ? t(access.ca === 'own' ? 'authority: {name} · valid until {until} · made on this server'
+      : 'authority: {name} · valid until {until} · issued elsewhere', { name: authority.name, until: authority.until || '?' })
+    : t('No authority yet.');
+  // what reaches this server from this browser: behind a proxy, only what the proxy passes on
+  $('access-mine').textContent = access.certificate ? t('your certificate: {name}', { name: access.certificate })
+    : access.ca ? t("No client certificate reaches this server from this browser. Behind a proxy, the proxy must pass the certificate's name in X-Client-Subject.")
+      : '';
   $('access-ca-own').hidden = access.ca !== 'own';
+  if (access.ca === 'own') accessIssued(access.issued || []);
   $('access-ca-external').hidden = access.ca !== 'external';
   const locked = mode === 'cert' || mode === 'both';
   $('access-ca-locked').hidden = !locked;
+  $('access-ca-change').hidden = locked;
+  $('access-ca-change-note').textContent = access.ca
+    ? t('Replace the authority: the certificates it issued stop working.') : t('Make one here, or load yours.');
+  $('access-ca-make').textContent = t(access.ca ? 'make a new authority here' : 'make an authority here');
 
   $('access-rows').textContent = '';
   for (const entry of access.allow || []) accessRow(typeof entry === 'string' ? { who: entry, can: 'write' } : entry);
@@ -96,7 +149,10 @@ function showAccess(access) {
   for (const el of [$('access-ca-make'), $('access-ca-load'), $('access-ca-pem')]) el.disabled = readOnly || locked;
 }
 
-document.querySelectorAll('input[name="access-mode"]').forEach((radio) => radio.addEventListener('change', accessNeeds));
+document.querySelectorAll('input[name="access-mode"]').forEach((radio) => radio.addEventListener('change', () => {
+  accessNeeds();
+  accessOpen(accessMode());
+}));
 
 $('access-mode-save').addEventListener('click', async () => {
   const mode = accessMode();
@@ -122,6 +178,9 @@ $('access-accounts-save').addEventListener('click', async () => {
 });
 
 $('access-ca-make').addEventListener('click', async () => {
+  if (!$('access-ca-own').hidden || !$('access-ca-external').hidden) {
+    if (!confirm(t('A new authority: the certificates of the one there is stop working. Go on?'))) return;
+  }
   try {
     showAccess(await post('api/access/ca', JSON.stringify({ make: true })));
     accessSay('Authority made: now issue your certificate.');

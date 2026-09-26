@@ -561,6 +561,38 @@ def authorityHeld(setup):
 	return 'external' if os.path.exists(os.path.join(where, 'ca.crt')) else None
 
 
+def authorityShown(setup):
+	"""The authority's name and the day it expires, read from its certificate; None without one."""
+	path = os.path.join(caDir(setup), 'ca.crt')
+	if not os.path.exists(path):
+		return None
+	try:
+		text = openssl('x509', '-in', path, '-noout', '-subject', '-enddate', '-nameopt', 'RFC2253').decode()
+	except AccessError:
+		return {'name': '?', 'until': None}
+	found = dict(line.split('=', 1) for line in text.splitlines() if '=' in line)
+	try:
+		until = time.strftime('%Y-%m-%d', time.strptime(found.get('notAfter', '').strip(), '%b %d %H:%M:%S %Y %Z'))
+	except ValueError:
+		until = None
+	return {'name': subjectName(found.get('subject', '')), 'until': until}
+
+
+def issuedHere(setup):
+	"""The certificates this server's authority issued, the newest first (DATA_DIR/ca/issued.log)."""
+	try:
+		with open(os.path.join(caDir(setup), 'issued.log')) as handle:
+			lines = handle.read().splitlines()
+	except OSError:
+		return []
+	out = []
+	for line in reversed(lines[-200:]):
+		words = line.split(' ', 3)
+		if len(words) == 4:
+			out.append({'when': words[0] + ' ' + words[1], 'serial': words[2], 'name': words[3]})
+	return out
+
+
 def issue(name, setup):
 	"""A client certificate for a person, signed here: (the .p12's bytes, its password)."""
 	name = certName(name)
@@ -851,6 +883,7 @@ def view(handler):
 			'providers': shown,
 			'public_url': secret('PARITY_DERIVA_PUBLIC_URL', setup) or getattr(setup, 'PUBLIC_URL', None) or '',
 			'callbacks': dict((n, redirectUri(handler, n)) for n in PROVIDERS), 'ca': authorityHeld(setup),
+			'authority': authorityShown(setup), 'issued': issuedHere(setup),
 			'user': found[0] if found else None, 'can': can(handler, found),
 			'signed': me[0] if me else None, 'certificate': certificate(handler),
 			'proxied': bool(handler.headers.get('X-Forwarded-For')),
