@@ -65,6 +65,9 @@ the thanks.
   different sets can be put together in a mix, their capitals added up on one
   time axis. It runs the offline stack on the local warehouse and contacts no
   broker.
+* **Servers** - one application, four roles: archive, test, trade on demo
+  accounts, trade with real money. How they fit together, with the diagrams,
+  is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 * **Audit trail** - every event is written to a JSONL log and can be replayed.
 * **Performance** - `performance/analyze.py` reports win/loss statistics,
   consecutive runs and three flavours of optimal *f* over the closed trades
@@ -1364,6 +1367,8 @@ its code. The switch in the header keeps the choice in the browser; English
 until one is made.
 
 ## Server roles: archive, test, trade
+
+The diagrams and the four usual layouts: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 One application, set up differently on each server. Its roles are in
 `DATA_DIR/server.json` (`{"roles": [...]}`), set on the settings page ("this

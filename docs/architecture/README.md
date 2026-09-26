@@ -22,7 +22,8 @@ python overview.py ../overview
 python render_png.py "../*.svg"
 ```
 
-I percorsi di icone e logo sono relativi alla radice del progetto; si cambiano con
+Le icone (`icone-per diagrammi/tabler-outline/`) non sono nel repository: per
+rigenerare servono lì o in `PD_ICONS`. I percorsi di icone e logo sono relativi alla radice del progetto; si cambiano con
 `PD_ICONS` e `PD_LOGHI`. `lib.py` contiene colori, componenti (server, moduli,
 frecce, legenda) e l'incorporamento dei font ridotti ai soli glifi usati.
 

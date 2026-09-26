@@ -10,7 +10,7 @@ from fontTools import subset
 
 import os as _os
 # Percorsi relativi alla radice del progetto parity-deriva (questo file sta in
-# "Claude outputs/diagrammi-architettura/sorgenti/"); si possono cambiare con le
+# docs/architecture/sorgenti/); si possono cambiare con le
 # variabili d'ambiente PD_ICONS e PD_LOGHI.
 _ROOT = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", ".."))
 ICONS = _os.environ.get("PD_ICONS", _os.path.join(_ROOT, "icone-per diagrammi", "tabler-outline"))
