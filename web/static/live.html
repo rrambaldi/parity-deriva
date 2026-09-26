@@ -62,9 +62,20 @@
     <label>gruppo <select id="chart-group"></select></label>
     <label>candele di <select id="chart-feed"></select></label>
     <label><input type="checkbox" id="chart-follow" checked> segui</label>
+    <span id="chart-ranges">
+      <button type="button" data-range="1h">1h</button>
+      <button type="button" data-range="4h">4h</button>
+      <button type="button" data-range="1D">1D</button>
+      <button type="button" data-range="all">all</button>
+    </span>
+    <button type="button" id="chart-fit" data-icon="expand" hidden>fit prices</button>
+    <span id="chart-keys" class="hint" title="wheel: zoom · drag: pan · drag an axis: stretch it · double click the prices: fit them · shift + drag: measure · ctrl + drag: zoom onto a box · shift + ← →: pan · + −: zoom · home, end: either end · f: fit the prices · esc: let go">gestures</span>
     <span id="chart-hover" class="hint"></span>
   </div>
-  <canvas id="live-chart" height="380"></canvas>
+  <div class="chart-stack">
+    <canvas id="live-chart" height="380"></canvas>
+    <canvas id="live-over" class="over" aria-hidden="true"></canvas>
+  </div>
   <canvas id="live-skew" height="120"></canvas>
 </section>
 

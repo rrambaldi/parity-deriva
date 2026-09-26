@@ -7,7 +7,7 @@ a client certificate in the user's browser never reaches it; what they all
 speak is OAuth 2.1 with dynamic client registration (RFC 7591) and PKCE.
 This is the smallest authorization server that satisfies them:
 
-* **the secret** is made on the settings page and shown once. It is the
+* **the secret** is made on the settings page, which can show it again. It is the
   password of the consent page, and a client that takes a fixed header -
   Cursor, VS Code, a CLI - sends it as `Authorization: Bearer <secret>`.
 * **register** takes any client, as the MCP specification expects. A client
@@ -16,7 +16,8 @@ This is the smallest authorization server that satisfies them:
 * **token** trades the code, with its PKCE verifier, for an access token of
   a day and a refresh token of sixty, rotated on every use.
 
-Only hashes are kept, in DATA_DIR/mcp.json: a copy of the file lets nobody in.
+Hashes are kept in DATA_DIR/mcp.json (0600), but for the secret itself, so
+the settings page can show it again: a copy of the file lets its holder in.
 A new secret throws every token away.
 """
 
@@ -82,6 +83,7 @@ class Authority(object):
 		except (OSError, ValueError):
 			state = {}
 		state.setdefault('secret', None)
+		state.setdefault('plain', None)
 		state.setdefault('clients', {})
 		state.setdefault('tokens', {})
 		return state
@@ -109,14 +111,19 @@ class Authority(object):
 		return {'secret': state['secret'] is not None, 'clients': sorted(names)}
 
 	def newSecret(self):
-		"""A new secret, returned once; every token given so far stops working."""
+		"""A new secret; every token given so far stops working."""
 		secret = secrets.token_urlsafe(32)
 		with self.lock:
 			state = self.read()
-			state['secret'] = digest(secret)
+			state['secret'], state['plain'] = digest(secret), secret
 			state['tokens'] = {}
 			self.write(state)
 		return secret
+
+	def shownSecret(self):
+		"""The secret, for the settings page; None when there is none, or it
+		was made before it was kept."""
+		return self.read()['plain']
 
 	def disconnect(self):
 		"""Every token goes; the secret stays."""

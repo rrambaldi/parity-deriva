@@ -126,17 +126,28 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
 <section id="mcp-panel">
   <h2 class="panel-title">AI assistants (MCP)</h2>
   <div id="mcp-state"></div>
+  <div id="mcp-address">
+    <span>connector address</span>
+    <code id="mcp-url"></code>
+    <button type="button" id="mcp-url-copy" data-icon="copy">copy</button>
+  </div>
   <ol id="mcp-how">
-    <li>make a token: it is shown once, keep it somewhere safe</li>
+    <li>make a token, or show the one there is</li>
     <li>claude.ai, Claude Desktop, ChatGPT, Gemini: add a custom connector with
-        the address <code id="mcp-url"></code> - the page it opens asks for the token</li>
+        the address above - the page it opens asks for the token</li>
     <li>Cursor, VS Code, a CLI: the same address, with the header
         <code>Authorization: Bearer &lt;token&gt;</code></li>
   </ol>
   <div id="mcp-actions">
+    <button type="button" id="mcp-show" data-icon="view">show token</button>
     <button type="button" id="mcp-secret" data-icon="add">new token</button>
     <button type="button" id="mcp-disconnect" data-icon="close">disconnect all</button>
   </div>
+  <div id="mcp-token" hidden>
+    <code id="mcp-token-text"></code>
+    <button type="button" id="mcp-copy" data-icon="copy">copy</button>
+  </div>
+  <p id="mcp-note" role="status"></p>
   <!-- a strategy's file, saved with download in its code's dialog: back as a
        draft, through the same checks as an assistant's -->
   <div id="mcp-files">
@@ -146,11 +157,6 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
     <button type="button" id="mcp-import" data-icon="upload">import as drafts</button>
     <button type="button" id="draft-format-open" data-icon="list">draft example</button>
   </div>
-  <div id="mcp-token" hidden>
-    <code id="mcp-token-text"></code>
-    <button type="button" id="mcp-copy" data-icon="copy">copy</button>
-  </div>
-  <p id="mcp-note" role="status"></p>
   <table id="mcp-strategies" hidden>
     <thead><tr><th>strategy</th><th>state</th><th>client</th><th>submitted</th><th>description</th><th></th></tr></thead>
     <tbody id="mcp-rows"></tbody>

@@ -375,6 +375,12 @@ section {
 #mcp-state, #mcp-note { color: var(--text-3); margin: 4px 0 6px; }
 #mcp-note { white-space: pre-line; }
 #mcp-how code, #mcp-token code { overflow-wrap: anywhere; }
+/* the address a connector is given: the one thing to copy, so it stands out */
+#mcp-address { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin: 10px 0 12px;
+  padding: 10px 12px; background: var(--raised); border: 1px solid var(--accent); border-left-width: 4px; border-radius: var(--radius-s); }
+#mcp-address span { color: var(--text-3); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: .04em; flex-basis: 100%; }
+#mcp-address code { font-family: var(--font-mono); font-size: var(--fs-title); font-weight: 600; color: var(--accent-text);
+  overflow-wrap: anywhere; user-select: all; flex: 1 1 16em; }
 #mcp-actions, #mcp-files, #mcp-token { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }
 /* the buttons on the line of the file box, not on the middle of its label too */
 #mcp-files { align-items: flex-end; }
@@ -427,6 +433,16 @@ canvas {
 /* the price chart is draggable, and a crosshair does not say so. app.js
    swaps this for 'grabbing' while a drag is running. */
 #chart { cursor: grab; }
+/* the layer app.js and livechart.js draw the crosshair, a measure and a zoom
+   box on: over the chart, its size, letting the pointer through to it */
+.chart-stack { position: relative; }
+.chart-stack canvas.over { position: absolute; inset: 0; pointer-events: none; background: transparent; border-color: transparent; }
+/* the whole run under the chart (drawNav in app.js) */
+#chart-nav { margin-top: 4px; cursor: pointer; }
+#chart-nav[hidden], #ranges[hidden] { display: none; }
+#ranges, #chart-ranges { display: inline-flex; gap: 4px; }
+#chart-tools #ranges button, #chart-ranges button { margin-left: 0; padding: 0 8px; }
+#chart-keys { cursor: help; text-decoration: underline dotted; }
 
 /* ------------------------------------------------------------ legend */
 

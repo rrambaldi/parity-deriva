@@ -43,6 +43,60 @@ function dashSample(dash) {
 }
 
 /*
+ * The candle charts' shared pieces - app.js on the run page, livechart.js on
+ * the live one - so the two answer the same keys and tag their axes alike.
+ */
+
+// A label in a filled box: the crosshair's price on the price axis ('left':
+// right edge at x, middle at y), its time on the time axis ('bottom': middle
+// at x, top at y), a measure by the pointer ('at': top left corner at x, y).
+// Kept inside the canvas, whichever side it would have run off.
+function axisTag(context, pal, text, x, y, side, fill) {
+  context.font = '11px ' + pal.mono;
+  const w = context.measureText(text).width + 10, h = 17;
+  const cw = context.canvas.clientWidth, ch = context.canvas.clientHeight;
+  let left = side === 'left' ? x - w : side === 'bottom' ? x - w / 2 : x;
+  let top = side === 'left' ? y - h / 2 : y;
+  left = Math.max(0, Math.min(cw - w, left));
+  top = Math.max(0, Math.min(ch - h, top));
+  context.fillStyle = fill || pal.text;
+  context.fillRect(left, top, w, h);
+  context.fillStyle = pal.panel;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(text, left + w / 2, top + h / 2 + 0.5);
+}
+
+// The chart's keys, the same on both pages. Shift and the arrows pan: the
+// arrows on their own already walk the runs and the trades on the run page.
+// Nothing is taken while a field has the focus or a dialog is open.
+function chartKey(event) {
+  if (event.ctrlKey || event.altKey || event.metaKey) return null;
+  if (event.target.closest && event.target.closest('input, select, textarea, button, dialog')) return null;
+  if (document.querySelector('dialog[open]')) return null;
+  if (event.shiftKey && event.key === 'ArrowLeft') return 'left';
+  if (event.shiftKey && event.key === 'ArrowRight') return 'right';
+  if (event.key === '+' || event.key === '=') return 'in';
+  if (event.key === '-' || event.key === '_') return 'out';
+  if (event.key === 'Home') return 'home';
+  if (event.key === 'End') return 'end';
+  if (event.key === 'f' || event.key === 'F') return 'fit';
+  return null;
+}
+
+// What a shift-drag measured from a to b, each {ms, price}: the move in pips
+// and in percent, the bars it took (of the timeframe drawn, when it is known)
+// and the time
+function measured(a, b, pip, bars, timeframe) {
+  const move = b.price - a.price, sign = move < 0 ? '-' : '+';
+  const minutes = Math.round(Math.abs(b.ms - a.ms) / 60000);
+  const time = [[Math.floor(minutes / 1440), 'd'], [Math.floor(minutes % 1440 / 60), 'h'], [minutes % 60, 'm']]
+    .filter(([n]) => n).map(([n, unit]) => n + unit).join(' ') || '0m';
+  return `${sign}${Math.abs(move / pip).toFixed(1)} pips · ${sign}${Math.abs(move / a.price * 100).toFixed(2)}%`
+    + ` · ${bars} ${timeframe ? timeframe + ' ' : ''}bars · ${time}`;
+}
+
+/*
  * A parameter's value as the tables print it: the form's switches, 0 or 1
  * on the wire, as Y and N (the grid's own y and n boxes, sim.html), and an
  * empty one as none - the strategy's own.

@@ -1241,6 +1241,8 @@ def route(handler, method, path, query):
 			return reply(handler, 403, {'error': "missing X-Parity-Deriva header"})
 		if path == '/api/mcp/secret':
 			return reply(handler, 200, {'secret': authority.newSecret()})
+		if path == '/api/mcp/secret/show':
+			return reply(handler, 200, {'secret': authority.shownSecret()})
 		if path == '/api/mcp/disconnect':
 			authority.disconnect()
 			return reply(handler, 200, status(handler.service))

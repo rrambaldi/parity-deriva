@@ -331,8 +331,11 @@ class MCPTest(StoreCase):
 		self.assertNotIn('EVERY-THIRD 1', ledger.STRATEGIES)
 		self.assertNotIn('EVERY-THIRD 1', [s['name'] for s in json.loads(raw)['strategies']])
 
-		# a new secret throws every token away
-		self.service.oauth.newSecret()
+		# a new secret throws every token away, and the page can show it again
+		made = self.service.oauth.newSecret()
+		status, raw, _ = self.http('/api/mcp/secret/show', {}, {'X-Parity-Deriva': '1'})
+		self.assertEqual((status, json.loads(raw)), (200, {'secret': made}))
+		self.assertEqual(self.http('/api/mcp/secret/show', {})[0], 403)
 		self.assertEqual(self.http('/mcp', {'jsonrpc': '2.0', 'id': 1, 'method': 'ping'},
 								   {'Authorization': 'Bearer %s' % self.bearer})[0], 401)
 

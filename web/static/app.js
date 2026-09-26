@@ -23,6 +23,10 @@ const LEVEL_NEAR = 0.01;   // share of the run's range two swings share a line a
 const MIN_BARS = 8;        // the closest the wheel will zoom
 const ZOOM_STEP = 1.25;    // bars gained or lost per notch of the wheel
 const PAN_SLOP = 4;        // pixels of drag that stop counting as a click
+const AXIS_DRAG = 150;     // pixels of drag on an axis that stretch it e-fold
+const BOX_MIN = 8;         // pixels a zoom box needs either way to count
+const NAV_EDGE = 6;        // pixels either side of the navigator's box that take its edge
+const CHART_H = 420;       // the price chart's height, which the layer over it shares
 const AXIS = { left: 66, right: 14, top: 12, bottom: 26 };
 // the service's own ceiling on a window (web/service.py MAX_CANDLES): asking
 // for more is refused, so the ladder does not ask
@@ -31,9 +35,16 @@ const MAX_FETCH = 5000;
 const state = {
   data: null,        // the last backtest payload
   view: null,        // {from, to} indices into data.candles, or null for all
+  scale: null,       // {high, low} once the prices are stretched by hand, or null to fit the bars
+  range: null,       // the prices last drawn: where a stretch or a pan starts from
+  pointer: null,     // {x, y} in the chart's own pixels while the pointer is over the plot
+  measure: null,     // {a, b}, each {ms, price}, while a shift-drag measure is on show
+  want: null,        // [fromMs, toMs] for tune() to fit exactly, from showTimes()
+  asked: 0,          // retune()s so far: a series that comes back after a newer one was asked is dropped
   selected: null,    // index into data.trades
   hover: null,       // index into data.candles
   decimals: 5,
+  quoted: 5,         // the decimals the broker quotes, which a pip is ten ticks of: see pipSize()
   about: {},         // strategy -> what it says it does, from /api/stores
   levels: true,      // draw the swing levels, toggled by the button
   slope: 0,          // 0 = no shading, else the threshold's place in the list
@@ -52,6 +63,18 @@ const $ = (id) => document.getElementById(id);
 
 const canvas = $('chart');
 const ctx = canvas.getContext('2d');
+
+// The crosshair, a measure and a zoom box are drawn on a canvas of their own
+// over the chart, so following the pointer never redraws seventeen thousand
+// candles: see drawOver().
+const over = $('chart-over');
+const octx = over.getContext('2d');
+
+// The whole run under the chart, with the stretch on show boxed: see drawNav().
+const NAV_H = 44;
+const NAV_AXIS = { left: AXIS.left, right: AXIS.right, top: 4, bottom: 4 };
+const navCanvas = $('chart-nav');
+const nctx = navCanvas.getContext('2d');
 
 // The capital chart's own axis. A wider left margin than the price chart's:
 // a balance carries its whole starting figure plus the decimals the moves
@@ -83,23 +106,26 @@ const pctx = panelCanvas.getContext('2d');
  * What one pip of the instrument on screen is, as a price difference.
  *
  * Ten ticks, which is the rule lib/utils.pipSize uses on the other side - and
- * read off the same precision the prices are drawn with, so the page needs no
- * table of its own to fall out of step with.
+ * read off the prices the broker quoted, so the page needs no table of its own
+ * to fall out of step with. Off the ask and the bid, not off the candles: a
+ * candle is their middle, and the middle of 1.17136 and 1.17126 has a sixth
+ * decimal the instrument does not, which made every pip here ten times too
+ * many.
  */
 function pipSize() {
   // a division rather than a negative power: Math.pow(10, -4) is
   // 0.00009999999999999999, and a pip that is not the number it is named
   // after turns every count into a rounding story
-  return 1 / Math.pow(10, state.decimals - 1);
+  return 1 / Math.pow(10, state.quoted - 1);
 }
 
-function decimalsOf(candles) {
+function decimalsOf(candles, column = 4) {
   // Read the precision off the data rather than off a table: the store holds
   // what the broker served, and a chart that rounds harder than the data is a
   // chart that hides the tick a level was reached by.
   let d = 0;
   for (let i = 0; i < candles.length && d < 6; i++) {
-    const text = String(candles[i][4]);
+    const text = String(candles[i][column]);
     const dot = text.indexOf('.');
     if (dot >= 0) d = Math.max(d, text.length - dot - 1);
   }
@@ -235,7 +261,7 @@ function setViewByTime(fromMs, toMs) {
   const to = barAt(toMs) === null ? list.length - 1 : barAt(toMs);
   state.view = (from <= 0 && to >= list.length - 1)
     ? null : { from, to: Math.max(from + MIN_BARS - 1, to) };
-  $('reset').hidden = state.view === null && !state.series;
+  showReset();
 }
 
 /*
@@ -276,13 +302,15 @@ function autoPick(win) {
  */
 function retune(now) {
   if (!state.data || !state.data.candles.length) return;
+  state.asked++;
   clearTimeout(state.tuning);
   state.tuning = setTimeout(tune, now ? 0 : 140);
 }
 
 async function tune() {
-  const win = viewTimes();
+  const win = state.want || viewTimes();
   if (!win || state.fetching) return;
+  state.want = null;
   const wanted = state.detail === 'auto' ? autoPick(win) : state.detail;
 
   if (wanted === runAt()) {
@@ -302,12 +330,18 @@ async function tune() {
   while (pad > 0 && (span + 2 * pad) * density(row) > MAX_FETCH) pad = Math.floor(pad / 2);
 
   state.fetching = true;
+  const asked = state.asked;
+  let stale = false;
   try {
     const query = new URLSearchParams({
       instrument: state.data.instrument, granularity: wanted,
       from: iso(win[0] - pad), to: iso(win[1] + pad) });
     const answer = await ask('api/candles?' + query.toString());
     if (!answer.candles.length) return;
+    // the chart was moved while these were on their way: fitting them to the
+    // window they were asked for would snap it back, so the newer one is
+    // asked instead
+    if (asked !== state.asked) { stale = true; return; }
     state.series = { granularity: wanted, candles: answer.candles,
                      from: answer.candles[0][0],
                      to: answer.candles[answer.candles.length - 1][0] };
@@ -320,6 +354,7 @@ async function tune() {
     message(`${wanted}: ${error.message}`, 'info');
   } finally {
     state.fetching = false;
+    if (stale) retune(true);
   }
 }
 
@@ -501,13 +536,16 @@ function fitCanvas(cv, context, height) {
 }
 
 function resize() {
-  return fitCanvas(canvas, ctx, 420);
+  return fitCanvas(canvas, ctx, CHART_H);
 }
 
 function draw() {
   const p = palette();
   const { width, height } = resize();
+  fitCanvas(over, octx, height);
   ctx.clearRect(0, 0, width, height);
+  $('ranges').hidden = !(state.data && state.data.candles.length);
+  drawNav();
   if (!state.data || !state.data.candles.length) return;
 
   const view = visible();
@@ -517,7 +555,8 @@ function draw() {
   // is zoomed. They used to join it only when it was, so a target outside the
   // whole run's high and low - which is every target that was never reached -
   // was drawn off the canvas and read as a target the page had not drawn
-  const range = scales(view, levels(trade));
+  const range = state.scale || scales(view, levels(trade));
+  state.range = range;
 
   const plotW = width - AXIS.left - AXIS.right;
   const plotH = height - AXIS.top - AXIS.bottom;
@@ -531,6 +570,12 @@ function draw() {
   drawPanel();
 
   grid(width, height, range, y, p);
+  // prices stretched by hand put bars above and below the plot: they stop at
+  // its edge instead of running over the axes
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(AXIS.left, AXIS.top, plotW, plotH);
+  ctx.clip();
   shade(view, plotH, step, p);
   curves(view, x, y, p);
   if (state.levels) supports(view, x, y, plotW, n, range, p);
@@ -553,7 +598,240 @@ function draw() {
   if (trade) setupBox(trade, view, x, y, n, step, p);
   arrows(view, x, y, step, p);
   if (trade) overlay(trade, view, x, y, plotW, n, step, p);
+  ctx.restore();
   times(view, x, height, n, step, p);
+  drawOver();
+  // the capital below boxes the same stretch
+  drawEquity();
+}
+
+/* ------------------------------------------------------ over the chart */
+
+// the plot as draw() last laid it out, for the pointer's side of things
+function plot() {
+  const view = visible(), r = state.range;
+  const plotW = canvas.clientWidth - AXIS.left - AXIS.right, plotH = CHART_H - AXIS.top - AXIS.bottom;
+  const step = plotW / view.candles.length;
+  return { view, r, plotW, plotH, step,
+           y: (v) => AXIS.top + (r.high - v) / (r.high - r.low) * plotH,
+           priceAt: (py) => r.high - (py - AXIS.top) / plotH * (r.high - r.low),
+           indexAt: (px) => view.from + (px - AXIS.left) / step };
+}
+
+// The pointer in the chart's own pixels, the ones draw() works in. The height
+// is scaled: the canvas is drawn CHART_H high and shown inside its border.
+function local(event) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: event.clientX - rect.left - canvas.clientLeft,
+           y: (event.clientY - rect.top - canvas.clientTop) * CHART_H / canvas.clientHeight };
+}
+
+// the bar and the price under the pointer, as a measure keeps them: by time
+// and by price, so it stays on its bars through a zoom or a pan
+function dataAt(event) {
+  const g = plot(), at = local(event);
+  const i = Math.max(0, Math.min(g.view.candles.length - 1, Math.floor(g.indexAt(at.x) - g.view.from)));
+  return { ms: g.view.candles[i][0], price: g.priceAt(at.y) };
+}
+
+function measureOf(m) {
+  return measured(m.a, m.b, pipSize(), Math.abs((barAt(m.b.ms) ?? 0) - (barAt(m.a.ms) ?? 0)), drawnAt());
+}
+
+/*
+ * The layer over the chart: the crosshair with its price and its time tagged
+ * on the axes, a measure, a zoom box. Redrawn on every move of the pointer,
+ * which the chart under it is not.
+ */
+function drawOver() {
+  octx.clearRect(0, 0, canvas.clientWidth, CHART_H);
+  if (!state.data || !state.data.candles.length || !state.range) return;
+  const p = palette(), g = plot();
+  const xAt = (ms) => AXIS.left + ((barAt(ms) ?? -1) - g.view.from + 0.5) * g.step;
+  const m = state.measure, box = pan && pan.box, at = state.pointer;
+  const colour = m && m.b.price < m.a.price ? p.down : p.up;
+  octx.save();
+  octx.beginPath();
+  octx.rect(AXIS.left, AXIS.top, g.plotW, g.plotH);
+  octx.clip();
+  if (m) {
+    const x1 = xAt(m.a.ms), x2 = xAt(m.b.ms), y1 = g.y(m.a.price), y2 = g.y(m.b.price);
+    octx.fillStyle = octx.strokeStyle = colour;
+    octx.globalAlpha = 0.12;
+    octx.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.max(1, Math.abs(x2 - x1)), Math.max(1, Math.abs(y2 - y1)));
+    octx.globalAlpha = 0.8;
+    octx.lineWidth = 1;
+    octx.beginPath();
+    octx.moveTo(x1, y1);
+    octx.lineTo(x2, y2);
+    octx.stroke();
+  }
+  if (box) {
+    octx.strokeStyle = octx.fillStyle = p.text;
+    octx.globalAlpha = 0.06;
+    octx.fillRect(Math.min(box.x0, box.x1), Math.min(box.y0, box.y1), Math.abs(box.x1 - box.x0), Math.abs(box.y1 - box.y0));
+    octx.globalAlpha = 0.7;
+    octx.setLineDash([4, 3]);
+    octx.strokeRect(Math.min(box.x0, box.x1) + 0.5, Math.min(box.y0, box.y1) + 0.5,
+                    Math.abs(box.x1 - box.x0), Math.abs(box.y1 - box.y0));
+  }
+  let i = null;
+  if (at) {
+    // the upright on the middle of the bar under the pointer, the level at the pointer
+    i = Math.max(0, Math.min(g.view.candles.length - 1, Math.floor((at.x - AXIS.left) / g.step)));
+    const cx = Math.round(AXIS.left + (i + 0.5) * g.step) + 0.5, cy = Math.round(at.y) + 0.5;
+    octx.strokeStyle = p.text;
+    octx.globalAlpha = 0.45;
+    octx.lineWidth = 1;
+    octx.setLineDash([3, 3]);
+    octx.beginPath();
+    octx.moveTo(cx, AXIS.top);
+    octx.lineTo(cx, AXIS.top + g.plotH);
+    octx.moveTo(AXIS.left, cy);
+    octx.lineTo(AXIS.left + g.plotW, cy);
+    octx.stroke();
+  }
+  octx.restore();
+  if (at) {
+    axisTag(octx, p, price(g.priceAt(at.y)), AXIS.left - 2, at.y, 'left');
+    axisTag(octx, p, stamp(g.view.candles[i][0]), AXIS.left + (i + 0.5) * g.step, CHART_H - AXIS.bottom + 3, 'bottom');
+  }
+  if (m) axisTag(octx, p, measureOf(m), xAt(m.b.ms) + 10, g.y(m.b.price) + 8, 'at', colour);
+}
+
+/*
+ * A zoom box let go of: the bars across it and the prices up it, set by hand
+ * the way the axes set them. One too small to have been meant is dropped.
+ */
+function boxZoom(box) {
+  pan.box = null;
+  if (Math.abs(box.x1 - box.x0) < BOX_MIN || Math.abs(box.y1 - box.y0) < BOX_MIN) return;
+  const g = plot();
+  const a = g.indexAt(Math.min(box.x0, box.x1)), b = g.indexAt(Math.max(box.x0, box.x1));
+  state.scale = { high: g.priceAt(Math.min(box.y0, box.y1)), low: g.priceAt(Math.max(box.y0, box.y1)) };
+  zoomTo(a, b - a);
+}
+
+/*
+ * A stretch of time by its two ends, on whichever bars can hold it: the finer
+ * series on show when it is inside it, the run's own otherwise. The bars that
+ * suit it are then asked for with the stretch itself, and not with the one
+ * MIN_BARS of the coarser bars may have widened it to - a day on a four hour
+ * run is a day, on finer bars. Not while a drag is running: its mouseup asks.
+ */
+function showTimes(fromMs, toMs, dragging) {
+  const s = state.series;
+  if (s && (fromMs < s.from || toMs > s.to)) state.series = null;
+  setViewByTime(fromMs, toMs);
+  draw();
+  if (dragging) return;
+  state.want = [fromMs, toMs];
+  retune(true);
+}
+
+// what the chart keys do (chartKey() in menu.js)
+function keyed(key) {
+  const view = visible(), span = view.to - view.from + 1;
+  if (key === 'left' || key === 'right') return zoomTo(view.from + (key === 'left' ? -span : span) / 4, span);
+  if (key === 'in' || key === 'out') {
+    const wanted = span * (key === 'out' ? ZOOM_STEP : 1 / ZOOM_STEP);
+    return zoomTo(view.from + (span - wanted) / 2, wanted);
+  }
+  if (key === 'fit') { state.scale = null; showReset(); return draw(); }
+  // either end of the run, and not of the finer bars fetched around the view
+  const run = state.data.candles, [a, b] = viewTimes();
+  if (key === 'home') showTimes(run[0][0], run[0][0] + (b - a));
+  if (key === 'end') showTimes(run[run.length - 1][0] - (b - a), run[run.length - 1][0]);
+}
+
+/* ------------------------------------------------------- the navigator */
+
+/*
+ * The whole run under the chart, as its capital - or its closes, for a run
+ * with too few trades to draw one - with the stretch on show boxed. Dragging
+ * the box moves the chart, its edges widen or narrow it, a press elsewhere
+ * takes the chart there: across a run of ten years in one move.
+ */
+function navWindow() {
+  const last = state.data.candles.length - 1;
+  const win = (state.view || state.series) && viewTimes();
+  if (!win) return [0, last];
+  return [runBarAt(win[0]) ?? 0, runBarAt(win[1]) ?? last];
+}
+
+function drawNav() {
+  const has = !!(state.data && state.data.candles.length);
+  navCanvas.hidden = !has;
+  if (!has) return;
+  const p = palette();
+  const { width, height } = fitCanvas(navCanvas, nctx, NAV_H);
+  nctx.clearRect(0, 0, width, height);
+  const run = state.data.candles, n = run.length;
+  const plotW = width - NAV_AXIS.left - NAV_AXIS.right, plotH = height - NAV_AXIS.top - NAV_AXIS.bottom;
+  const x = (i) => NAV_AXIS.left + (i + 0.5) * plotW / n;
+  const points = equityPoints(), capital = points.length >= 2;
+  // a loop and not Math.max(...): ten years of five minute closes are more
+  // arguments than a call takes
+  let high = -Infinity, low = Infinity;
+  for (const v of capital ? points.map((q) => q[1]) : run.map((c) => c[4])) {
+    if (v > high) high = v;
+    if (v < low) low = v;
+  }
+  if (high === low) { high += 0.5; low -= 0.5; }
+  const y = (v) => NAV_AXIS.top + (high - v) / (high - low) * plotH;
+  nctx.lineWidth = 1;
+  nctx.strokeStyle = !capital ? p.text3 : points[points.length - 1][1] >= points[0][1] ? p.up : p.down;
+  nctx.beginPath();
+  if (capital) {
+    // a step, as drawEquity() draws it
+    nctx.moveTo(x(points[0][0]), y(points[0][1]));
+    for (let i = 1; i < points.length; i++) {
+      nctx.lineTo(x(points[i][0]), y(points[i - 1][1]));
+      nctx.lineTo(x(points[i][0]), y(points[i][1]));
+    }
+    nctx.lineTo(width - NAV_AXIS.right, y(points[points.length - 1][1]));
+  } else {
+    // a point a pixel is all a line this narrow can show
+    const every = Math.max(1, Math.floor(n / plotW));
+    nctx.moveTo(x(0), y(run[0][4]));
+    for (let i = every; i < n; i += every) nctx.lineTo(x(i), y(run[i][4]));
+  }
+  nctx.stroke();
+  // what is not on show, dimmed; what is, boxed
+  const [a, b] = navWindow();
+  const left = NAV_AXIS.left + a * plotW / n, right = NAV_AXIS.left + (b + 1) * plotW / n;
+  nctx.fillStyle = p.panel;
+  nctx.globalAlpha = 0.65;
+  nctx.fillRect(NAV_AXIS.left, 0, left - NAV_AXIS.left, height);
+  nctx.fillRect(right, 0, width - NAV_AXIS.right - right, height);
+  nctx.globalAlpha = 1;
+  nctx.strokeStyle = p.text2;
+  nctx.lineWidth = 1.5;
+  nctx.strokeRect(left, 1.5, Math.max(2, right - left), height - 3);
+}
+
+// the navigator's pointer as a bar of the run, and which part of the box it is on
+function navBar(event) {
+  const rect = navCanvas.getBoundingClientRect();
+  return (event.clientX - rect.left - navCanvas.clientLeft - NAV_AXIS.left)
+    / (navCanvas.clientWidth - NAV_AXIS.left - NAV_AXIS.right) * state.data.candles.length;
+}
+
+function navPart(event) {
+  const [a, b] = navWindow();
+  const k = (navCanvas.clientWidth - NAV_AXIS.left - NAV_AXIS.right) / state.data.candles.length;
+  const px = navBar(event) * k;
+  if (Math.abs(px - a * k) <= NAV_EDGE) return 'from';
+  if (Math.abs(px - (b + 1) * k) <= NAV_EDGE) return 'to';
+  return px > a * k && px < (b + 1) * k ? 'move' : 'out';
+}
+
+// bars a to b of the run on the chart, the box kept inside the run
+function navShow(a, b, dragging) {
+  const run = state.data.candles, last = run.length - 1;
+  if (a < 0) { b -= a; a = 0; }
+  if (b > last) { a = Math.max(0, a - (b - last)); b = last; }
+  showTimes(run[Math.round(a)][0], run[Math.round(b)][0], dragging);
 }
 
 function grid(width, height, range, y, p) {
@@ -1109,6 +1387,13 @@ function drawEquity() {
     ectx.fillText(amount(v, decimals), EQ_AXIS.left - 8, py);
   }
 
+  // the stretch the price chart has on show, when it is not the whole run
+  if (state.view || state.series) {
+    const [a, b] = navWindow();
+    ectx.fillStyle = p.span;
+    ectx.fillRect(EQ_AXIS.left + a * step, EQ_AXIS.top, Math.max(1, (b - a + 1) * step), plotH);
+  }
+
   // where it started, so profit and loss are read against a line rather than
   // against the axis labels
   ectx.strokeStyle = p.text3;
@@ -1603,6 +1888,7 @@ function select(index) {
     from: Math.max(0, from - PADDING_BARS),
     to: Math.min(last, to + PADDING_BARS),
   };
+  state.scale = null;
 
   $('reset').hidden = false;
   $('chart-trade').textContent = tradeLine(trade);
@@ -1640,16 +1926,40 @@ function zoomTo(from, span) {
   span = Math.max(MIN_BARS, Math.min(Math.round(span), count));
   from = Math.max(0, Math.min(Math.round(from), count - span));
   state.view = span >= count ? null : { from, to: from + span - 1 };
-  $('reset').hidden = state.view === null && !state.series;
+  showReset();
   draw();
   // and then, once the wheel stops, the bars themselves may change: see
   // retune(). The chart is redrawn first, so the zoom never waits on a
-  // request to feel like it happened
-  retune();
+  // request to feel like it happened. Not in the middle of a drag: new bars
+  // would renumber the ones the drag started from, and the mouseup asks
+  if (!pan) retune();
+}
+
+function showReset() {
+  $('reset').hidden = state.view === null && !state.series && !state.scale;
+}
+
+// the prices stretched by hand: they stay as set while the bars move under
+// them, until a double click on the price axis or the reset gives them back
+function setScale(high, low) {
+  state.scale = { high, low };
+  showReset();
+  draw();
+}
+
+// which part of the chart a pointer is on: the price axis down the left, the
+// time axis along the bottom, or the plot
+function zone(event) {
+  const rect = canvas.getBoundingClientRect();
+  if (event.clientX - rect.left < AXIS.left) return 'price';
+  if (event.clientY - rect.top > rect.height - AXIS.bottom) return 'time';
+  return 'plot';
 }
 
 function resetView() {
   state.view = null;
+  state.scale = null;
+  state.measure = null;
   state.selected = null;
   // back to the bars the strategy read. "The whole range" at five minute
   // detail is not the whole range, it is a refusal from the service
@@ -1771,6 +2081,9 @@ async function run(fields, extra) {
 function show(data) {
   state.data = data;
   state.decimals = decimalsOf(data.candles);
+  // the ask high (see scales()), where a store has one
+  state.quoted = data.candles.length && data.candles[0][5] != null
+    ? decimalsOf(data.candles, 5) : state.decimals;
   state.view = null;
   state.selected = null;
   state.page = 0;
@@ -1857,7 +2170,7 @@ $('trade-rows').addEventListener('click', (event) => {
  */
 canvas.addEventListener('click', (event) => {
   if (dragged) { dragged = false; return; }
-  if (!state.data || !state.data.trades.length) return;
+  if (!state.data || !state.data.trades.length || zone(event) !== 'plot') return;
   const bar = barUnder(event.clientX);
   let best = null, distance = Infinity;
   state.data.trades.forEach((trade, i) => {
@@ -1927,6 +2240,16 @@ $('levels').addEventListener('click', () => {
 canvas.addEventListener('wheel', (event) => {
   if (!state.data || !state.data.candles.length) return;
   event.preventDefault();
+  // over the price axis, or with shift: the prices stretch about the one
+  // under the pointer and the bars stay. Shift turns the wheel sideways in
+  // some browsers, hence either delta
+  if (event.shiftKey || zone(event) === 'price') {
+    const r = state.range, rect = canvas.getBoundingClientRect();
+    const at = r.high - (event.clientY - rect.top - AXIS.top)
+      / (rect.height - AXIS.top - AXIS.bottom) * (r.high - r.low);
+    const k = (event.deltaY || event.deltaX) > 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+    return setScale(at + (r.high - at) * k, at - (at - r.low) * k);
+  }
   const view = visible();
   const span = view.to - view.from + 1;
   const pivot = barUnder(event.clientX);
@@ -1937,31 +2260,61 @@ canvas.addEventListener('wheel', (event) => {
   zoomTo(pivot - (pivot - view.from) / span * wanted, wanted);
 }, { passive: false });
 
-// Dragging sideways moves the window. A drag under PAN_SLOP pixels is a click
-// and is left to the handler above, which is what picks a trade.
+// Dragging the plot moves the window, and the prices too once they are set by
+// hand; dragging an axis stretches it. A drag under PAN_SLOP pixels is a
+// click and is left to the handler above, which is what picks a trade.
 let pan = null;
 canvas.addEventListener('mousedown', (event) => {
   if (!state.data || !state.data.candles.length) return;
   // otherwise the browser starts its own drag - a text selection that runs
   // out of the canvas and swallows the mousemove the pan is made of
   event.preventDefault();
-  canvas.style.cursor = 'grabbing';
-  const view = visible();
-  pan = { x: event.clientX, from: view.from, span: view.to - view.from + 1,
-          bars: (canvas.clientWidth - AXIS.left - AXIS.right)
-                / view.candles.length, moved: false };
+  const view = visible(), where = zone(event);
+  // on the plot, shift measures and ctrl (cmd on a Mac) boxes a stretch to zoom onto
+  const mode = where !== 'plot' ? where : event.shiftKey ? 'measure'
+    : (event.ctrlKey || event.metaKey) ? 'box' : 'plot';
+  pan = { where: mode, x: event.clientX, y: event.clientY, start: local(event), range: state.range,
+          from: view.from, span: view.to - view.from + 1,
+          bars: (canvas.clientWidth - AXIS.left - AXIS.right) / view.candles.length,
+          plotH: canvas.clientHeight - AXIS.top - AXIS.bottom, moved: false };
+  // a measure on show goes at the next press, whatever the press is for
+  state.measure = mode === 'measure' ? { a: dataAt(event), b: dataAt(event) } : null;
+  if (mode !== 'measure' && mode !== 'box') state.pointer = null;
+  if (mode === 'plot') canvas.style.cursor = 'grabbing';
+  drawOver();
+});
+
+// ctrl and a click is the context menu on a Mac, and here the start of a box
+canvas.addEventListener('contextmenu', (event) => { if (event.ctrlKey) event.preventDefault(); });
+
+// the price axis back to fitting the bars
+canvas.addEventListener('dblclick', (event) => {
+  if (zone(event) !== 'price' || !state.scale) return;
+  state.scale = null;
+  showReset();
+  draw();
 });
 window.addEventListener('mouseup', () => {
+  if (pan && pan.box) boxZoom(pan.box);
+  // a shift-click that never moved measured nothing, and is left a click
+  if (pan && pan.where === 'measure' && !pan.moved) state.measure = null;
   // a pan that ended may have walked out of the window that was fetched, and
   // asking for the next one is the same question the wheel asks
   if (pan && pan.moved) retune();
   pan = null;
   canvas.style.cursor = '';
+  drawOver();
 });
 
 document.addEventListener('keydown', (event) => {
   if (event.target.matches('input, select, button')) return;
-  if (event.key === 'Escape') return resetView();
+  if (event.key === 'Escape') {
+    // a zoom box half drawn is let go of, and only that
+    if (pan && pan.where === 'box') { pan = null; return drawOver(); }
+    return resetView();
+  }
+  const key = chartKey(event);
+  if (key && state.data && state.data.candles.length) { event.preventDefault(); return keyed(key); }
   if (!state.data || !state.data.trades.length) return;
   if (event.key === 'ArrowDown' || event.key === 'j') {
     event.preventDefault();
@@ -1979,11 +2332,41 @@ document.addEventListener('keydown', (event) => {
 canvas.addEventListener('mousemove', (event) => {
   if (!state.data || !state.data.candles.length) return;
   if (pan) {
-    const moved = event.clientX - pan.x;
-    if (Math.abs(moved) < PAN_SLOP && !pan.moved) return;
+    const dx = event.clientX - pan.x, dy = event.clientY - pan.y;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < PAN_SLOP && !pan.moved) return;
     pan.moved = dragged = true;
-    return zoomTo(pan.from - moved / pan.bars, pan.span);
+    if (pan.where === 'measure') {
+      state.measure.b = dataAt(event);
+      state.pointer = local(event);
+      $('chart-zoom').textContent = measureOf(state.measure);
+      return drawOver();
+    }
+    if (pan.where === 'box') {
+      const at = local(event);
+      pan.box = { x0: pan.start.x, y0: pan.start.y, x1: at.x, y1: at.y };
+      state.pointer = at;
+      return drawOver();
+    }
+    const r = pan.range;
+    if (pan.where === 'price') {
+      // down squeezes the prices together, up pulls them apart, about the middle
+      const mid = (r.high + r.low) / 2, half = (r.high - r.low) / 2 * Math.exp(dy / AXIS_DRAG);
+      return setScale(mid + half, mid - half);
+    }
+    if (pan.where === 'time') {
+      // right fewer bars, left more, the last one on the chart staying put
+      const span = pan.span * Math.exp(-dx / AXIS_DRAG);
+      return zoomTo(pan.from + pan.span - span, span);
+    }
+    if (state.scale) {
+      const shift = dy / pan.plotH * (r.high - r.low);
+      state.scale = { high: r.high + shift, low: r.low + shift };
+    }
+    return zoomTo(pan.from - dx / pan.bars, pan.span);
   }
+  canvas.style.cursor = { price: 'ns-resize', time: 'ew-resize' }[zone(event)] || '';
+  state.pointer = zone(event) === 'plot' ? local(event) : null;
+  drawOver();
   const view = visible();
   const rect = canvas.getBoundingClientRect();
   const step = (rect.width - AXIS.left - AXIS.right) / view.candles.length;
@@ -2001,6 +2384,8 @@ canvas.addEventListener('mousemove', (event) => {
 });
 
 canvas.addEventListener('mouseleave', () => {
+  state.pointer = null;
+  drawOver();
   if (state.selected === null) { $('chart-zoom').textContent = ''; return; }
   const trade = state.data.trades[state.selected];
   $('chart-zoom').textContent =
@@ -2009,6 +2394,62 @@ canvas.addEventListener('mouseleave', () => {
 });
 
 window.addEventListener('resize', () => { draw(); drawEquity(); drawLevels(); });
+
+// The stretches the buttons over the chart jump to: a day, a week, a month
+// and three, ending where the chart does - or starting where the run does,
+// when there is not that much of it before.
+const RANGES = { '1D': 864e5, '1W': 7 * 864e5, '1M': 30 * 864e5, '3M': 91 * 864e5 };
+$('ranges').addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-range]');
+  if (!button || !state.data || !state.data.candles.length) return;
+  const run = state.data.candles, d = RANGES[button.dataset.range];
+  const from = Math.max(run[0][0], viewTimes()[1] - d);
+  showTimes(from, Math.min(run[run.length - 1][0], from + d));
+});
+
+// the navigator's gestures: see drawNav()
+let navDrag = null;
+navCanvas.addEventListener('mousedown', (event) => {
+  if (!state.data || !state.data.candles.length) return;
+  event.preventDefault();
+  let [a, b] = navWindow();
+  const part = navPart(event), at = navBar(event);
+  if (part === 'out') {
+    // a press away from the box takes it there, and a drag goes on from it
+    const half = (b - a) / 2;
+    navShow(at - half, at + half, true);
+    [a, b] = navWindow();
+  }
+  navDrag = { part: part === 'out' ? 'move' : part, at, a, b };
+});
+window.addEventListener('mousemove', (event) => {
+  if (!navDrag) return;
+  const d = navBar(event) - navDrag.at;
+  let { a, b } = navDrag;
+  if (navDrag.part === 'move') { a += d; b += d; }
+  // an edge stops at the run's own, where the box would otherwise slide
+  if (navDrag.part === 'from') a = Math.max(0, Math.min(a + d, b - MIN_BARS));
+  if (navDrag.part === 'to') b = Math.min(state.data.candles.length - 1, Math.max(b + d, a + MIN_BARS));
+  navShow(a, b, true);
+});
+window.addEventListener('mouseup', () => {
+  if (!navDrag) return;
+  navDrag = null;
+  retune(true);
+});
+navCanvas.addEventListener('mousemove', (event) => {
+  if (navDrag || !state.data || !state.data.candles.length) return;
+  navCanvas.style.cursor = { from: 'ew-resize', to: 'ew-resize', move: 'grab', out: 'pointer' }[navPart(event)];
+});
+navCanvas.addEventListener('wheel', (event) => {
+  if (!state.data || !state.data.candles.length) return;
+  event.preventDefault();
+  const [a, b] = navWindow(), span = b - a + 1, at = navBar(event);
+  const wanted = span * ((event.deltaY || event.deltaX) > 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
+  const from = at - (at - a) / span * wanted;
+  navShow(from, from + wanted - 1, true);
+  retune();
+}, { passive: false });
 
 /* ------------------------------------------------------------------ write */
 
@@ -2099,8 +2540,9 @@ function walkRuns() {
   $('run-prev').addEventListener('click', () => go(-1));
   $('run-next').addEventListener('click', () => go(1));
   document.addEventListener('keydown', (event) => {
+    // shift and the arrows are the chart's pan (chartKey in menu.js)
     if (event.target.matches('input, select, textarea') || event.altKey || event.ctrlKey
-      || event.metaKey) return;
+      || event.metaKey || event.shiftKey) return;
     if (event.key === 'ArrowLeft') go(-1);
     if (event.key === 'ArrowRight') go(1);
   });

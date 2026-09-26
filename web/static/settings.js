@@ -304,6 +304,7 @@ async function showMcp(state) {
   $('mcp-state').textContent = (state.secret ? 'a token is set' : 'no token yet: make one to connect an assistant')
     + (state.clients.length ? ` \u00b7 connected: ${state.clients.join(', ')}` : '');
   $('mcp-disconnect').disabled = !state.clients.length;
+  $('mcp-show').disabled = !state.secret;
   const rows = $('mcp-rows');
   rows.textContent = '';
   mcpStrategies = Object.fromEntries(state.strategies.map((s) => [s.name, s]));
@@ -513,27 +514,57 @@ $('mcp-import').addEventListener('click', async () => {
   await showMcp();
 });
 
+// the token in its box, with its copy button, and the button to hide it
+function mcpShowToken(secret) {
+  $('mcp-token-text').textContent = secret;
+  $('mcp-token').hidden = false;
+  $('mcp-show').textContent = 'hide token';
+}
+
+async function mcpNewToken() {
+  try {
+    mcpShowToken((await post('api/mcp/secret', '{}')).secret);
+    mcpSay('copy it into the connector or the editor');
+    await showMcp();
+  } catch (error) {
+    mcpSay(String(error.message || error));
+  }
+}
+
 $('mcp-secret').addEventListener('click', async () => {
   const state = await ask('api/mcp');
-  if (state.secret && !confirm('A new token disconnects every assistant connected with the old one. Go on?')) return;
+  if (state.secret && !await askUser('A new token disconnects every assistant connected with the old one.',
+    'new token', 'add')) return;
+  await mcpNewToken();
+});
+
+// shown again on asking, hidden again on a second press; a token made before
+// the page kept them cannot be, so a new one is offered instead
+$('mcp-show').addEventListener('click', async () => {
+  if (!$('mcp-token').hidden) {
+    $('mcp-token').hidden = true;
+    $('mcp-show').textContent = 'show token';
+    return;
+  }
   try {
-    const made = await post('api/mcp/secret', '{}');
-    $('mcp-token-text').textContent = made.secret;
-    $('mcp-token').hidden = false;
-    mcpSay('the token is shown only now: copy it into the connector or the editor');
-    await showMcp();
+    const { secret } = await post('api/mcp/secret/show', '{}');
+    if (secret) { mcpShowToken(secret); mcpSay(''); return; }
+    if (await askUser('This token was made before tokens could be shown again, so it cannot be. '
+      + 'Make a new one? Every assistant connected with the old one will have to connect again.',
+      'new token', 'add')) await mcpNewToken();
   } catch (error) {
     mcpSay(String(error.message || error));
   }
 });
 
-$('mcp-copy').addEventListener('click', () => {
-  navigator.clipboard.writeText($('mcp-token-text').textContent)
-    .then(() => mcpSay('copied'), () => mcpSay('copy it by hand: the browser refused'));
-});
+const mcpCopy = (text) => navigator.clipboard.writeText(text)
+  .then(() => mcpSay('copied'), () => mcpSay('copy it by hand: the browser refused'));
+$('mcp-copy').addEventListener('click', () => mcpCopy($('mcp-token-text').textContent));
+$('mcp-url-copy').addEventListener('click', () => mcpCopy($('mcp-url').textContent));
 
 $('mcp-disconnect').addEventListener('click', async () => {
-  if (!confirm('Disconnect every assistant? Each one will have to connect again with the token.')) return;
+  if (!await askUser('Disconnect every assistant? Each one will have to connect again with the token.',
+    'disconnect all', 'close')) return;
   try {
     await showMcp(await post('api/mcp/disconnect', '{}'));
     mcpSay('disconnected');
