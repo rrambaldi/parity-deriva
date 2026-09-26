@@ -40,6 +40,7 @@
 -->
 <div id="settings-tabs" role="tablist" aria-label="settings">
   <button type="button" role="tab" id="tab-server" aria-controls="server-panel" aria-selected="true">this server</button>
+  <button type="button" role="tab" id="tab-backup" aria-controls="backup-panel" aria-selected="false" tabindex="-1">backup</button>
   <button type="button" role="tab" id="tab-data" aria-controls="data-panel" aria-selected="false" tabindex="-1">market data</button>
   <button type="button" role="tab" id="tab-quality" aria-controls="quality-panel" aria-selected="false" tabindex="-1">data quality</button>
   <button type="button" role="tab" id="tab-mcp" aria-controls="mcp-panel" aria-selected="false" tabindex="-1">AI assistants</button>
@@ -88,10 +89,19 @@
       <button type="button" id="trade-save" data-icon="add">save</button>
     </div>
   </div>
+  <p id="server-note" role="status"></p>
+</section>
+
+<!--
+  Where the old simulations go, off this disk: an S3 bucket, or a folder of a
+  Google Drive or a OneDrive through rclone (web/storage.py), and what is
+  there - every set, sent, brought here, downloaded whole.
+-->
+<section id="backup-panel" role="tabpanel" aria-labelledby="tab-backup" hidden>
+  <h2 class="panel-title">backup</h2>
   <!-- where a set's runs go off this disk (web/storage.py): an S3 bucket, or
        a folder of a Drive through rclone, tested before it is kept -->
   <div id="storage-box">
-    <h3 class="panel-title">old simulations</h3>
     <p class="dim">A set's runs - what fills the disk - can go off it, and come back by themselves
       when one is opened: "to the bucket" in the simulate page's list of sets, or scripts/cold.py
       for the old ones.</p>
@@ -158,7 +168,7 @@
       </table>
     </div>
   </div>
-  <p id="server-note" role="status"></p>
+  <p id="backup-note" role="status"></p>
 </section>
 
 <section id="data-panel" role="tabpanel" aria-labelledby="tab-data" hidden>

@@ -371,7 +371,9 @@ $('trade-save').addEventListener('click', async () => {
   } catch (error) { serverSay(error); }
 });
 
-/* where a set's runs go off this disk (api/storage, web/storage.py) */
+/* where a set's runs go off this disk (api/storage, web/storage.py): the backup tab */
+
+const backupSay = (error) => { $('backup-note').textContent = String(error.message || error); };
 
 const STORAGE = { gdrive: 'a Google Drive', onedrive: 'a OneDrive' };
 
@@ -460,7 +462,7 @@ $('storage-rows').addEventListener('click', async (event) => {
   const id = row.dataset.id;
   if (button.dataset.act === 'zip') {
     // made on the service first, then saved by the browser; a refusal stays on this page
-    $('server-note').textContent = `making the zip of ${id}…`;
+    $('backup-note').textContent = `making the zip of ${id}…`;
     try {
       const response = await fetch(`api/sweeps/${id}/zip`);
       if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || response.statusText);
@@ -469,18 +471,18 @@ $('storage-rows').addEventListener('click', async (event) => {
       link.download = `${id}.zip`;
       link.click();
       setTimeout(() => URL.revokeObjectURL(link.href), 60000);
-      $('server-note').textContent = `${id}.zip saved by the browser`;
-    } catch (error) { serverSay(error); }
+      $('backup-note').textContent = `${id}.zip saved by the browser`;
+    } catch (error) { backupSay(error); }
     return;
   }
   button.disabled = true;
   const send = button.dataset.act === 'send';
-  $('server-note').textContent = send ? `sending ${id}…` : `bringing ${id} here…`;
+  $('backup-note').textContent = send ? `sending ${id}…` : `bringing ${id} here…`;
   try {
     const told = await post(`api/sweeps/${id}`, JSON.stringify(send ? { cold: true } : { warm: true }));
-    $('server-note').textContent = send ? `${id}: ${told.files} runs there, ${megabytes(told.freed)} freed here`
+    $('backup-note').textContent = send ? `${id}: ${told.files} runs there, ${megabytes(told.freed)} freed here`
       : `${id}: ${told.files} runs brought here`;
-  } catch (error) { serverSay(error); }
+  } catch (error) { backupSay(error); }
   readStorageSets();
 });
 
@@ -504,8 +506,8 @@ function showStorageKind() {
 $('storage-kind').addEventListener('change', showStorageKind);
 for (const id of ['drive-client-id', 'drive-client-secret']) $(id).addEventListener('input', showStorageKind);
 $('drive-copy').addEventListener('click', () => navigator.clipboard.writeText($('drive-command').textContent)
-  .then(() => { $('server-note').textContent = 'copied: run it on the PC'; },
-    () => { $('server-note').textContent = 'copy it by hand: the browser refused'; }));
+  .then(() => { $('backup-note').textContent = 'copied: run it on the PC'; },
+    () => { $('backup-note').textContent = 'copy it by hand: the browser refused'; }));
 
 $('storage-save').addEventListener('click', async () => {
   const kind = $('storage-kind').value;
@@ -516,12 +518,12 @@ $('storage-save').addEventListener('click', async () => {
       clientId: $('drive-client-id').value, clientSecret: $('drive-client-secret').value }
       : { kind: 'none' };
   $('storage-save').disabled = true;
-  $('server-note').textContent = kind === 'none' ? '' : 'writing a test file there…';
+  $('backup-note').textContent = kind === 'none' ? '' : 'writing a test file there…';
   try {
     showStorage(await post('api/storage', JSON.stringify(body)));
-    $('server-note').textContent = kind === 'none' ? 'forgotten: the runs stay on this disk'
+    $('backup-note').textContent = kind === 'none' ? 'forgotten: the runs stay on this disk'
       : 'tested and saved: a file was written there, read back and deleted';
-  } catch (error) { serverSay(error); }
+  } catch (error) { backupSay(error); }
   $('storage-save').disabled = false;
 });
 
@@ -1172,7 +1174,7 @@ follow();
 
 showLanguages().catch((error) => { $('lang-note').textContent = String(error.message || error); });
 ask('api/server').then(showServer).catch(serverSay);
-ask('api/storage').then(showStorage).catch(serverSay);
+ask('api/storage').then(showStorage).catch(backupSay);
 ask('api/market').then((state) => { showMarket(state); showQuality(state); if (marketRunning) followMarket(); })
   .catch((error) => dataLog([String(error.message || error)]));
 showCalendar();

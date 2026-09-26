@@ -1478,7 +1478,7 @@ archive like the PC does: a mirror token there, the archive as upstream.
 
 The runs of a set - the trades the run page draws, a few MB each - are what
 fills the disk; the set's own file, its table, is small. Where they can go is
-chosen on the settings page (this server, "old simulations") and tested
+chosen on the settings page (the backup tab) and tested
 there - a file written, read back and deleted - before it is kept:
 
 - an S3 bucket, any: AWS, Hetzner, Backblaze, MinIO, Garage - its endpoint,
@@ -1513,7 +1513,7 @@ go there (`sweeps/<set>/<n>.json.gz`), each removed from here once it is
 there - to a Drive the folder in one rclone call, every file checked - with a
 copy of the set's own files (`sweeps/<set>.json.gz`, `.meta.json`), so the set
 is whole there; the list says "in the bucket". Under the choice on the
-settings page, "what is there" reads the storage and lays every set out, its
+backup tab, "what is there" reads the storage and lays every set out, its
 runs here and there: "send", "bring here" - which also takes a set another
 server sent there - and "download", the set whole in a zip laid out as the
 runs folder keeps it. The set stays in every list, mix and

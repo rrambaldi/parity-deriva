@@ -2205,7 +2205,7 @@ class Service(object):
 		"""Where the sets' runs go (web/storage.py), or a refusal when nothing is chosen."""
 		found = storage.bucket(self.setup)
 		if found is None:
-			raise ServiceError("no bucket: choose one on the settings page (this server) - an S3 "
+			raise ServiceError("no bucket: choose one on the settings page, backup tab - an S3 "
 							   "bucket, a Google Drive or a OneDrive")
 		return found
 

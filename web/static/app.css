@@ -469,7 +469,7 @@ section {
   letter-spacing: normal; font-size: inherit; cursor: pointer; }
 #roles-box button { align-self: flex-start; }
 #trade-table td:last-child { white-space: nowrap; }
-#storage-box { margin-top: 18px; }
+#backup-note:empty { display: none; }
 #storage-box p.dim, #storage-box .storage-steps { margin: 8px 0; color: var(--text-3); font-size: var(--fs-small); }
 #storage-s3[hidden], #storage-drive[hidden], #storage-google[hidden], #storage-state:empty { display: none; }
 #storage-box .market-row { margin: 8px 0; }
