@@ -438,6 +438,13 @@ section {
    have one */
 #calendar-actions, #market-actions, .market-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
 #server-state.bad { color: var(--live); font-weight: 600; }
+#quality-panel .market-row { margin-top: 10px; }
+#data-box[hidden] { display: none; }
+#quality-panel [hidden] { display: none; }
+#record-feeds { width: min(28em, 80vw); font-family: var(--font-mono); }
+#archive-state, #q-note { color: var(--text-3); font-size: var(--fs-small); overflow-wrap: anywhere; }
+#q-numbers { margin: 10px 0 0; padding: 8px; font-family: var(--font-mono); font-size: var(--fs-small); background: var(--raised); border-radius: var(--radius-s); white-space: pre-wrap; }
+#q-days { display: block; width: 100%; height: 140px; margin-top: 8px; }
 #server-note:empty, #promote-box[hidden] { display: none; }
 #promote-url { width: min(36em, 80vw); }
 #market-box { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }

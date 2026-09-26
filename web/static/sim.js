@@ -295,6 +295,7 @@ function fixedFields() {
     granularity: $('granularity').value, from: $('from').value,
     to: $('to').value, risk: $('risk').value, balance: $('balance').value,
     leverage: $('leverage').value,
+    data: $('data').value,
     newsBefore: $('newsBefore').value, newsAfter: $('newsAfter').value,
     newsImpacts: $('newsImpacts').value,
   };
@@ -334,6 +335,7 @@ function fillForm(f) {
     onGranularity();
   }
   for (const id of ['from', 'to', 'risk', 'balance', 'leverage']) if (f[id]) $(id).value = f[id];
+  $('data').value = [...$('data').options].some((o) => o.value === (f.data || '')) ? f.data || '' : '';
   // a set made before these were on this page had no news rule
   $('newsBefore').value = f.newsBefore || '';
   $('newsAfter').value = f.newsAfter || '';
@@ -1561,3 +1563,9 @@ async function start() {
 }
 
 start().catch((error) => message(String(error.message || error)));
+
+// the archives a run can read instead of the stores: the select shows once there is one
+ask('api/market').then(({ archives }) => {
+  for (const name of archives || []) $('data').add(new Option(`${name}, as served`, name));
+  $('data-box').hidden = !(archives || []).length;
+}).catch(() => {});

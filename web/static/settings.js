@@ -130,6 +130,129 @@ $('market-run').addEventListener('click', () => dataAction(async () => {
   await followMarket();
 }));
 
+/* ----------------------------------------------------- the data quality */
+
+// what the archive holds, what to record, and two sources of one series set
+// against each other (data/archive.py): the stores ('') or an archive's provider
+function showQuality(state) {
+  $('record-box').hidden = !state.writer;
+  $('record-feeds').value = state.record.feeds.join('\n');
+  $('record-every').value = state.record.every;
+  $('archive-state').textContent = state.archives.length
+    ? `the archive keeps the bars of ${state.archives.join(', ')} (MARKET/archive), each a source below`
+    : 'the archive is empty: record a feed, or archive what the live sessions saw';
+  for (const id of ['q-a', 'q-b']) {
+    const box = $(id);
+    const was = box.value;
+    box.textContent = '';
+    box.add(new Option('the stores (downloaded)', ''));
+    for (const name of state.archives) box.add(new Option(`${name}, as served`, name));
+    box.value = [...box.options].some((o) => o.value === was) ? was
+      : (id === 'q-b' && state.archives[0]) || '';
+  }
+}
+
+function qualityInstruments() {
+  const box = $('q-instrument');
+  if (!box.options.length) for (const row of instruments) box.add(new Option(row.instrument, row.instrument));
+  const row = instruments.find((r) => r.instrument === box.value);
+  const tf = $('q-granularity');
+  const was = tf.value;
+  tf.textContent = '';
+  for (const g of (row ? row.granularities : [])) tf.add(new Option(g.granularity, g.granularity));
+  if ([...tf.options].some((o) => o.value === was)) tf.value = was;
+}
+$('q-instrument').addEventListener('change', qualityInstruments);
+
+function drawDays(days, standout) {
+  const canvas = $('q-days');
+  canvas.hidden = !days.length;
+  if (!days.length) return;
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth, height = 140;
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  const css = getComputedStyle(document.documentElement);
+  const color = (name) => css.getPropertyValue(name).trim();
+  const top = Math.max(...days.map((d) => d.p95)) || 1;
+  const left = 46, bottom = 16, w = (width - left) / days.length;
+  const odd = new Set(standout.map((d) => d.day));
+  ctx.fillStyle = color('--text-3');
+  ctx.font = '11px ' + color('--font-mono');
+  ctx.fillText(`${top.toFixed(2)} pip`, 0, 12);
+  ctx.fillText('p95 |ΔClose| a day', left, height - 2);
+  days.forEach((d, i) => {
+    const h = (height - bottom - 8) * d.p95 / top;
+    ctx.fillStyle = odd.has(d.day) ? color('--down') : color('--entry');
+    ctx.fillRect(left + i * w, height - bottom - h, Math.max(1, w - 1), h);
+  });
+}
+
+$('record-save').addEventListener('click', () => dataAction(async () => {
+  const feeds = $('record-feeds').value.split('\n').map((l) => l.trim()).filter(Boolean);
+  const state = await post('api/market', JSON.stringify({ record: { feeds, every: Number($('record-every').value) } }));
+  showMarket(state);
+  showQuality(state);
+  dataLog([feeds.length ? `recording ${feeds.length} feed${feeds.length === 1 ? '' : 's'} every ${state.record.every} min`
+    : 'recording nothing']);
+}));
+
+$('archive-now').addEventListener('click', () => dataAction(async () => {
+  const state = await post('api/market/archive', '{}');
+  showQuality(state);
+  dataLog(state.lines);
+}));
+
+$('q-compare').addEventListener('click', async () => {
+  $('q-note').textContent = 'comparing…';
+  try {
+    const r = await post('api/market/compare', JSON.stringify({
+      instrument: $('q-instrument').value, granularity: $('q-granularity').value,
+      from: $('q-from').value, to: $('q-to').value, a: $('q-a').value, b: $('q-b').value }));
+    const name = (s) => s || 'the stores';
+    const three = (s) => (s ? `median ${s.median} · p95 ${s.p95} · max ${s.max}` : 'n/a');
+    $('q-numbers').hidden = false;
+    $('q-numbers').textContent = [
+      `${r.instrument} ${r.granularity} · ${name(r.b)} against ${name(r.a)} · ${r.from || '?'} .. ${r.to || '?'} · pip ${r.pip}`,
+      `bars: ${r.bars.both} in both · ${r.bars.onlyA} only in ${name(r.a)} · ${r.bars.onlyB} only in ${name(r.b)}`,
+      `ΔClose (pips): ${three(r.dClose)}`,
+      `ΔHigh  (pips): ${three(r.dHigh)}`,
+      `ΔLow   (pips): ${three(r.dLow)}`,
+      `spread median (pips): ${name(r.a)} ${r.spread.a ?? 'n/a'} · ${name(r.b)} ${r.spread.b ?? 'n/a'}`,
+      `clock: ${r.shift === null ? 'n/a' : r.shift === 0 ? 'the bars open at the same time'
+        : `${name(r.b)} fits best moved ${r.shift} bar${Math.abs(r.shift) === 1 ? '' : 's'} - a bar-open convention, a DST or a server clock; the numbers are after that move`}`,
+      `days that stand out (p95 over 3x the usual): ${r.standout.map((d) => day(d.day)).join(', ') || 'none'}`,
+    ].join('\n');
+    drawDays(r.days, r.standout);
+    $('q-note').textContent = '';
+  } catch (error) {
+    $('q-numbers').hidden = $('q-days').hidden = true;
+    $('q-note').textContent = String(error.message || error);
+  }
+});
+
+$('q-impact').addEventListener('click', async () => {
+  $('q-note').textContent = 'running the favourite on both sources…';
+  try {
+    const r = await post('api/market/impact', JSON.stringify(
+      { favourite: $('q-favourite').value, a: $('q-a').value, b: $('q-b').value }));
+    const side = (s) => `${s.source || 'the stores'}: ${s.trades} trades, net ${Number(s.net || 0).toFixed(2)}`;
+    $('q-note').textContent = `${r.strategy} ${r.from} .. ${r.to} · ${side(r.a)} · ${side(r.b)} · `
+      + (r.same ? 'the same trades' : `they part from trade ${r.first.trade}`);
+  } catch (error) {
+    $('q-note').textContent = String(error.message || error);
+  }
+});
+
+ask('api/favourites').then(({ favourites }) => {
+  for (const f of favourites) {
+    const x = f.fields || {};
+    $('q-favourite').add(new Option(`${x.strategy} ${x.instrument} ${x.granularity}${f.note ? ' · ' + f.note : ''}`, f.id));
+  }
+}).catch(() => {});
+
 /* ----------------------------------------------------------- the server */
 
 function showServer(s) {
@@ -747,10 +870,11 @@ $('mcp-disconnect').addEventListener('click', async () => {
 
 showMcp().catch((error) => mcpSay(String(error.message || error)));
 ask('api/server').then(showServer).catch((error) => { $('server-note').textContent = String(error.message || error); });
-ask('api/market').then((state) => { showMarket(state); if (marketRunning) followMarket(); })
+ask('api/market').then((state) => { showMarket(state); showQuality(state); if (marketRunning) followMarket(); })
   .catch((error) => dataLog([String(error.message || error)]));
 showCalendar();
-loadStores().then(loadImports).catch((error) => dataLog([String(error.message || error)]));
+loadStores().then(() => { qualityInstruments(); return loadImports(); })
+  .catch((error) => dataLog([String(error.message || error)]));
 // an import started earlier, from this page or another, is picked up
 ask('api/imports/status').then((status) => {
   if (status.running) dataAction(() => followImport(status));

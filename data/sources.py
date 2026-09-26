@@ -154,8 +154,25 @@ def fetchCandles(service, kept, report):
 			report("%s %s: %d bars from %s" % (instrument, granularity, added, provider.name))
 
 
+def recordAndArchive(service, kept, report):
+	"""The feeds to record, then candles.db into the archive (data/archive.py)."""
+	from parity_deriva.data import archive
+	archive.record(service, kept, report)
+	archive.compact(service, report)
+
+
 RUN = {('candles', 'upstream'): pullCandles, ('calendar', 'upstream'): pullCalendar,
-	   ('candles', 'providers'): fetchCandles}
+	   ('candles', 'providers'): fetchCandles, ('record', 'on'): recordAndArchive}
+
+
+def active(kind, kept):
+	"""Whether a kind has anything to run on this server."""
+	if not kept['writer']:
+		return False
+	if kind == 'record':
+		from parity_deriva.data import archive
+		return bool(archive.feeds(kept))
+	return kept[kind]['source'] != 'manual'
 
 
 class Sources(object):
@@ -168,18 +185,19 @@ class Sources(object):
 		self.service = service
 		self.lock = threading.Lock()
 		self.runLock = threading.Lock()
-		self.state = dict((kind, {'at': None, 'ok': None, 'lines': []}) for kind in KINDS)
+		self.state = dict((kind, {'at': None, 'ok': None, 'lines': []})
+						  for kind in list(KINDS) + ['record'])
 
 	def trigger(self, kind):
 		"""A run of a kind's source in the background, unless one is running."""
 		kept = market.config(self.service.setup)
-		if kind not in KINDS or not kept['writer'] or kept[kind]['source'] == 'manual':
+		if kind not in self.state or not active(kind, kept):
 			raise market.MarketError("%s: no source to run on this server" % kind)
 		with self.lock:
 			if self.state[kind].get('running'):
 				return self.state[kind]
 			self.state[kind] = {'at': int(time.time() * 1000), 'ok': None, 'lines': [],
-								'running': True, 'source': kept[kind]['source']}
+								'running': True, 'source': kept[kind].get('source', 'on')}
 		thread = threading.Thread(target=self.run, args=(kind, kept, self.state[kind]))
 		thread.daemon = True
 		thread.start()
@@ -187,7 +205,7 @@ class Sources(object):
 
 	def run(self, kind, kept, state):
 		"""One run of a kind's source; what it did goes in `state`."""
-		source, lines = kept[kind]['source'], state['lines']
+		source, lines = kept[kind].get('source', 'on'), state['lines']
 		# ponytail: one run at a time for all kinds; a lock a kind if a slow upstream holds the other up
 		with self.runLock:
 			try:
@@ -202,12 +220,12 @@ class Sources(object):
 
 	def due(self, kind, kept):
 		last = self.state[kind]['at']
-		return kept['writer'] and kept[kind]['source'] != 'manual' and (
+		return active(kind, kept) and (
 			last is None or time.time() * 1000 - last >= kept[kind]['every'] * 60000)
 
 	def loop(self):
 		while True:
-			for kind in KINDS:
+			for kind in list(self.state):
 				try:
 					if self.due(kind, market.config(self.service.setup)):
 						self.trigger(kind)

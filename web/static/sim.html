@@ -53,6 +53,9 @@
     <label>capital <input type="number" id="balance" min="0" step="any"></label>
     <!-- the account's n:1: its margin is checked on every run (report.margin), not enforced -->
     <label>leverage <input type="number" id="leverage" min="1" step="1" placeholder="30"></label>
+    <!-- the candles: the stores (downloaded), or the bars a broker served as
+         the archive keeps them (data/archive.py); shown once there is one -->
+    <label id="data-box" hidden>data <select id="data"><option value="">the stores</option></select></label>
     <!-- stand aside this many minutes either side of a calendar event on the
          instrument's own currencies; both zero, or no calendar, is no rule -->
     <label>news -min <input type="number" id="newsBefore" min="0" step="1" placeholder="0"></label>

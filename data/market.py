@@ -63,6 +63,13 @@ def config(setup=None):
 		   'provider': kept.get('provider') or ''}
 	for kind in KINDS:
 		out[kind] = dict({'source': 'manual', 'every': 60}, **(kept.get(kind) or {}))
+	# the brokers' bars recorded with no session trading (data/archive.py)
+	out['record'] = dict({'feeds': [], 'every': 15}, **(kept.get('record') or {}))
+	# where the candles of a run come from: the stores, or one archive of the
+	# bars a broker served (Sourced), which a run only reads
+	out['stores'] = out['dir']
+	if isinstance(setup, Sourced):
+		out['stores'] = os.path.join(out['dir'], ARCHIVE, setup.MARKET_SOURCE)
 	return out
 
 
@@ -74,8 +81,41 @@ def writer(setup=None):
 	return config(setup)['writer']
 
 
+def stores(setup=None):
+	"""The folder of the candle stores a run reads: the market's, or an archive's."""
+	return config(setup)['stores']
+
+
 def store(instrument, setup=None):
-	return os.path.join(directory(setup), '%s.hd5' % instrument)
+	return os.path.join(stores(setup), '%s.hd5' % instrument)
+
+
+#: the bars the brokers served, one folder a provider (data/archive.py)
+ARCHIVE = 'archive'
+
+
+def archives(setup=None):
+	"""The providers the archive keeps bars of: each one a source a run can read."""
+	where = os.path.join(directory(setup), ARCHIVE)
+	return sorted(n for n in os.listdir(where) if os.path.isdir(os.path.join(where, n))) \
+		if os.path.isdir(where) else []
+
+
+class Sourced(object):
+	"""
+	A setup whose candles are one archive's, MARKET/archive/<provider>, the
+	rest being the setup's: a run on the bars a broker served instead of on
+	the downloaded ones. The calendar stays the market's.
+	"""
+
+	def __init__(self, setup, source):
+		if source not in archives(setup):
+			raise MarketError("no archive of %r: there are %s" % (
+				source, ', '.join(archives(setup)) or 'none yet'))
+		self.__dict__.update(_setup=setup, MARKET_SOURCE=source)
+
+	def __getattr__(self, name):
+		return getattr(self.__dict__['_setup'], name)
 
 
 def guard(where, setup=None):
@@ -123,6 +163,18 @@ def save(changes, setup=None):
 			from parity_deriva.trading import providers
 			if value not in providers.available():
 				raise MarketError("provider: one of %s" % ', '.join(providers.available()))
+		elif key == 'record':
+			from parity_deriva.trading import providers
+			lines = (value or {}).get('feeds') if isinstance(value, dict) else None
+			every = (value or {}).get('every', 15) if isinstance(value, dict) else None
+			if not isinstance(lines, list) or not all(
+					isinstance(line, str) and len(line.split()) == 3
+					and line.split()[0].lower() in providers.available() for line in lines):
+				raise MarketError("record: feeds, each \"<provider> <INSTRUMENT> <granularity>\", "
+								  "a provider among %s" % ', '.join(providers.available()))
+			if not isinstance(every, int) or isinstance(every, bool) or not 1 <= every <= 1440:
+				raise MarketError("record: every is minutes, 1 to 1440")
+			value = {'feeds': [' '.join(line.split()) for line in lines], 'every': every}
 		else:
 			raise MarketError("no market setting %r" % key)
 		kept[key] = value

@@ -1266,6 +1266,27 @@ Another parity - the PC, a server for real money - copies the market data
 with a token of the mirror or pc role. The forexfactory scraper is not a
 source: it is a program of its own and pushes, like any outside one.
 
+## Our own archive of the bars the brokers served
+
+The stores hold the downloaded candles (dukascopy's). What the brokers
+actually served is kept too, and set against them (`data/archive.py`,
+settings, data quality):
+
+- record: feeds of "provider INSTRUMENT granularity", fetched every few
+  minutes off the broker's API into `live/candles.db` with no session
+  trading and no order placed; a live session records its own bars there
+  as it trades;
+- archive: candles.db into `MARKET/archive/<provider>/<INSTRUMENT>.hd5`, the
+  stores' own format, after every record run or with "archive now";
+- a run on an archive: the simulate page's "data" (a `data` field for the
+  API and MCP), the same run on the bars that broker served;
+- compare: two sources of one series, bar by bar over the window both hold:
+  bars either lacks, the difference of close, high and low in pips (median,
+  p95, max), the spreads, the clock shift that fits them best (the numbers
+  are taken after it), each day's p95 and the days that stand out;
+- impact: a favourite run on the two sources, the trades and net of each and
+  the trade they part at.
+
 ## Programs' tokens, and the PC's mixes on the cloud
 
 Besides the assistants' token, the settings page (AI assistants) makes a

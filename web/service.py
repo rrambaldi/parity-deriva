@@ -71,6 +71,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from parity_deriva.backtest import ledger
 from parity_deriva.backtest import shadow
 from parity_deriva.backtest.driver import Cancelled
+from parity_deriva.data import archive
 from parity_deriva.data import calendar as calendar_module
 from parity_deriva.data import market
 from parity_deriva.data import sources
@@ -310,6 +311,8 @@ class Service(object):
 
 	def __init__(self, setup=None, max_candles=MAX_CANDLES, cache_size=8):
 		self.logger = logging.getLogger(LOGGER)
+		# a run on an archive's candles sets its own setup for its thread (backtest)
+		self._local = threading.local()
 		self.setup = setup if setup is not None else settings
 		self.max_candles = int(max_candles)
 		self.cache_size = int(cache_size)
@@ -366,6 +369,15 @@ class Service(object):
 		ledger.STRATEGIES.update(uploaded.backtest(dataDir))
 		self._sandbox = threading.Lock()
 
+	@property
+	def setup(self):
+		"""The setup, or the one a run on an archive set for its own thread."""
+		return getattr(self.__dict__.get('_local'), 'setup', None) or self._setup
+
+	@setup.setter
+	def setup(self, value):
+		self._setup = value
+
 	# --------------------------------------------------------------- stores
 
 	def storePath(self, instrument):
@@ -380,7 +392,7 @@ class Service(object):
 		is the files that are there.
 		"""
 		out = []
-		directory = market.directory(self.setup)
+		directory = market.stores(self.setup)
 		try:
 			names = sorted(os.listdir(directory))
 		except OSError as exc:
@@ -580,7 +592,61 @@ class Service(object):
 		kept = market.config(self.setup)
 		kept['upstream'] = dict(kept['upstream'], token=bool(kept['upstream']['token']))
 		return dict(kept, home=market.home(self.setup), providers=providers.available(),
-					runs=self.sources.state)
+					runs=self.sources.state, archives=market.archives(self.setup))
+
+	def archiveNow(self):
+		"""candles.db into the archive now, and what it holds after (data/archive.py)."""
+		lines = []
+		try:
+			archive.compact(self, lines.append)
+		except market.MarketError as exc:
+			raise ServiceError(str(exc))
+		return dict(self.marketData(), lines=lines or ['nothing new to archive'])
+
+	def compareData(self, body):
+		"""Two sources of one series, bar by bar (archive.compare)."""
+		instrument, granularity = str(body.get('instrument') or ''), str(body.get('granularity') or '')
+		self.known(instrument)
+		try:
+			return archive.compare(self.setup, instrument, granularity,
+								   str(body.get('a') or ''), str(body.get('b') or ''),
+								   parseDate(body.get('from'), 'from'),
+								   parseDate(body.get('to'), 'to', end=True))
+		except market.MarketError as exc:
+			raise ServiceError(str(exc))
+
+	def impact(self, body):
+		"""
+		A favourite's form run on two sources over the window both hold -
+		the stores and an archive, say - and where their trades part: what a
+		difference in the candles does to what a strategy would have done.
+		"""
+		favourite = next((f for f in self.favourites() if f.get('id') == body.get('favourite')), None)
+		if favourite is None:
+			raise ServiceError("no such favourite")
+		fields = dict(favourite['fields'])
+		a, b = str(body.get('a') or ''), str(body.get('b') or '')
+		try:
+			spans = [archive.span(self.setup, name, fields['instrument'], fields['granularity'])
+					 for name in (a, b)]
+		except market.MarketError as exc:
+			raise ServiceError(str(exc))
+		if None in spans:
+			raise ServiceError("%s holds no %s %s" % (
+				(a, b)[spans.index(None)] or 'the market', fields['instrument'], fields['granularity']))
+		dtfrom, dtto = max(s[0] for s in spans), min(s[1] for s in spans)
+		if dtto <= dtfrom:
+			raise ServiceError("the two sources hold no window in common")
+		fields.update({'from': dtfrom.strftime('%Y-%m-%d'), 'to': dtto.strftime('%Y-%m-%d')})
+		args = backtestArgs(lambda name: _text(fields.get(name)))
+		args.pop('data', None)
+		runs = [self.outline(self.backtest(confirmed=True, data=name or None, **args)) for name in (a, b)]
+		first = differ(*[r['rows'] for r in runs])
+		return {'favourite': favourite['id'], 'strategy': fields.get('strategy'),
+				'from': fields['from'], 'to': fields['to'], 'same': first is None,
+				'a': {'source': a, 'trades': runs[0]['trades'], 'net': runs[0]['net']},
+				'b': {'source': b, 'trades': runs[1]['trades'], 'net': runs[1]['net']},
+				'first': None if first is None else {'trade': first + 1}}
 
 	def setMarketData(self, body):
 		"""Change the folder, the role or a source (market.save)."""
@@ -1229,9 +1295,7 @@ class Service(object):
 		here = self.outline(self.backtest(confirmed=True,
 										  **backtestArgs(lambda name: _text(fields.get(name)))))
 		there = self.outline(pushed)
-		first = next((i for i, (a, b) in enumerate(zip(here['rows'], there['rows'])) if a != b),
-					 None if len(here['rows']) == len(there['rows'])
-					 else min(len(here['rows']), len(there['rows'])))
+		first = differ(here['rows'], there['rows'])
 		out = {'sweep': sweep, 'n': int(n), 'checked': int(time.time() * 1000),
 			   'ok': first is None, 'here': {'trades': here['trades'], 'net': here['net']},
 			   'pushed': {'trades': there['trades'], 'net': there['net']},
@@ -1336,7 +1400,8 @@ class Service(object):
 		# for to every later request for a different one - and the same goes
 		# for the hours, the overnight rule and the news windows: each of
 		# them is a different run of the same strategy
-		return (instrument, granularity, strategy, dtfrom, dtto, units,
+		return (getattr(self.setup, 'MARKET_SOURCE', None) if isinstance(self.setup, market.Sourced)
+				else None, instrument, granularity, strategy, dtfrom, dtto, units,
 				params.label() if params is not None else None, balance, risk,
 				maxStopPips, session, bool(intraday), news,
 				tuple(newsImpacts) if newsImpacts else None, maxBars,
@@ -1350,7 +1415,24 @@ class Service(object):
 		raise ServiceError("%s has no %s candles" % (known['instrument'],
 													  granularity))
 
-	def backtest(self, instrument, granularity, strategy='AG01', dtfrom=None,
+	def backtest(self, *args, data=None, **kwargs):
+		"""
+		_backtest(), on the stores' candles or, with `data` a provider the
+		archive keeps (market.archives), on the bars that broker served:
+		the same run on another source, for data/archive.impact.
+		"""
+		if not data:
+			return self._backtest(*args, **kwargs)
+		try:
+			self._local.setup = market.Sourced(self._setup, data)
+		except market.MarketError as exc:
+			raise ServiceError(str(exc))
+		try:
+			return self._backtest(*args, **kwargs)
+		finally:
+			del self._local.setup
+
+	def _backtest(self, instrument, granularity, strategy='AG01', dtfrom=None,
 				 dtto=None, units=1, params=None, balance=None, risk=None,
 				 maxStopPips=None, session=None, intraday=False, news=None,
 				 newsImpacts=None, maxBars=None, strategyArgs=None,
@@ -2662,6 +2744,12 @@ def parseSwitch(text, name):
 	return int(text)
 
 
+def differ(one, two):
+	"""The index of the first trade two runs part at, None when they are the same."""
+	return next((i for i, (a, b) in enumerate(zip(one, two)) if a != b),
+				None if len(one) == len(two) else min(len(one), len(two)))
+
+
 def backtestArgs(get):
 	"""
 	The form as Service.backtest's keyword arguments. `get` takes a field
@@ -2701,7 +2789,9 @@ def backtestArgs(get):
 		newsImpacts=parseImpacts(get('newsImpacts')),
 		params=pluginParams(strategy, get),
 		strategyArgs=handlerArgs(strategy, get),
-		leverage=parseLeverage(get('leverage')))
+		leverage=parseLeverage(get('leverage')),
+		# the candles: the stores' (none), or an archive's (market.archives)
+		data=get('data') or None)
 
 
 def parseExcursionBars(text):
@@ -3285,6 +3375,21 @@ class Handler(BaseHTTPRequestHandler):
 				length = int(self.headers.get('Content-Length') or 0)
 				body = self.rfile.read(length).decode('utf-8', 'replace')
 				return self.sendJSON(self.service.importCalendar(body))
+			if route in ('/api/market/archive', '/api/market/compare', '/api/market/impact'):
+				# archive: candles.db into MARKET/archive now; compare: two sources
+				# of a series; impact: a favourite run on both (data/archive.py)
+				length = int(self.headers.get('Content-Length') or 0)
+				try:
+					body = json.loads(self.rfile.read(length) or b'{}')
+				except ValueError:
+					body = None
+				if not isinstance(body, dict):
+					raise ServiceError('the body is a JSON object')
+				if route.endswith('/archive'):
+					return self.sendJSON(self.service.archiveNow())
+				if route.endswith('/compare'):
+					return self.sendJSON(self.service.compareData(body))
+				return self.sendJSON(self.service.impact(body))
 			if route in ('/api/market', '/api/market/run'):
 				# {"dir"?, "writer"?, "candles"?, ...} changes market.json,
 				# {"kind": "candles"} runs its source now

@@ -176,6 +176,39 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
 </section>
 
 <!--
+  The bars the brokers served (data/archive.py): recorded with no session
+  trading, kept in MARKET/archive a provider, and set against the stores -
+  the numbers first, and what a difference does to a favourite's trades.
+-->
+<section id="quality-panel">
+  <h2 class="panel-title">data quality</h2>
+  <div id="record-box" class="market-row">
+    <label>record from the brokers: provider INSTRUMENT granularity, one a line
+      <textarea id="record-feeds" rows="3" spellcheck="false" placeholder="oanda EUR_USD M5"></textarea></label>
+    <label>every (min) <input type="number" id="record-every" min="1" max="1440" value="15"></label>
+    <button type="button" id="record-save" data-icon="yes">save</button>
+    <button type="button" id="archive-now" data-icon="import">archive now</button>
+  </div>
+  <p id="archive-state"></p>
+  <div class="market-row">
+    <label>instrument <select id="q-instrument"></select></label>
+    <label>tf <select id="q-granularity"></select></label>
+    <label>from <input type="date" id="q-from"></label>
+    <label>to <input type="date" id="q-to"></label>
+    <label>source A <select id="q-a"></select></label>
+    <label>source B <select id="q-b"></select></label>
+    <button type="button" id="q-compare" data-icon="list">compare</button>
+  </div>
+  <pre id="q-numbers" hidden></pre>
+  <canvas id="q-days" hidden></canvas>
+  <div class="market-row">
+    <label>impact: a favourite run on A and on B <select id="q-favourite"></select></label>
+    <button type="button" id="q-impact" data-icon="play">run on both</button>
+  </div>
+  <p id="q-note" role="status"></p>
+</section>
+
+<!--
   The door for an AI assistant of your own (web/mcp.py): the token it
   connects with, who holds one, and the strategies it wrote. They are drafts,
   backtested only in a sandbox, until enabled here after reading the code.
