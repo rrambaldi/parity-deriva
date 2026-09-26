@@ -1287,6 +1287,25 @@ settings, data quality):
 - impact: a favourite run on the two sources, the trades and net of each and
   the trade they part at.
 
+## Languages
+
+The pages are written in English, and every English text is the key of a
+catalogue: `{"name": "italiano", "texts": {"English text": "its text"}}`,
+`{name}` standing for a value the page puts in ("{n} running of {m}").
+`web/static/i18n.js`, loaded before every page's other scripts, reads the
+catalogue of the language chosen before the first paint and puts every text
+node, title, placeholder and aria-label in it, the ones a page adds later
+too; what a canvas draws goes through `t(text, values)`. A text with no
+entry stays English.
+
+The built-in catalogues are `web/static/i18n/<code>.json` (Italian). The
+settings page's languages panel lists them with the share of the texts each
+says, downloads one - or the template, every text with nothing yet - and
+takes a new one back (`web/i18n.py`: a code, known texts, the same `{values}`
+as the English), kept in `DATA_DIR/i18n/<code>.json` over the built-in one of
+its code. The switch in the header keeps the choice in the browser; English
+until one is made.
+
 ## Programs' tokens, and the PC's mixes on the cloud
 
 Besides the assistants' token, the settings page (AI assistants) makes a

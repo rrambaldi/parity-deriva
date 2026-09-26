@@ -121,8 +121,11 @@ function chartKey(event) {
 // and the time
 function measured(a, b, pip, bars, timeframe) {
   const move = b.price - a.price, sign = move < 0 ? '-' : '+';
-  return `${sign}${Math.abs(move / pip).toFixed(1)} pips · ${sign}${Math.abs(move / a.price * 100).toFixed(2)}%`
-    + ` · ${bars} ${timeframe ? timeframe + ' ' : ''}bars · ${lasted(b.ms - a.ms)}`;
+  // drawn on the chart, so put in the language here (i18n.js t)
+  return t(timeframe ? '{sign}{move} pips · {sign2}{pct}% · {bars} {timeframe} bars · {duration}'
+    : '{sign}{move} pips · {sign2}{pct}% · {bars} bars · {duration}', {
+    sign, sign2: sign, move: Math.abs(move / pip).toFixed(1), pct: Math.abs(move / a.price * 100).toFixed(2),
+    bars, timeframe, duration: lasted(b.ms - a.ms) });
 }
 
 // a stretch of time in days, hours and minutes: '6d 14h 15m'
@@ -151,14 +154,17 @@ function paramValue(name, value) {
  * performance/report.py), in one line: every page that shows a run says it.
  */
 function marginText(m) {
-  if (!m) return 'margin: n/a, no saved trades';
+  if (!m) return t('margin: n/a, no saved trades');
   const day = (ms) => new Date(ms).toISOString().slice(0, 10);
   const money = (v) => (v < 0 ? '\u2212' : '') + Math.abs(v).toFixed(2);
-  return `margin at ${m.leverage}:1 \u00b7 peak ${money(m.peakMargin)} (${m.peakMarginPct.toFixed(1)}% of capital)`
-    + (m.minFree === null ? '' : ` \u00b7 lowest free ${money(m.minFree)}`)
-    + ` \u00b7 at most ${m.maxOpen} open`
-    + (m.negativeAt !== null ? ` \u00b7 \u2717 the account goes to zero on ${day(m.negativeAt)}`
-      : m.breachAt !== null ? ` \u00b7 \u2717 out of margin on ${day(m.breachAt)}` : ' \u00b7 \u2713 always room');
+  // a piece at a time through t(): the pieces come and go, one text could not say them all
+  const parts = [t('margin at {leverage}:1 \u00b7 peak {peak} ({pct}% of capital)',
+    { leverage: m.leverage, peak: money(m.peakMargin), pct: m.peakMarginPct.toFixed(1) })];
+  if (m.minFree !== null) parts.push(t('lowest free {free}', { free: money(m.minFree) }));
+  parts.push(t('at most {n} open', { n: m.maxOpen }));
+  parts.push(m.negativeAt !== null ? t('\u2717 the account goes to zero on {date}', { date: day(m.negativeAt) })
+    : m.breachAt !== null ? t('\u2717 out of margin on {date}', { date: day(m.breachAt) }) : t('\u2713 always room'));
+  return parts.join(' \u00b7 ');
 }
 
 (function () {
@@ -398,7 +404,7 @@ function marginText(m) {
           const real = busy.accounts === 'real';
           accounts.hidden = false;
           accounts.className = 'badge ' + (real ? 'live' : 'practice');
-          accounts.textContent = real ? 'real money server' : 'demo server';
+          accounts.textContent = real ? 'real money' : 'demo';
           accounts.title = (real ? 'this server trades real money accounts only'
             : 'this server trades demo accounts only') + ' (PARITY_DERIVA_ACCOUNTS in .env)';
           document.documentElement.dataset.accounts = busy.accounts;

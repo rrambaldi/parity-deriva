@@ -253,6 +253,61 @@ ask('api/favourites').then(({ favourites }) => {
   }
 }).catch(() => {});
 
+/* ------------------------------------------------------- the languages */
+
+// every language the pages can be in, how much of them it says, and a
+// catalogue to download, upload or drop (web/i18n.py)
+async function showLanguages(state) {
+  const { languages } = state || await ask('api/i18n');
+  const body = $('lang-rows');
+  body.textContent = '';
+  for (const l of languages) {
+    const row = body.insertRow();
+    row.insertCell().textContent = l.code;
+    row.insertCell().textContent = l.name + (l.uploaded ? ' · uploaded' : l.builtin && l.code !== 'en' ? ' · built in' : '');
+    const share = row.insertCell();
+    share.className = 'num';
+    share.textContent = `${Math.round(100 * l.share)}%`;
+    const get = row.insertCell();
+    if (l.code !== 'en') {
+      const link = document.createElement('a');
+      link.href = `api/i18n/${encodeURIComponent(l.code)}/download`;
+      link.download = `${l.code}.json`;
+      link.textContent = 'download';
+      get.appendChild(link);
+    }
+    const drop = row.insertCell();
+    if (l.uploaded) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.code = l.code;
+      button.dataset.icon = 'delete';
+      button.textContent = 'delete';
+      drop.appendChild(button);
+    }
+  }
+}
+
+$('lang-rows').addEventListener('click', async (event) => {
+  const code = event.target.dataset && event.target.dataset.code;
+  if (!code) return;
+  if (!await askUser(`Delete the uploaded ${code} catalogue? A built-in one of that code stays.`, 'delete', 'delete')) return;
+  try {
+    await showLanguages(await post(`api/i18n/${encodeURIComponent(code)}/delete`, '{}'));
+    $('lang-note').textContent = 'deleted';
+  } catch (error) { $('lang-note').textContent = String(error.message || error); }
+});
+
+$('lang-upload').addEventListener('click', async () => {
+  const file = ($('lang-file').files || [])[0];
+  const code = $('lang-code').value.trim();
+  if (!file || !code) { $('lang-note').textContent = "give the language's code and choose its catalogue"; return; }
+  try {
+    await showLanguages(await post(`api/i18n/${encodeURIComponent(code)}`, await file.text()));
+    $('lang-note').textContent = `${code} uploaded: choose it in the header`;
+  } catch (error) { $('lang-note').textContent = String(error.message || error); }
+});
+
 /* ----------------------------------------------------------- the server */
 
 function showServer(s) {
@@ -869,6 +924,53 @@ $('mcp-disconnect').addEventListener('click', async () => {
 });
 
 showMcp().catch((error) => mcpSay(String(error.message || error)));
+/* -------------------------------------------------------------- the tabs */
+
+// one section a tab, as the docs page has them: the address says which (a
+// panel, or anything inside one), else the one last opened in this browser
+const TAB_KEY = 'parity-deriva.settings-tab';
+const tabs = [...document.querySelectorAll('#settings-tabs [role="tab"]')];
+
+function openTab(tab, focus) {
+  for (const t of tabs) {
+    const on = t === tab;
+    t.setAttribute('aria-selected', String(on));
+    t.tabIndex = on ? 0 : -1;
+    $(t.getAttribute('aria-controls')).hidden = !on;
+  }
+  if (focus) tab.focus();
+  try { localStorage.setItem(TAB_KEY, tab.getAttribute('aria-controls')); } catch (error) { /* this visit only */ }
+}
+
+function follow() {
+  let where = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+  if (!where) {
+    try { where = document.getElementById(localStorage.getItem(TAB_KEY) || ''); } catch (error) { where = null; }
+  }
+  const panel = where && where.closest('[role="tabpanel"]');
+  if (!panel) return;
+  openTab(tabs.find((t) => t.getAttribute('aria-controls') === panel.id));
+  if (where !== panel) where.scrollIntoView();
+}
+
+for (const tab of tabs) {
+  tab.addEventListener('click', () => {
+    openTab(tab);
+    history.replaceState(null, '', `#${tab.getAttribute('aria-controls')}`);
+  });
+  // the arrows move along the tabs, as a tab list does
+  tab.addEventListener('keydown', (event) => {
+    const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+    if (!step) return;
+    const next = tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length];
+    openTab(next, true);
+    history.replaceState(null, '', `#${next.getAttribute('aria-controls')}`);
+  });
+}
+window.addEventListener('hashchange', follow);
+follow();
+
+showLanguages().catch((error) => { $('lang-note').textContent = String(error.message || error); });
 ask('api/server').then(showServer).catch((error) => { $('server-note').textContent = String(error.message || error); });
 ask('api/market').then((state) => { showMarket(state); showQuality(state); if (marketRunning) followMarket(); })
   .catch((error) => dataLog([String(error.message || error)]));

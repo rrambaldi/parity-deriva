@@ -229,7 +229,7 @@ function renderDetail() {
   const f = d.fields || {};
   $('detail-title').textContent = `${d.id} · ${f.strategy} on ${f.instrument} ${f.granularity}`
     + ` · ${d.provider} ${d.account} (${d.accountName || ''})`
-    + (f.capital ? ` · capitale ${money(Number(f.capital))} (saldo del conto ${money(d.balance)} ${d.currency || ''})`
+    + (f.capital ? ` · capital ${money(Number(f.capital))} (account balance ${money(d.balance)} ${d.currency || ''})`
                  : ` · capital at start ${money(d.balance)} ${d.currency || ''}`)
     + (f.capital ? ` · risk taken on ${money(Number(f.capital))} ${d.currency || ''}` : '');
   $('detail-params').textContent = paramsText(f);
@@ -419,9 +419,9 @@ function renderBoard(groups) {
       if (!session) row.className = 'hint';
       const k = byFeed.get(`${provider}:${account}`) || {};
       cell(row, `${provider} · ${account}`).title = `${g.strategy} ${g.instrument} ${g.granularity} · ${id}`;
-      cell(row, !session ? `riferimento${k.n === undefined ? '' : ` · ${k.n} barre`}`
+      cell(row, !session ? `reference${k.n === undefined ? '' : ` · ${k.n} bars`}`
         : k.mean === undefined || k.mean === null ? ''
-        : `media |Δc| ${pips(k.mean)} pip · ultimo ${pips(k.last)} · p95 ${pips(k.p95)}`);
+        : `mean |Δc| ${pips(k.mean)} pip · last ${pips(k.last)} · p95 ${pips(k.p95)}`);
       cell(row, pips(k.spread), 'num');
       cell(row, pips(k.latency), 'num');
       const sm = (session || {}).summary || {};
@@ -435,12 +435,12 @@ function renderBoard(groups) {
       cell(row, session ? money(sm.plDiff) : '', 'num');
       cell(row, session ? pips(sm.plDiffPips) : '', 'num');
       cell(row, session ? pct2(sm.plDiffPct) : '', 'num');
-      cell(row, session ? `${parity.divergences ?? 0} divergenze${alarm ? ' · ALARM' : ''}` : '', alarm ? 'bad' : '');
+      cell(row, session ? `${parity.divergences ?? 0} divergences${alarm ? ' · ALARM' : ''}` : '', alarm ? 'bad' : '');
     };
     if (g.reference) line(g.reference.id, g.reference.provider, g.reference.account, null);
     for (const s of g.sessions || []) if (!g.reference || s.id !== g.reference.id) line(s.id, s.provider, s.account, s);
   }
-  if (!body.rows.length) cell(body.insertRow(), 'nessuna sessione', 'hint').colSpan = 12;
+  if (!body.rows.length) cell(body.insertRow(), 'no session', 'hint').colSpan = 12;
 
   const td = Object.values(state.skew).map((s) => s.twelvedata).find(Boolean);
   const g = groups.find((x) => x.key === state.group) || groups[0];
@@ -449,8 +449,8 @@ function renderBoard(groups) {
   // provider to have it: the next multiple of the period, plus 20 s
   const period = periodOf(g.granularity);
   const next = (Math.floor(Date.now() / period) + 1) * period + 20000;
-  $('skew-note').textContent = `Twelve Data: ${td.calls_today}/${td.limit} crediti oggi (riserva ${td.reserve})`
-    + ` · ultima chiamata ${td.last_call ? clock(td.last_call) + ' UTC' : '—'} · prossimo poll ~${clock(next)}`;
+  $('skew-note').textContent = `Twelve Data: ${td.calls_today}/${td.limit} credits today (reserve ${td.reserve})`
+    + ` · last call ${td.last_call ? clock(td.last_call) + ' UTC' : '—'} · next poll ~${clock(next)}`;
   $('skew-note').className = td.calls_today >= td.limit - td.reserve ? 'bad' : 'hint';
 }
 
@@ -463,10 +463,10 @@ function renderTradeSkew() {
     const table = document.createElement('table');
     table.className = 'live-small';
     const head = table.createTHead().insertRow();
-    for (const [label, cls] of [['segnale', ''], ['sim entry', 'num'], ['sim exit', 'num'], ['sim esito', ''], ['sim P&L', 'num'],
-        ['broker', ''], ['entry', 'num'], ['exit', 'num'], ['esito', ''], ['P&L', 'num'], ['Δentry pip', 'num'],
+    for (const [label, cls] of [['signal', ''], ['sim entry', 'num'], ['sim exit', 'num'], ['sim outcome', ''], ['sim P&L', 'num'],
+        ['broker', ''], ['entry', 'num'], ['exit', 'num'], ['outcome', ''], ['P&L', 'num'], ['Δentry pip', 'num'],
         ['Δexit pip', 'num'], ['ΔP&L EUR', 'num'], ['ΔP&L pip', 'num'], ['ΔP&L %', 'num'],
-        ['esito uguale', ''], ['spaiato', '']]) {
+        ['same outcome', ''], ['unpaired', '']]) {
       const th = document.createElement('th');
       th.textContent = label;
       th.className = cls;
@@ -489,16 +489,16 @@ function renderTradeSkew() {
       cell(row, bk.reason || ''); cell(row, money(bk.pl), 'num');
       cell(row, pips(r.entryDiff), 'num'); cell(row, pips(r.exitDiff), 'num'); cell(row, money(r.plDiff), 'num');
       cell(row, pips(r.plDiffPips), 'num'); cell(row, pct2(r.plDiffPct), 'num');
-      cell(row, r.outcomeMatch === null || r.outcomeMatch === undefined ? '' : r.outcomeMatch ? 'sì' : 'no');
+      cell(row, r.outcomeMatch === null || r.outcomeMatch === undefined ? '' : r.outcomeMatch ? 'yes' : 'no');
       cell(row, r.unpaired || '');
     }
-    if (!body.rows.length) cell(body.insertRow(), 'nessun trade', 'hint').colSpan = 17;
+    if (!body.rows.length) cell(body.insertRow(), 'no trade', 'hint').colSpan = 17;
     box.append(h, table);
   }
   if (!box.children.length) {
     const p = document.createElement('p');
     p.className = 'hint';
-    p.textContent = 'nessun trade accoppiato ancora';
+    p.textContent = 'no paired trade yet';
     box.appendChild(p);
   }
 }
@@ -563,7 +563,7 @@ async function refreshChart() {
       const mine = c.feeds[f.feed] || (c.feeds[f.feed] = { feed: f.feed, provider: f.provider, account: f.account, candles: [] });
       if (rows.length) mine.candles = mine.candles.filter((r) => r[0] < rows[0][0]).concat(rows);
     }
-  } catch (error) { $('chart-hover').textContent = `candele: ${error.message || error}`; }
+  } catch (error) { $('chart-hover').textContent = `candles: ${error.message || error}`; }
   const reference = c.reference || (group.reference ? feedOf(group.reference) : null);
   LiveChart.setData({ candlesPayload: { reference, feeds: Object.values(c.feeds) },
                       skewPayload: state.skew[`${group.instrument}|${group.granularity}`],
@@ -629,13 +629,13 @@ function fillStrategies() {
   if (c && c.kind === 'picked') {
     // a simulated run picked but not starred: offered for this start only
     const s = c.summary || {};
-    select.add(new Option(`scelta: ${s.strategy} · ${s.instrument} ${s.granularity}`
+    select.add(new Option(`chosen: ${s.strategy} · ${s.instrument} ${s.granularity}`
       + (c.source.kind === 'sweep' ? ` · sweep run #${c.source.n}` : ` · run ${String(c.source.id).slice(0, 8)}`),
       'picked'));
   }
   if (pick.favourites.length) {
     const group = document.createElement('optgroup');
-    group.label = 'preferite';
+    group.label = 'favourites';
     for (const f of pick.favourites) {
       const option = new Option(favLabel(f), 'fav:' + f.id);
       option.title = paramsText(f.fields);
@@ -644,8 +644,8 @@ function fillStrategies() {
     select.appendChild(group);
   }
   const plain = document.createElement('optgroup');
-  plain.label = pick.favourites.length ? 'tutte le strategie (senza simulazione)'
-    : 'strategie (nessuna preferita: segna un run di una simulazione con ★)';
+  plain.label = pick.favourites.length ? 'every strategy (no simulation)'
+    : 'strategies (no favourite: star a run of a simulation with ★)';
   for (const name of pick.stores.strategies) plain.appendChild(new Option(name, 'plain:' + name));
   select.appendChild(plain);
   select.value = !c ? select.options[0].value
@@ -690,13 +690,13 @@ function renderSummary() {
   if (!c) return;
   const head = document.createElement('h4');
   if (c.kind === 'plain') {
-    head.textContent = `${c.fields.strategy} · parametri di default`;
+    head.textContent = `${c.fields.strategy} · default parameters`;
     box.appendChild(head);
     const p = document.createElement('p');
     p.className = 'hint';
-    p.textContent = 'nessuna simulazione dietro questa scelta: la strategia parte con i suoi '
-      + 'default. Per andare live su un form provato, segna un run di una simulazione con ★, '
-      + 'oppure scegli tra le simulate.';
+    p.textContent = 'no simulation behind this choice: the strategy starts with its '
+      + 'defaults. To go live on a form that was tried, star a run of a simulation with ★, '
+      + 'or choose among the simulated ones.';
     box.appendChild(p);
     box.appendChild(paramsBlock(c.fields));
     return;
@@ -708,15 +708,15 @@ function renderSummary() {
   const starred = !!favOf(c.source);
   star.textContent = starred ? '★' : '☆';
   star.setAttribute('aria-pressed', String(starred));
-  star.title = starred ? 'togli dalle preferite' : 'segna come preferita';
+  star.title = starred ? 'take it off the favourites' : 'mark it a favourite';
   star.addEventListener('click', () => toggleFavourite(c.source).catch((e) => newSay(String(e.message || e))));
   head.append(star, ` ${s.strategy} · ${s.instrument} ${s.granularity}`);
   box.appendChild(head);
   const from = document.createElement('p');
   from.className = 'hint';
   from.textContent = c.source.kind === 'sweep'
-    ? `simulazione ${c.source.name ? '"' + c.source.name + '" ' : ''}${c.source.id} · run #${c.source.n}`
-    : `backtest salvato ${c.source.id}`;
+    ? `simulation ${c.source.name ? '"' + c.source.name + '" ' : ''}${c.source.id} · run #${c.source.n}`
+    : `saved backtest ${c.source.id}`;
   box.appendChild(from);
   const dl = document.createElement('dl');
   const row = (k, v) => {
@@ -724,10 +724,10 @@ function renderSummary() {
     const dd = document.createElement('dd'); dd.textContent = v;
     dl.append(dt, dd);
   };
-  row('periodo', `${day(s.from)} .. ${day(s.to)}`);
+  row('period', `${day(s.from)} .. ${day(s.to)}`);
   row('trade', s.trades === null || s.trades === undefined ? '—' : String(s.trades));
-  row('netto', num(s.net));
-  row('capitale', `${num(s.start)} → ${num(s.final)}`);
+  row('net', num(s.net));
+  row('capital', `${num(s.start)} → ${num(s.final)}`);
   row('ROI / CAR', `${pct(s.roi)} / ${pct(s.car)}`);
   row('win rate', s.winRate === null || s.winRate === undefined ? '—' : pct(s.winRate * 100));
   row('profit factor', num(s.profitFactor));
@@ -744,10 +744,10 @@ function renderSummary() {
       .filter(([, v]) => v !== null && v !== undefined && v !== '')) }).toString();
   link.target = '_blank';   // the live page stays where it was
   link.rel = 'noopener';
-  link.textContent = 'apri il run ↗';
+  link.textContent = 'open the run ↗';
   const foot = document.createElement('p');
   foot.className = 'hint';
-  foot.textContent = 'il form va live com\'è stato simulato; strumento, timeframe e rischio qui sopra restano tuoi da cambiare';
+  foot.textContent = 'the form goes live as it was simulated; the instrument, timeframe and risk above are yours to change';
   box.append(link, foot);
 }
 
@@ -756,14 +756,14 @@ function paramsBlock(fields) {
   const wrap = document.createElement('div');
   const list = paramList(fields);
   const h = document.createElement('h5');
-  h.textContent = list.length ? 'parametri' : 'parametri: nessuno (la strategia non ne ha di liberi)';
+  h.textContent = list.length ? 'parameters' : 'parameters: none (the strategy has no free ones)';
   wrap.appendChild(h);
   if (!list.length) return wrap;
   const dl = document.createElement('dl');
   for (const p of list) {
     const dt = document.createElement('dt'); dt.textContent = p.label; dt.title = p.name;
     const dd = document.createElement('dd'); dd.textContent = String(p.value);
-    if (p.isDefault) { dd.className = 'hint'; dd.textContent += ' (default)'; dd.title = 'il form non lo fissava: la strategia ha preso il suo default'; }
+    if (p.isDefault) { dd.className = 'hint'; dd.textContent += ' (default)'; dd.title = 'the form did not set it: the strategy took its default'; }
     dl.append(dt, dd);
   }
   wrap.appendChild(dl);
@@ -807,7 +807,7 @@ function starCell(row, source) {
   const starred = !!favOf(source);
   star.textContent = starred ? '★' : '☆';
   star.setAttribute('aria-pressed', String(starred));
-  star.title = starred ? 'togli dalle preferite' : 'segna come preferita';
+  star.title = starred ? 'take it off the favourites' : 'mark it a favourite';
   star.addEventListener('click', (event) => {
     event.stopPropagation();
     toggleFavourite(source).catch((e) => simSay(String(e.message || e)));
@@ -822,7 +822,7 @@ function simTable(headers) {
   for (const h of headers) {
     const th = document.createElement('th');
     th.textContent = h;
-    if (h.startsWith('#') || ['trade', 'run', 'capitale', 'netto', 'ROI', 'MDD%', 'migliore'].includes(h)) th.className = 'num';
+    if (h.startsWith('#') || ['trades', 'run', 'capital', 'net', 'ROI', 'MDD%', 'best'].includes(h)) th.className = 'num';
     head.appendChild(th);
   }
   table.appendChild(document.createElement('tbody'));
@@ -840,8 +840,8 @@ async function renderSim() {
   if (pick.tab === 'runs') {
     const { runs } = await ask('api/runs');
     count(runs.length);
-    if (!runs.length) { list.textContent = 'nessun backtest salvato'; return; }
-    const table = simTable(['', 'run', 'salvato', 'strategia', 'mercato', 'periodo', 'parametri', 'trade', 'capitale']);
+    if (!runs.length) { list.textContent = 'no backtest saved'; return; }
+    const table = simTable(['', 'run', 'saved', 'strategy', 'market', 'period', 'parameters', 'trades', 'capital']);
     for (const run of runs) {
       const row = table.tBodies[0].insertRow();
       row.dataset.pick = run.id;
@@ -865,12 +865,12 @@ async function renderSim() {
     const job = pick.job;
     const back = document.createElement('button');
     back.type = 'button';
-    back.textContent = '‹ tutte le simulazioni';
+    back.textContent = '‹ every simulation';
     back.addEventListener('click', () => { pick.job = null; renderSim().catch((e) => simSay(String(e.message || e))); });
     const title = document.createElement('p');
     title.textContent = `${job.name ? '"' + job.name + '" · ' : ''}${job.id} · ${(job.fields || {}).strategy} ${(job.fields || {}).instrument} ${(job.fields || {}).granularity} · ${job.done.length} run`;
     list.append(back, title);
-    const table = simTable(['', '#', 'parametri', 'trade', 'netto', 'capitale', 'ROI', 'MDD%']);
+    const table = simTable(['', '#', 'parameters', 'trades', 'net', 'capital', 'ROI', 'MDD%']);
     const rows = job.done.filter((r) => !r.error).sort((a, b) => (b.final || 0) - (a.final || 0));
     count(rows.length);
     for (const r of rows) {
@@ -900,8 +900,8 @@ async function renderSim() {
   }
   const { sweeps } = await ask('api/sweeps');
   count(sweeps.length);
-  if (!sweeps.length) { list.textContent = 'nessuna simulazione salvata'; return; }
-  const table = simTable(['set', 'nome', 'salvato', 'strategia', 'mercato', 'periodo', 'run', 'migliore']);
+  if (!sweeps.length) { list.textContent = 'no simulation saved'; return; }
+  const table = simTable(['set', 'name', 'saved', 'strategy', 'market', 'period', 'run', 'best']);
   for (const set of sweeps) {
     const row = table.tBodies[0].insertRow();
     row.dataset.pick = set.id;
@@ -909,7 +909,7 @@ async function renderSim() {
     cell(row, `${set.instrument} ${set.granularity}`); cell(row, `${set.from || ''} .. ${set.to || ''}`);
     cell(row, `${set.runs}/${set.total}`, 'num'); cell(row, num(set.best), 'num');
     row.addEventListener('click', async () => {
-      simSay('leggo la simulazione…');
+      simSay('reading the simulation…');
       try { pick.job = await ask('api/sweeps/' + set.id); }
       catch (error) { simSay(String(error.message || error)); return; }
       renderSim().catch((e) => simSay(String(e.message || e)));

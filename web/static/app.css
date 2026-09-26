@@ -129,6 +129,8 @@ h1 img { height: 28px; width: auto; }
 
 /* the theme switch: three buttons in one frame, the one in force pressed */
 #theme { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-s); }
+/* the language, first in the theme's box (i18n.js): as small as its buttons */
+#theme #lang { height: 28px; width: auto; padding: 0 2px; border: 0; background: transparent; font-size: var(--fs-small); color: var(--text-2); }
 #theme button { height: 28px; width: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
   border: 0; border-radius: 4px; color: var(--text-3); }
 #theme button:hover { color: var(--text); }
@@ -1094,11 +1096,12 @@ dialog.sheet::backdrop { background: var(--backdrop); } /* token in tokens.css: 
 
 /* ------------------------------------------------------------ docs */
 
-/* the two tabs, the way the live page's sim-tabs are: the one open ringed */
-#docs-tabs { display: flex; gap: 8px; margin: var(--space-4) var(--gutter) 0; }
-#docs-tabs [aria-selected="true"] { border-color: var(--entry); color: var(--text); }
-#docs-guide[hidden], #docs-api[hidden] { display: none; }
-@media (max-width: 640px) { #docs-tabs { margin-left: var(--space-3); margin-right: var(--space-3); } }
+/* the two tabs, the way the live page's sim-tabs are: the one open ringed;
+   the settings page's sections the same way */
+#docs-tabs, #settings-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: var(--space-4) var(--gutter) 0; }
+#docs-tabs [aria-selected="true"], #settings-tabs [aria-selected="true"] { border-color: var(--entry); color: var(--text); }
+#docs-guide[hidden], #docs-api[hidden], section[role="tabpanel"][hidden] { display: none; }
+@media (max-width: 640px) { #docs-tabs, #settings-tabs { margin-left: var(--space-3); margin-right: var(--space-3); } }
 
 /* how a strategy is written, and the helpers read off the code: prose kept to
    a readable measure, the names and signatures in the mono face */

@@ -34,6 +34,19 @@
 </header>
 
 <!--
+  One section at a time, a tab each: the page had grown too long to read.
+  The address says which (#mcp-panel, or anything inside one), else the one
+  last opened in this browser (settings.js).
+-->
+<div id="settings-tabs" role="tablist" aria-label="settings">
+  <button type="button" role="tab" id="tab-server" aria-controls="server-panel" aria-selected="true">this server</button>
+  <button type="button" role="tab" id="tab-data" aria-controls="data-panel" aria-selected="false" tabindex="-1">market data</button>
+  <button type="button" role="tab" id="tab-quality" aria-controls="quality-panel" aria-selected="false" tabindex="-1">data quality</button>
+  <button type="button" role="tab" id="tab-mcp" aria-controls="mcp-panel" aria-selected="false" tabindex="-1">AI assistants</button>
+  <button type="button" role="tab" id="tab-lang" aria-controls="lang-panel" aria-selected="false" tabindex="-1">languages</button>
+</div>
+
+<!--
   The candle exports waiting in IMPORT_DIR, a way to add one, and a way to
   merge them all into the stores. The import is scripts/import_csv.py run by
   the service, so its report here is what it prints on the command line.
@@ -43,7 +56,7 @@
   from here (etc/settings.py ACCOUNTS), and what goes with it: a real one's
   minimums for a promotion and its loss limit, a demo one's real server.
 -->
-<section id="server-panel">
+<section id="server-panel" role="tabpanel" aria-labelledby="tab-server">
   <h2 class="panel-title">this server</h2>
   <div id="server-state"></div>
   <div id="promote-box" class="market-row" hidden>
@@ -55,7 +68,7 @@
   <p id="server-note" role="status"></p>
 </section>
 
-<section id="data-panel">
+<section id="data-panel" role="tabpanel" aria-labelledby="tab-data" hidden>
   <!--
     Where the stores and the calendar are, and whether this server writes
     them (data/market.py): prod and dev read one folder, one of them writes it.
@@ -94,7 +107,7 @@
     </div>
     <pre id="market-runs" hidden></pre>
     <p class="dim">Another server - the PC, a real money one - copies this market data with a
-      token of the mirror or pc role, made under AI assistants below.</p>
+      token of the mirror or pc role, made in the AI assistants tab.</p>
   </div>
   <!-- what the stores hold now: the series each one keeps, and the ones the
        viewer builds from them (data/store.py) -->
@@ -180,7 +193,7 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
   trading, kept in MARKET/archive a provider, and set against the stores -
   the numbers first, and what a difference does to a favourite's trades.
 -->
-<section id="quality-panel">
+<section id="quality-panel" role="tabpanel" aria-labelledby="tab-quality" hidden>
   <h2 class="panel-title">data quality</h2>
   <div id="record-box" class="market-row">
     <label>record from the brokers: provider INSTRUMENT granularity, one a line
@@ -209,11 +222,31 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
 </section>
 
 <!--
+  The pages' languages (web/i18n.py, static/i18n.js): the built-in ones, and
+  the ones uploaded here - a catalogue of the pages' English texts, each with
+  its text in the language. Download the template to start one.
+-->
+<section id="lang-panel" role="tabpanel" aria-labelledby="tab-lang" hidden>
+  <h2 class="panel-title">languages</h2>
+  <table id="lang-table">
+    <thead><tr><th>code</th><th>language</th><th class="num">translated</th><th></th><th></th></tr></thead>
+    <tbody id="lang-rows"></tbody>
+  </table>
+  <div class="market-row">
+    <a id="lang-template" class="button" href="api/i18n/template/download" download="template.json">download the template</a>
+    <label>code <input type="text" id="lang-code" size="6" maxlength="6" placeholder="fr" spellcheck="false"></label>
+    <label>catalogue <input type="file" id="lang-file" accept=".json,application/json"></label>
+    <button type="button" id="lang-upload" data-icon="upload">upload</button>
+  </div>
+  <p id="lang-note" role="status"></p>
+</section>
+
+<!--
   The door for an AI assistant of your own (web/mcp.py): the token it
   connects with, who holds one, and the strategies it wrote. They are drafts,
   backtested only in a sandbox, until enabled here after reading the code.
 -->
-<section id="mcp-panel">
+<section id="mcp-panel" role="tabpanel" aria-labelledby="tab-mcp" hidden>
   <h2 class="panel-title">AI assistants (MCP)</h2>
   <div id="mcp-state"></div>
   <div id="mcp-address">
@@ -459,6 +492,7 @@ class MyEma(H4):
   </div>
 </dialog>
 
+<script src="static/i18n.js"></script>
 <script src="static/menu.js"></script>
 <script src="static/settings.js"></script>
 </body>

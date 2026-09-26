@@ -66,6 +66,8 @@ const sandbox = {
   getComputedStyle: () => ({ getPropertyValue: () => '' }),
   window: { devicePixelRatio: 2, addEventListener() {} },
   history: { replaceState() {} }, location: { search: '' },
+  // web/static/i18n.js's, in English: a template's values put in
+  t: (text, values) => String(text).replace(/\{(\w+)\}/g, (all, name) => (values && name in values ? values[name] : all)),
   // the timeframe ladder debounces its fetch; here it is run inline, because
   // what is under test is which series it picks and not how long it waits
   setTimeout: (fn) => { fn(); return 0; }, clearTimeout() {},
@@ -305,8 +307,9 @@ assert.ok(!run(`progressLine({ instrument: 'X', granularity: 'H4',
    is none. The collecting happens in another tab, on the site's own page.
    settings.js is a page of its own, so it gets a context of its own */
 const settings = vm.createContext({ console, Math, Number, String, Array, JSON, Date, Object,
-  Promise, document: sandbox.document, fetch: sandbox.fetch, setTimeout: sandbox.setTimeout,
-  location: sandbox.location });
+  // its tabs ask the document for them, and the window for the address
+  Promise, document: { ...sandbox.document, querySelectorAll: () => [] }, fetch: sandbox.fetch,
+  setTimeout: sandbox.setTimeout, location: sandbox.location, window: { addEventListener: () => {} } });
 vm.runInContext(fs.readFileSync(
   path.join(__dirname, '..', 'web', 'static', 'settings.js'), 'utf8'), settings);
 const inSettings = (code) => vm.runInContext(code, settings);
@@ -659,7 +662,7 @@ const inSim = (code) => vm.runInContext(code, simPage);
 assert.match(inSim(`analyse({ kpi: { roi: 30, car: 20, profitFactor: 2.5, expectancy: 5, winRate: 0.5,
   maxDrawdownPct: 5, riskReward: 2, sharpe: 2.5, carMdd: 4, ulcer: 2 },
   margin: { ok: false, leverage: 30, peakMarginPct: 140, minFree: -5, breachAt: 0, negativeAt: null } }).verdict`),
-  /margine/);
+  /out of margin/);
 assert.match(inSim(`marginText({ ok: true, leverage: 30, peakMargin: 1000, peakMarginPct: 1, minFree: 90000,
   maxOpen: 2, breachAt: null, negativeAt: null })`), /always room/);
 inSim(`var T0 = Date.UTC(2020, 0, 1), T1 = Date.UTC(2020, 11, 31, 23, 59, 59), Q = (T1 - T0) / 4;

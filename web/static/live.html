@@ -43,11 +43,11 @@
 -->
 <section id="skew-board">
   <table id="skew-table" class="live-small">
-    <thead><tr><th>feed</th><th>Δ prezzo vs riferimento</th><th class="num">spread mediano (pip)</th>
-      <th class="num">latenza mediana (s)</th><th class="num">accoppiati</th><th class="num">Δentry medio (pip)</th>
-      <th class="num">esiti diversi</th><th class="num">spaiati</th><th class="num">ΔP&amp;L tot EUR</th>
+    <thead><tr><th>feed</th><th>Δ price vs reference</th><th class="num">median spread (pip)</th>
+      <th class="num">median latency (s)</th><th class="num">paired</th><th class="num">mean Δentry (pip)</th>
+      <th class="num">other outcome</th><th class="num">unpaired</th><th class="num">ΔP&amp;L total EUR</th>
       <th class="num">ΔP&amp;L pip</th><th class="num">ΔP&amp;L %</th><th>parity</th></tr></thead>
-    <tbody id="skew-rows"><tr><td colspan="12" class="hint">in attesa dei dati&hellip;</td></tr></tbody>
+    <tbody id="skew-rows"><tr><td colspan="12" class="hint">waiting for the data&hellip;</td></tr></tbody>
   </table>
   <p id="skew-note" class="hint"></p>
 </section>
@@ -59,9 +59,9 @@
 -->
 <section id="live-chart-panel">
   <div id="chart-controls">
-    <label>gruppo <select id="chart-group"></select></label>
-    <label>candele di <select id="chart-feed"></select></label>
-    <label><input type="checkbox" id="chart-follow" checked> segui</label>
+    <label>group <select id="chart-group"></select></label>
+    <label>candles of <select id="chart-feed"></select></label>
+    <label><input type="checkbox" id="chart-follow" checked> follow</label>
     <span id="chart-ranges">
       <button type="button" data-range="1h">1h</button>
       <button type="button" data-range="4h">4h</button>
@@ -82,7 +82,7 @@
 
 <!-- every signal twice: as simulated on the reference and as placed on the broker -->
 <section id="trade-skew">
-  <div id="trade-skew-tables"><p class="hint">in attesa dei dati&hellip;</p></div>
+  <div id="trade-skew-tables"><p class="hint">waiting for the data&hellip;</p></div>
 </section>
 
 <!--
@@ -111,24 +111,24 @@
   list is the favourites - sweep runs, and the saved backtests of before,
   starred (api/favourites) - and the aside shows what that simulation
   made. The plain strategies, with their defaults and no simulation behind
-  them, stay in a second group. "scegli tra le simulate" opens every saved
+  them, stay in a second group. "choose among the simulated" opens every saved
   run and sweep to pick from, starred or not.
 -->
 <section id="new-live">
   <h3 class="panel-title">new live session</h3>
   <div class="new-grid">
     <form id="new-form" autocomplete="off">
-      <label>strategia <select id="new-strategy"></select></label>
-      <button type="button" id="choose-sim" data-icon="list">scegli tra le simulate&hellip;</button>
+      <label>strategy <select id="new-strategy"></select></label>
+      <button type="button" id="choose-sim" data-icon="list">choose among the simulated&hellip;</button>
       <label>instrument <select id="new-instrument"></select></label>
       <label>timeframe <select id="new-granularity"></select></label>
       <label>risk % <input type="number" id="new-risk" value="1" min="0.01" max="100" step="0.01"></label>
-      <label title="lo stesso numero su ogni conto: un conto in USD (eToro) lo prende 1:1">capitale
+      <label title="the same number on every account: an account in USD (eToro) takes it 1:1">capital
         <input type="number" id="new-capital" min="1" step="any" required></label>
       <fieldset id="new-accounts"><legend>accounts</legend><p class="hint">reading the accounts&hellip;</p></fieldset>
       <button type="submit" id="new-start" class="primary" data-icon="play">start</button>
     </form>
-    <aside id="new-summary"><p class="hint">scegli una strategia: qui compare il riassunto della sua simulazione</p></aside>
+    <aside id="new-summary"><p class="hint">choose a strategy: the summary of its simulation shows here</p></aside>
   </div>
   <p id="new-description" class="hint"></p>
   <p id="new-message" hidden></p>
@@ -139,7 +139,7 @@
 <dialog id="sim-dialog" class="sheet" aria-labelledby="sim-dialog-title">
   <form method="dialog" class="dialog-head">
     <div class="dialog-heading">
-      <h2 class="dialog-title" id="sim-dialog-title">strategie simulate <span class="dialog-count" id="sim-count"></span></h2>
+      <h2 class="dialog-title" id="sim-dialog-title">simulated strategies <span class="dialog-count" id="sim-count"></span></h2>
       <p class="dialog-sub">every simulated form on disk &middot; click a row to pick it &middot; the star keeps it among the favourites</p>
     </div>
     <div class="dialog-tools">
@@ -149,10 +149,10 @@
   </form>
   <div class="dialog-body flush">
     <div id="sim-tabs">
-      <button type="button" data-tab="sweeps" aria-pressed="true">simulazioni (sweep)</button>
-      <button type="button" data-tab="runs" aria-pressed="false">backtest salvati</button>
+      <button type="button" data-tab="sweeps" aria-pressed="true">simulations (sweeps)</button>
+      <button type="button" data-tab="runs" aria-pressed="false">saved backtests</button>
     </div>
-    <div id="sim-list"><p class="hint">leggo&hellip;</p></div>
+    <div id="sim-list"><p class="hint">reading&hellip;</p></div>
     <p id="sim-message" class="hint" hidden></p>
   </div>
 </dialog>
@@ -190,6 +190,7 @@
   </form>
 </dialog>
 
+<script src="static/i18n.js"></script>
 <script src="static/menu.js"></script>
 <script src="static/livechart.js"></script>
 <script src="static/live.js"></script>

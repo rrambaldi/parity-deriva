@@ -188,7 +188,7 @@ function draw() {
     fit(strip, sctx, 120);   // sizing it clears it
     ctx.fillStyle = pal.text3;
     ctx.font = '12px ' + pal.mono;
-    ctx.fillText('nessuna candela ancora', 12, 24);
+    ctx.fillText(t('no candle yet'), 12, 24);
     return;
   }
   const view = visible();
@@ -577,9 +577,9 @@ function drawStrip(pal, view, x, step) {
     lx += 20;
     label(text);
   };
-  label(`Δ close vs ${state.reference || 'riferimento'} (pip)`);
+  label(t('Δ close vs {feed} (pip)', { feed: state.reference || t('reference') }));
   for (const l of state.skew) legend(l.feed, dashOf(l.provider));
-  if (!state.skew.length) label('nessuna serie di skew');
+  if (!state.skew.length) label(t('no skew series'));
 }
 
 /* ------------------------------------------------------------ gestures */

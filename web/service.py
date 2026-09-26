@@ -82,7 +82,7 @@ from parity_deriva.lib import indicators
 from parity_deriva.lib import news as news_module
 from parity_deriva.performance import report as report_module
 from parity_deriva.strategy import plugins, uploaded
-from parity_deriva.web import livesessions, mcp, oauth
+from parity_deriva.web import i18n, livesessions, mcp, oauth
 from parity_deriva.web import logs as logs_page
 
 
@@ -3058,7 +3058,7 @@ class Handler(BaseHTTPRequestHandler):
 		query = urllib.parse.parse_qs(parsed.query)
 
 		try:
-			if mcp.route(self, 'GET', route, query):
+			if mcp.route(self, 'GET', route, query) or i18n.route(self, 'GET', route, query):
 				return
 			if logs_page.route(self, 'GET', route, query):
 				return
@@ -3229,7 +3229,7 @@ class Handler(BaseHTTPRequestHandler):
 		try:
 			# MCP and OAuth have their own door, and the settings page's
 			# MCP routes check the header themselves
-			if mcp.route(self, 'POST', route, query):
+			if mcp.route(self, 'POST', route, query) or i18n.route(self, 'POST', route, query):
 				return
 			# the calendar route also takes the collector's token, because a
 			# script running on forexfactory's page cannot send a custom

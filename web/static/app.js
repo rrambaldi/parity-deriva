@@ -1327,10 +1327,10 @@ function overlay(trade, view, x, y, plotW, n, step, p) {
     ctx.textBaseline = 'bottom';
     if (side === 'right') {
       ctx.textAlign = 'right';
-      ctx.fillText(`${label} ${price(value)}`, AXIS.left + plotW - 4, py - 3);
+      ctx.fillText(`${t(label)} ${price(value)}`, AXIS.left + plotW - 4, py - 3);
     } else {
       ctx.textAlign = 'left';
-      ctx.fillText(`${label} ${price(value)}`, AXIS.left + 4, py - 3);
+      ctx.fillText(`${t(label)} ${price(value)}`, AXIS.left + 4, py - 3);
     }
   };
 
@@ -1738,7 +1738,7 @@ function drawDrawdown() {
     dctx.fill();
     dctx.textAlign = px > width / 2 ? 'right' : 'left';
     dctx.textBaseline = 'bottom';
-    dctx.fillText(`worst ${worst.pct.toFixed(2)}%`, px + (px > width / 2 ? -8 : 8), py - 2);
+    dctx.fillText(t('worst {pct}%', { pct: worst.pct.toFixed(2) }), px + (px > width / 2 ? -8 : 8), py - 2);
   }
 }
 
