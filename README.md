@@ -1469,11 +1469,30 @@ archive and on every demo server - which that server judges (`push_record`);
 its verdict is the answer. A trade server takes its market data from the
 archive like the PC does: a mirror token there, the archive as upstream.
 
-## Simulations in an S3 bucket
+## Old simulations off the disk: an S3 bucket, a Google Drive, a OneDrive
 
 The runs of a set - the trades the run page draws, a few MB each - are what
-fills the disk; the set's own file, its table, is small. With a bucket in
-`parity_deriva/.env`, any S3 one (AWS, Hetzner, Backblaze, MinIO, Garage):
+fills the disk; the set's own file, its table, is small. Where they can go is
+chosen on the settings page (this server, "old simulations") and tested
+there - a file written, read back and deleted - before it is kept:
+
+- an S3 bucket, any: AWS, Hetzner, Backblaze, MinIO, Garage - its endpoint,
+  name, access key and secret, region and prefix (`lib/s3.py` speaks S3
+  itself, Signature Version 4 over urllib, no boto3);
+- a folder of a Google Drive or of a OneDrive, through rclone. The page gives
+  the command to run on a PC with a browser, e.g. `rclone authorize
+  "onedrive"`; its login opens there, and what it prints is pasted back on
+  the page. For Google Drive the command asks for the files rclone makes
+  only (`drive.file`), and a client ID of one's own goes first - an OAuth
+  client of the "Desktop app" kind with the Drive API on: rclone's shared
+  one is being retired during 2026.
+
+The choice is `DATA_DIR/storage.json` and the Drive's login
+`DATA_DIR/rclone.conf`, both readable by the service's user only; rclone keeps
+the token fresh (a OneDrive left unused some 90 days asks for a new one).
+rclone is looked for beside the service's Python (the venv's `bin`), on the
+PATH, or where `PARITY_DERIVA_RCLONE` says; the Docker image has it. With
+nothing chosen on the page, the bucket `.env` names is taken:
 
 ```
 export PARITY_DERIVA_S3_ENDPOINT=https://fsn1.your-objectstorage.com
@@ -1484,19 +1503,18 @@ export PARITY_DERIVA_S3_REGION=us-east-1          # the default
 export PARITY_DERIVA_S3_PREFIX=parity-deriva      # the default: two servers may share a bucket
 ```
 
-the simulate page's list of sets has "to the bucket" on each: its runs go
-there (`<prefix>/sweeps/<set>/<n>.json.gz`), each removed from here once the
-bucket has it, and the list says "in the bucket". The set stays in every
-list, mix and favourite; a run opened comes back by itself, and "bring back"
-brings them all. Deleting a set deletes its runs in the bucket too - a
-bucket that does not answer keeps the set. For cron, the old sets nobody
-uses (not in a mix, no run starred):
+The simulate page's list of sets then has "to the bucket" on each: its runs
+go there (`sweeps/<set>/<n>.json.gz`), each removed from here once it is
+there - to a Drive the folder in one rclone call, every file checked - and
+the list says "in the bucket". The set stays in every list, mix and
+favourite; a run opened comes back by itself, and "bring back" brings them
+all. Deleting a set deletes its runs there too - storage that does not
+answer keeps the set. For cron, the old sets nobody uses (not in a mix, no
+run starred):
 
 ```
 python scripts/cold.py --older-than 30 [--dry-run]
 ```
-
-`lib/s3.py` speaks S3 itself (Signature Version 4 over urllib), no boto3.
 
 # Tests
 

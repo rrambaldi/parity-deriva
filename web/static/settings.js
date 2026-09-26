@@ -371,6 +371,74 @@ $('trade-save').addEventListener('click', async () => {
   } catch (error) { serverSay(error); }
 });
 
+/* where a set's runs go off this disk (api/storage, web/storage.py) */
+
+const STORAGE = { gdrive: 'a Google Drive', onedrive: 'a OneDrive' };
+
+function showStorage(s) {
+  $('storage-kind').value = s.kind || 'none';
+  const b = s.s3 || {};
+  $('storage-state').textContent = !s.kind ? 'nothing chosen: the runs stay on this disk'
+    : s.from === 'env' ? `the S3 bucket ${b.bucket} of .env (PARITY_DERIVA_S3_*): a choice here goes before it`
+      : s.kind === 's3' ? `the S3 bucket ${b.bucket} at ${b.endpoint}`
+        : `the folder ${s.folder} of ${STORAGE[s.kind]}` + (s.rclone ? '' : ' - but rclone is not on this server');
+  $('s3-endpoint').value = b.endpoint || '';
+  $('s3-bucket').value = b.bucket || '';
+  $('s3-access').value = b.accessKey || '';
+  $('s3-region').value = b.region || '';
+  $('s3-prefix').value = b.prefix || '';
+  $('s3-secret').value = '';
+  $('s3-secret').placeholder = b.secretKey && s.from === 'page' ? 'kept: type a new one to change it' : '';
+  $('drive-folder').value = s.folder || 'parity-deriva';
+  $('drive-client-id').value = s.clientId || '';
+  $('drive-client-secret').value = '';
+  $('drive-client-secret').placeholder = s.clientSecret ? 'kept: type it again to run the command' : '';
+  $('drive-token').value = '';
+  $('drive-token').placeholder = s.token ? 'logged in: paste a new one only to log in again' : '';
+  showStorageKind();
+}
+
+// the command the user runs on a PC: rclone's own, for access to the files it makes only
+function driveCommand() {
+  if ($('storage-kind').value === 'onedrive') return 'rclone authorize "onedrive"';
+  const id = $('drive-client-id').value.trim();
+  const options = id ? { client_id: id, client_secret: $('drive-client-secret').value.trim(), scope: 'drive.file' }
+    : { scope: 'drive.file' };
+  return `rclone authorize "drive" "${btoa(JSON.stringify(options)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}"`;
+}
+
+function showStorageKind() {
+  const kind = $('storage-kind').value;
+  $('storage-s3').hidden = kind !== 's3';
+  $('storage-drive').hidden = !STORAGE[kind];
+  $('storage-google').hidden = kind !== 'gdrive';
+  $('drive-command').textContent = driveCommand();
+}
+
+$('storage-kind').addEventListener('change', showStorageKind);
+for (const id of ['drive-client-id', 'drive-client-secret']) $(id).addEventListener('input', showStorageKind);
+$('drive-copy').addEventListener('click', () => navigator.clipboard.writeText($('drive-command').textContent)
+  .then(() => { $('server-note').textContent = 'copied: run it on the PC'; },
+    () => { $('server-note').textContent = 'copy it by hand: the browser refused'; }));
+
+$('storage-save').addEventListener('click', async () => {
+  const kind = $('storage-kind').value;
+  const body = kind === 's3' ? { kind, endpoint: $('s3-endpoint').value, bucket: $('s3-bucket').value,
+    accessKey: $('s3-access').value, secretKey: $('s3-secret').value, region: $('s3-region').value,
+    prefix: $('s3-prefix').value }
+    : STORAGE[kind] ? { kind, token: $('drive-token').value, folder: $('drive-folder').value,
+      clientId: $('drive-client-id').value, clientSecret: $('drive-client-secret').value }
+      : { kind: 'none' };
+  $('storage-save').disabled = true;
+  $('server-note').textContent = kind === 'none' ? '' : 'writing a test file there…';
+  try {
+    showStorage(await post('api/storage', JSON.stringify(body)));
+    $('server-note').textContent = kind === 'none' ? 'forgotten: the runs stay on this disk'
+      : 'tested and saved: a file was written there, read back and deleted';
+  } catch (error) { serverSay(error); }
+  $('storage-save').disabled = false;
+});
+
 $('trade-rows').addEventListener('click', async (event) => {
   const button = event.target.closest('button');
   if (!button) return;
@@ -1018,6 +1086,7 @@ follow();
 
 showLanguages().catch((error) => { $('lang-note').textContent = String(error.message || error); });
 ask('api/server').then(showServer).catch(serverSay);
+ask('api/storage').then(showStorage).catch(serverSay);
 ask('api/market').then((state) => { showMarket(state); showQuality(state); if (marketRunning) followMarket(); })
   .catch((error) => dataLog([String(error.message || error)]));
 showCalendar();

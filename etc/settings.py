@@ -385,6 +385,11 @@ S3_ACCESS_KEY = dotenv('PARITY_DERIVA_S3_ACCESS_KEY')
 S3_SECRET_KEY = dotenv('PARITY_DERIVA_S3_SECRET_KEY')
 S3_REGION = dotenv('PARITY_DERIVA_S3_REGION', 'us-east-1')
 S3_PREFIX = dotenv('PARITY_DERIVA_S3_PREFIX', 'parity-deriva')
+# The bucket may also be chosen on the settings page - an S3 one, or a folder
+# of a Google Drive or a OneDrive (web/storage.py), the page's choice before
+# this one. A Drive goes through rclone: this program, when it is neither
+# beside the service's Python (the venv's bin) nor on the PATH.
+RCLONE = dotenv('PARITY_DERIVA_RCLONE')
 
 CANDLE_DB = dotenv('PARITY_DERIVA_CANDLE_DB', os.path.join(DATA_DIR, 'live', 'candles.db'))
 

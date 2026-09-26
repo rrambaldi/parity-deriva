@@ -3,9 +3,10 @@
 # data comes from, at /setup (the code to open it is in the container's log).
 FROM python:3.12-slim
 
-# openssl: the setup makes a certificate authority and the client certificates
+# openssl: the setup makes a certificate authority and the client certificates;
+# rclone: old simulations to a Google Drive or a OneDrive (web/storage.py)
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends openssl \
+	&& apt-get install -y --no-install-recommends openssl rclone ca-certificates \
 	&& rm -rf /var/lib/apt/lists/*
 
 # the requirements alone first, so a change to the code does not reinstall them

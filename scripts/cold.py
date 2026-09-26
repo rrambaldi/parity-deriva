@@ -8,8 +8,10 @@ freeze): the rule the button on the simulate page is the hand of, for cron.
 A set goes once it was saved more than that many days ago, unless it is in a
 mix or one of its runs is starred: those are the ones opened again. Its table
 stays here - the lists, the mixes and the favourites read it - and its runs'
-files go, each coming back by itself the first time it is opened. The bucket
-is PARITY_DERIVA_S3_* in parity_deriva/.env.
+files go, each coming back by itself the first time it is opened. Where they
+go is chosen on the settings page - an S3 bucket, a Google Drive or a
+OneDrive folder (web/storage.py) - or is the bucket PARITY_DERIVA_S3_* in
+parity_deriva/.env names.
 """
 
 import argparse

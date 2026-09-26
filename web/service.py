@@ -83,7 +83,7 @@ from parity_deriva.lib import s3
 from parity_deriva.lib import news as news_module
 from parity_deriva.performance import report as report_module
 from parity_deriva.strategy import plugins, uploaded
-from parity_deriva.web import access, i18n, livesessions, mcp, oauth, servers
+from parity_deriva.web import access, i18n, livesessions, mcp, oauth, servers, storage
 from parity_deriva.web import logs as logs_page
 
 
@@ -678,7 +678,7 @@ class Service(object):
 				'promoteDays': getattr(self.setup, 'PROMOTE_DAYS', settings.PROMOTE_DAYS),
 				'promoteTrades': getattr(self.setup, 'PROMOTE_TRADES', settings.PROMOTE_TRADES),
 				'dailyLossPct': getattr(self.setup, 'DAILY_LOSS_PCT', settings.DAILY_LOSS_PCT),
-				'halted': self.live.halted(), 'bucket': s3.fromSettings(self.setup) is not None}
+				'halted': self.live.halted(), 'bucket': storage.bucket(self.setup) is not None}
 
 	def setRoles(self, body):
 		try:
@@ -2179,11 +2179,14 @@ class Service(object):
 		cold = self.cold(sweep)
 		if cold:
 			bucket = self.bucket()
-			for name in cold['files']:
-				try:
-					bucket.delete(self.coldKey(sweep, name))
-				except s3.S3Error as exc:
-					raise ServiceError("the set's runs in the bucket: %s - it is kept, try again" % exc)
+			try:
+				if hasattr(bucket, 'dropAll'):
+					bucket.dropAll(self.coldKey(sweep, ''))
+				else:
+					for name in cold['files']:
+						bucket.delete(self.coldKey(sweep, name))
+			except s3.S3Error as exc:
+				raise ServiceError("the set's runs in the bucket: %s - it is kept, try again" % exc)
 		for suffix in ('.json.gz', '.meta.json', '.cold.json'):
 			try:
 				os.remove(self.sweepPath(sweep, suffix))
@@ -2195,12 +2198,21 @@ class Service(object):
 	# ----------------------------------------------------- cold storage
 
 	def bucket(self):
-		"""The S3 bucket the sets' runs go to (lib/s3.py), or a refusal when .env names none."""
-		found = s3.fromSettings(self.setup)
+		"""Where the sets' runs go (web/storage.py), or a refusal when nothing is chosen."""
+		found = storage.bucket(self.setup)
 		if found is None:
-			raise ServiceError("no bucket: set PARITY_DERIVA_S3_ENDPOINT, _BUCKET, _ACCESS_KEY and "
-							   "_SECRET_KEY in parity_deriva/.env, then restart")
+			raise ServiceError("no bucket: choose one on the settings page (this server) - an S3 "
+							   "bucket, a Google Drive or a OneDrive")
 		return found
+
+	def storageData(self):
+		return storage.status(self.setup)
+
+	def setStorage(self, body):
+		try:
+			return storage.save(body, self.setup)
+		except storage.StorageError as exc:
+			raise ServiceError(str(exc))
 
 	@staticmethod
 	def coldKey(sweep, name):
@@ -2232,11 +2244,26 @@ class Service(object):
 		bucket = self.bucket()
 		folder = self.sweepPath(sweep, '')
 		held = self.cold(sweep) or {'files': {}}
+		names = [n for n in sorted(os.listdir(folder)) if not n.endswith('.part')
+				 and os.path.isfile(os.path.join(folder, n))] if os.path.isdir(folder) else []
 		freed = 0
-		for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else ():
+		if names and hasattr(bucket, 'sendAll'):
+			# a Drive, through rclone: the folder in one call, each file checked
+			# on the way; ponytail: a set of hundreds of MB may outlast a
+			# proxy's timeout - the send goes on, and the list says it after
+			try:
+				bucket.sendAll(folder, self.coldKey(sweep, ''))
+			except s3.S3Error as exc:
+				raise ServiceError("set %s: %s" % (sweep, exc))
+			sent = dict((n, os.path.getsize(os.path.join(folder, n))) for n in names)
+			held['files'].update(sent)
+			held['at'] = int(time.time() * 1000)
+			self._write(self.sweepPath(sweep, '.cold.json'), json.dumps(held).encode())
+			for name in names:
+				os.remove(os.path.join(folder, name))
+			freed, names = sum(sent.values()), []
+		for name in names:
 			path = os.path.join(folder, name)
-			if name.endswith('.part') or not os.path.isfile(path):
-				continue
 			with open(path, 'rb') as handle:
 				data = handle.read()
 			try:
@@ -3213,7 +3240,7 @@ class Handler(BaseHTTPRequestHandler):
 			if route == '/api/sweeps':
 				# and whether their runs have a bucket to go to (freeze)
 				return self.sendJSON({'sweeps': self.service.sweeps(),
-									  'bucket': s3.fromSettings(self.service.setup) is not None})
+									  'bucket': storage.bucket(self.service.setup) is not None})
 			if route.startswith('/api/sweeps/'):
 				# <id> is the set, <id>/<n> one run of it, whole, and
 				# <id>/<n>/excursions where price went after its entries
@@ -3294,6 +3321,8 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendJSON(self.service.serverData())
 			if route == '/api/trade-servers':
 				return self.sendJSON(self.service.tradeServers())
+			if route == '/api/storage':
+				return self.sendJSON(self.service.storageData())
 			if route == '/api/imports/status':
 				return self.sendJSON(self.service.importStatus())
 			if route == '/api/runs':
@@ -3468,7 +3497,7 @@ class Handler(BaseHTTPRequestHandler):
 				# the kill switch: every session running, stopped and closed
 				return self.sendJSON(self.service.live.stopAll())
 			if route in ('/api/server/roles', '/api/trade-servers', '/api/trade-servers/poll',
-						 '/api/trade-servers/push'):
+						 '/api/trade-servers/push', '/api/storage'):
 				# {"roles": [...]} this server's; {"name", "url", "token"} or {"name",
 				# "drop": true} a trade server; poll reads them now; {"server",
 				# "fields"} pushes a form to one (web/servers.py)
@@ -3481,6 +3510,9 @@ class Handler(BaseHTTPRequestHandler):
 					raise ServiceError('the body is a JSON object')
 				if route == '/api/server/roles':
 					return self.sendJSON(self.service.setRoles(body))
+				if route == '/api/storage':
+					# {"kind": "none" | "s3" | "gdrive" | "onedrive", ...} where old runs go
+					return self.sendJSON(self.service.setStorage(body))
 				if route == '/api/trade-servers':
 					return self.sendJSON(self.service.saveTradeServer(body))
 				if route.endswith('/poll'):

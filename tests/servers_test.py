@@ -299,7 +299,7 @@ class ColdStorageTest(unittest.TestCase):
         saveSet(self.service)
         with self.assertRaises(ServiceError) as caught:
             self.service.freeze(SWEEP)
-        self.assertIn('PARITY_DERIVA_S3_ENDPOINT', str(caught.exception))
+        self.assertIn('choose one on the settings page', str(caught.exception))
         self.assertIsNotNone(self.service.sweepPayload(SWEEP, 1))
 
     def test_a_sets_runs_go_to_the_bucket_and_come_back_when_opened(self):

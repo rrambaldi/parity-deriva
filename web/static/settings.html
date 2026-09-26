@@ -88,6 +88,64 @@
       <button type="button" id="trade-save" data-icon="add">save</button>
     </div>
   </div>
+  <!-- where a set's runs go off this disk (web/storage.py): an S3 bucket, or
+       a folder of a Drive through rclone, tested before it is kept -->
+  <div id="storage-box">
+    <h3 class="panel-title">old simulations</h3>
+    <p class="dim">A set's runs - what fills the disk - can go off it, and come back by themselves
+      when one is opened: "to the bucket" in the simulate page's list of sets, or scripts/cold.py
+      for the old ones.</p>
+    <p id="storage-state"></p>
+    <div class="market-row">
+      <label>where
+        <select id="storage-kind">
+          <option value="none">nowhere: they stay on this disk</option>
+          <option value="s3">an S3 bucket</option>
+          <option value="gdrive">a folder of a Google Drive</option>
+          <option value="onedrive">a folder of a OneDrive</option>
+        </select></label>
+    </div>
+    <div id="storage-s3" class="market-row" hidden>
+      <label>endpoint <input type="url" id="s3-endpoint" spellcheck="false"
+        placeholder="https://fsn1.your-objectstorage.com"></label>
+      <label>bucket <input type="text" id="s3-bucket" spellcheck="false"></label>
+      <label>access key <input type="text" id="s3-access" spellcheck="false" autocomplete="off"></label>
+      <label>secret key <input type="password" id="s3-secret" autocomplete="off"></label>
+      <label>region <input type="text" id="s3-region" placeholder="us-east-1"></label>
+      <label>prefix <input type="text" id="s3-prefix" placeholder="parity-deriva"></label>
+    </div>
+    <div id="storage-drive" hidden>
+      <div id="storage-google">
+        <p class="dim">rclone's own Google client is being retired during 2026: make one of your own - an
+          OAuth client of the "Desktop app" kind in the Google Cloud console, with the Google Drive API
+          enabled - and give it here before running the command.
+          <a href="https://rclone.org/drive/#making-your-own-client-id" target="_blank" rel="noopener">how to
+          make one</a></p>
+        <div class="market-row">
+          <label>client ID <input type="text" id="drive-client-id" spellcheck="false" autocomplete="off"></label>
+          <label>client secret <input type="password" id="drive-client-secret" autocomplete="off"></label>
+        </div>
+      </div>
+      <ol class="dim storage-steps">
+        <li>on a PC with a browser, <a href="https://rclone.org/downloads/" target="_blank"
+          rel="noopener">download rclone</a> and run this there:</li>
+      </ol>
+      <div class="market-row">
+        <code id="drive-command"></code>
+        <button type="button" id="drive-copy" data-icon="copy">copy</button>
+      </div>
+      <ol class="dim storage-steps" start="2">
+        <li>log in on the page it opens, and allow it</li>
+        <li>paste here what it prints between ---&gt; and &lt;---End paste</li>
+      </ol>
+      <div class="market-row">
+        <label id="drive-token-box">what rclone printed
+          <textarea id="drive-token" rows="3" spellcheck="false" autocomplete="off"></textarea></label>
+        <label>folder <input type="text" id="drive-folder" maxlength="80" placeholder="parity-deriva"></label>
+      </div>
+    </div>
+    <button type="button" id="storage-save" data-icon="yes">test and save</button>
+  </div>
   <p id="server-note" role="status"></p>
 </section>
 
