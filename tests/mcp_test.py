@@ -317,7 +317,7 @@ class MCPTest(StoreCase):
 		self.assertEqual(names, ['get_news', 'list_strategies', 'get_source', 'list_data',
 								 'submit_strategy', 'submit_indicator', 'list_helpers', 'request_feature',
 								 'run_backtest', 'propose_public', 'push_calendar', 'push_candles',
-								 'market_status', 'pull_candles', 'pull_calendar'])
+								 'market_status', 'pull_candles', 'pull_calendar', 'push_sweep', 'push_mix'])
 		data, _ = self.tool('list_data')
 		self.assertEqual(data['instruments'][0]['instrument'], 'EUR_USD')
 		source, failed = self.tool('get_source', name='parity_deriva.strategy.H4')
@@ -612,8 +612,8 @@ class MCPTest(StoreCase):
 											  ask=first, bid=first)[0])
 		with self.assertRaises(mcp.ToolError):
 			mcp.call(self.service, 'push_calendar', {'events': [event]}, self.base, 'claude.ai')
-		# another server copies it with the mirror token, which does nothing else
-		self.bearer = self.service.oauth.newMirror()
+		# another server copies it with a mirror token, which does nothing else
+		self.bearer = self.service.oauth.newKey('backup', 'mirror')
 		told, failed = self.tool('market_status')
 		self.assertFalse(failed, told)
 		self.assertEqual(told['instruments'][0]['instrument'], 'EUR_USD')
@@ -625,8 +625,9 @@ class MCPTest(StoreCase):
 		told, failed = self.tool('pull_calendar', since='2025-09-01')
 		self.assertEqual(([e['actual'] for e in told['events']], told['next']), (['2.40%'], None))
 		for name in ('list_strategies', 'push_calendar'):
-			self.assertIn('mirror token only', self.tool(name, events=[event])[0])
-		self.service.oauth.dropMirror()
+			self.assertIn('a mirror token may not call %s' % name, self.tool(name, events=[event])[0])
+		self.assertEqual(self.service.oauth.keys()[0]['name'], 'backup')
+		self.service.oauth.dropKey('backup')
 		self.assertEqual(self.http('/mcp', {'jsonrpc': '2.0', 'id': 1, 'method': 'ping'},
 								   {'Authorization': 'Bearer %s' % self.bearer})[0], 401)
 		self.bearer = self.service.oauth.shownSecret()

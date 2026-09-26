@@ -84,8 +84,7 @@ class Authority(object):
 			state = {}
 		state.setdefault('secret', None)
 		state.setdefault('plain', None)
-		state.setdefault('mirror', None)
-		state.setdefault('mirrorPlain', None)
+		state.setdefault('keys', {})
 		state.setdefault('clients', {})
 		state.setdefault('tokens', {})
 		return state
@@ -134,41 +133,54 @@ class Authority(object):
 			state['tokens'] = {}
 			self.write(state)
 
-	def secretIs(self, text, which='secret'):
-		held = self.read()[which]
+	def secretIs(self, text):
+		held = self.read()['secret']
 		return bool(held and text and hmac.compare_digest(held, digest(text)))
 
-	# ----------------------------------------------------- the mirror token
+	# ------------------------------------------------ the programs' tokens
 
-	def newMirror(self):
+	#: what a program's token is for; mcp.ROLES says what each one may call
+	ROLES = ('pc', 'mirror', 'market')
+
+	def newKey(self, name, role):
 		"""
-		A second token, for another parity server that copies the market data
-		(mcp.PULLS and nothing else); the old one stops working.
+		A token of its own for a program - the PC that pushes its results,
+		another server that copies the market data, the scraper - allowed one
+		kind of work. A new one of the same name replaces it.
 		"""
-		mirror = secrets.token_urlsafe(32)
+		name = ' '.join(str(name or '').split())[:40]
+		if not name or role not in self.ROLES:
+			raise ValueError("a program's token has a name and a role among %s"
+							 % ', '.join(self.ROLES))
+		key = secrets.token_urlsafe(32)
 		with self.lock:
 			state = self.read()
-			state['mirror'], state['mirrorPlain'] = digest(mirror), mirror
+			state['keys'] = dict((k, v) for k, v in state['keys'].items() if v['name'] != name)
+			state['keys'][digest(key)] = {'name': name, 'role': role, 'plain': key,
+										  'made': int(time.time() * 1000)}
 			self.write(state)
-		return mirror
+		return key
 
-	def dropMirror(self):
+	def dropKey(self, name):
 		with self.lock:
 			state = self.read()
-			state['mirror'] = state['mirrorPlain'] = None
+			state['keys'] = dict((k, v) for k, v in state['keys'].items() if v['name'] != name)
 			self.write(state)
 
-	def mirrorIs(self, text):
-		return self.secretIs(text, 'mirror')
+	def keys(self):
+		"""The programs' tokens for the settings page, oldest first."""
+		return sorted(({'name': v['name'], 'role': v['role'], 'token': v['plain'], 'made': v['made']}
+					   for v in self.read()['keys'].values()), key=lambda k: k['made'])
 
-	def shownMirror(self):
-		return self.read()['mirrorPlain']
+	def keyOf(self, bearer):
+		"""{'name', 'role'} of the program `bearer` was given to, or None."""
+		return self.read()['keys'].get(digest(bearer or ''))
 
 	def allowed(self, bearer):
-		"""Is `bearer` the secret, the mirror token or a live access token?"""
+		"""Is `bearer` the secret, a program's token or a live access token?"""
 		if not bearer:
 			return False
-		if self.secretIs(bearer) or self.mirrorIs(bearer):
+		if self.secretIs(bearer) or self.keyOf(bearer):
 			return True
 		token = self.read()['tokens'].get(digest(bearer))
 		return bool(token and token['kind'] == 'access' and token['expires'] > time.time())

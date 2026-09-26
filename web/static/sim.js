@@ -1426,7 +1426,7 @@ async function openSets() {
   for (const set of sweeps) {
     const row = body.insertRow();
     row.dataset.id = set.id;
-    const cells = [set.id, fullStamp(set.saved), null, set.strategy, set.instrument,
+    const cells = [set.id + (set.origin ? ` (from ${set.origin})` : ''), fullStamp(set.saved), null, set.strategy, set.instrument,
       set.granularity, set.from, set.to, (set.varied || []).join(', '),
       `${set.runs}${set.runs < set.total ? ' of ' + set.total : ''}${set.stopped ? ' (stopped)' : ''}`,
       set.best === null || set.best === undefined ? '' : amount(set.best),

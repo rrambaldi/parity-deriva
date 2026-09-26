@@ -97,6 +97,7 @@ async function openMix(id) {
   $('mix-leverage').value = state.mix.leverage || '';
   $('mix-delete').hidden = !state.mix.id;
   $('mix-together').hidden = !state.mix.id;
+  $('mix-verify').hidden = !state.mix.origin;
   // the address says which, so a reload and the back button from a run come here
   history.replaceState(null, '', state.mix.id ? '?id=' + state.mix.id : location.pathname);
   fillMixes();
@@ -145,6 +146,34 @@ $('mix-together').addEventListener('click', async () => {
     state.view = 'together';
     message('');
     render();
+  } catch (error) { fail(error); }
+  finally { button.disabled = false; }
+});
+// a pushed mix's runs done again here (api/mixes/<id>/verify): the trades
+// it was simulated with elsewhere against the ones this server makes
+function verifiedText(v) {
+  if (v.error) return `${v.sweep}/${v.n}: ${v.error}`;
+  const side = (s) => `${s.trades} trades, net ${amount(s.net)}`;
+  return `${v.sweep}/${v.n}: ` + (v.ok ? `the same here (${side(v.here)})`
+    : `differs - here ${side(v.here)}, pushed ${side(v.pushed)}, from trade ${v.first.trade}`);
+}
+$('mix-verify').addEventListener('click', async () => {
+  const button = $('mix-verify');
+  button.disabled = true;
+  try {
+    let job = await post(`api/mixes/${state.mix.id}/verify`);
+    while (job.running) {
+      message(`running the runs again here: ${job.done} of ${job.total} done`, 'info');
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      job = await ask('api/mixes/verify');
+    }
+    if (job.error) throw new Error(job.error);
+    if (job.mix !== state.mix.id) return;
+    state.drawn = await ask('api/mixes/' + state.mix.id);
+    render();
+    const same = job.results.filter((v) => v.ok).length;
+    message(`${same} of ${job.results.length} the same here · `
+      + job.results.map(verifiedText).join(' · '), same === job.results.length ? 'info' : '');
   } catch (error) { fail(error); }
   finally { button.disabled = false; }
 });
@@ -416,6 +445,7 @@ function render() {
   $('mix-title').textContent = !runs.length ? 'an empty mix: press add, pick a simulation and add its runs'
     : !t ? `${state.mix.name || 'mix'} · none of its runs can be read`
     : `${state.mix.name || 'mix'} · ${runs.length} run${runs.length === 1 ? '' : 's'}`
+      + (state.mix.origin ? ` · from ${state.mix.origin.client}` : '')
       + ` · ${stamp(t.from)} .. ${stamp(t.to)} · capital ${amount(t.start)} → ${amount(t.final)}`
       + ` · max drawdown ${amount(t.maxDrawdown)}`;
   $('mix-views').hidden = !state.together;
@@ -450,7 +480,12 @@ function render() {
     if (i === state.pick) line.className = 'selected';
     const swatch = cell(line, '');
     swatch.innerHTML = `<span class="k series">${dashSample(DASHES[i % DASHES.length])}</span>`;
-    cell(line, `${run.sweep}/${run.n}` + (run.name ? ` · ${run.name}` : ''));
+    const named = cell(line, `${run.sweep}/${run.n}` + (run.name ? ` · ${run.name}` : '')
+      + (run.verified ? (run.verified.ok ? ' · verified' : ' · differs here') : ''));
+    if (run.verified) {
+      named.title = verifiedText(run.verified);
+      if (!run.verified.ok) named.className = 'bad';
+    }
     if (run.error) {
       cell(line, run.error, 'bad').colSpan = 12;
     } else {

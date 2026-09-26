@@ -382,6 +382,10 @@ section {
 #mcp-address code { font-family: var(--font-mono); font-size: var(--fs-title); font-weight: 600; color: var(--accent-text);
   overflow-wrap: anywhere; user-select: all; flex: 1 1 16em; }
 #mcp-actions, #mcp-files, #mcp-token { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }
+#mcp-key-new { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 8px 0; }
+#mcp-keys code { overflow-wrap: anywhere; font-size: var(--fs-small); }
+#mcp-keys td:last-child { white-space: nowrap; }
+#mcp-keys[hidden] { display: none; }
 /* the buttons on the line of the file box, not on the middle of its label too */
 #mcp-files { align-items: flex-end; }
 #mcp-token[hidden], #mcp-strategies[hidden], #mcp-requests[hidden], #mcp-news[hidden] { display: none; }
@@ -436,13 +440,12 @@ section {
 #market-box { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 #market-box .market-row { margin-top: 10px; }
 #market-box [hidden] { display: none; }
-#market-state, #market-mirror-state { overflow-wrap: anywhere; }
-#market-state { margin-bottom: 6px; }
+#market-state { margin-bottom: 6px; overflow-wrap: anywhere; }
+#market-box p.dim { margin: 10px 0 0; color: var(--text-3); font-size: var(--fs-small); }
 #market-writer-box { flex-direction: row; align-items: center; gap: 6px; }
 #market-dir, #market-upstream { width: min(36em, 80vw); }
 #market-candles-every, #market-calendar-every { width: 6em; }
 #market-runs { margin: 10px 0 0; padding: 8px; font-family: var(--font-mono); font-size: var(--fs-small); background: var(--raised); border-radius: var(--radius-s); white-space: pre-wrap; }
-#market-mirror-token { overflow-wrap: anywhere; }
 #data-actions[hidden], #calendar-how[hidden], #calendar-actions[hidden] { display: none; }
 #calendar-format, #draft-format { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
 #calendar-format pre, #draft-format pre { margin: 0 0 12px; padding: 8px; font-family: var(--font-mono); overflow-x: auto; background: var(--raised); border-radius: var(--radius-s); font-size: var(--fs-small); }

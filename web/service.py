@@ -574,14 +574,13 @@ class Service(object):
 	def marketData(self):
 		"""
 		The settings page's market box: the folder, the role, the sources and
-		their last runs, the mirror token other servers copy it with. The
-		upstream's token is said to be there, not shown.
+		their last runs. The upstream's token is said to be there, not shown.
 		"""
 		from parity_deriva.trading import providers
 		kept = market.config(self.setup)
 		kept['upstream'] = dict(kept['upstream'], token=bool(kept['upstream']['token']))
 		return dict(kept, home=market.home(self.setup), providers=providers.available(),
-					runs=self.sources.state, mirror=self.oauth.shownMirror())
+					runs=self.sources.state)
 
 	def setMarketData(self, body):
 		"""Change the folder, the role or a source (market.save)."""
@@ -590,14 +589,6 @@ class Service(object):
 		market.save(body, self.setup)
 		self._cache.clear()
 		del self._order[:]
-		return self.marketData()
-
-	def mirror(self, on):
-		"""A new mirror token for the servers that copy this one's market data, or none."""
-		if on:
-			self.oauth.newMirror()
-		else:
-			self.oauth.dropMirror()
 		return self.marketData()
 
 	def mergeBars(self, instrument, granularity, frame, keep=False):
@@ -906,8 +897,11 @@ class Service(object):
 		os.makedirs(os.path.dirname(path), exist_ok=True)
 		self._write(path, json.dumps(rows, indent=1).encode())
 
-	def saveMix(self, mix):
-		"""Keep a mix, a new one when it comes without an id; every run is checked."""
+	def saveMix(self, mix, origin=None):
+		"""
+		Keep a mix, a new one when it comes without an id; every run is
+		checked. `origin` is who pushed it, for a mix made on another server.
+		"""
 		items = []
 		for item in mix.get('items') or []:
 			if not isinstance(item, dict):
@@ -921,6 +915,10 @@ class Service(object):
 				 'saved': int(time.time() * 1000), 'items': items,
 				 # the account's n:1, None the setting's (report.margin)
 				 'leverage': parseLeverage(_text(mix.get('leverage')))}
+		held = next((r for r in self.mixes() if r.get('id') == mix_id), None)
+		origin = origin or (held or {}).get('origin')
+		if origin:
+			entry['origin'] = origin
 		with self._jobLock:
 			self._writeMixes([r for r in self.mixes() if r.get('id') != mix_id] + [entry])
 		return entry
@@ -960,6 +958,7 @@ class Service(object):
 			runs.append(dict(item, name=name, fields=fields, summary=summary,
 							 params=row.get('params'), varied=job.get('varied'),
 							 margin=row.get('margin'),
+							 verified=self.verified(item['sweep'], item['n']),
 							 # by time alone: two trades closing on one bar keep
 							 # their order, which sorting on the balance too lost
 							 curve=sorted(row.get('curve') or [], key=lambda p: p[0])))
@@ -1120,6 +1119,93 @@ class Service(object):
 		if job is None:
 			return {'running': False}
 		out = dict(job)
+		if job.get('current'):
+			out['progress'] = self.progress()
+		return out
+
+	# ------------------------------------------------------------ verifying
+
+	def verifyPath(self, sweep, n):
+		return os.path.join(self.sweepPath(sweep, ''), '%d.verify.json' % int(n))
+
+	def verified(self, sweep, n):
+		"""The last check of a pushed run, or None."""
+		try:
+			with open(self.verifyPath(sweep, n)) as handle:
+				return json.load(handle)
+		except (OSError, ValueError):
+			return None
+
+	@staticmethod
+	def outline(payload):
+		"""What a check compares: the trades, each by its key and its times, and the net."""
+		trades = payload.get('trades') or []
+		return {'trades': len(trades), 'net': (payload.get('report') or {}).get('net'),
+				'rows': [(t.get('key'), t.get('entryTime'), t.get('exitTime'),
+						  None if t.get('pl') is None else round(t['pl'], 2)) for t in trades]}
+
+	def verify(self, sweep, n):
+		"""
+		A run pushed from another server done again here, on this server's
+		code and candles, against the trades it came with: what is to trade
+		live is what was simulated. Kept beside the run.
+		"""
+		pushed = self.sweepPayload(sweep, n)
+		if pushed is None:
+			raise ServiceError("run %s of set %s has no trades here: push it with its mix" % (n, sweep))
+		fields, _, _ = self.simulated({'kind': 'sweep', 'id': sweep, 'n': n})
+		here = self.outline(self.backtest(confirmed=True,
+										  **backtestArgs(lambda name: _text(fields.get(name)))))
+		there = self.outline(pushed)
+		first = next((i for i, (a, b) in enumerate(zip(here['rows'], there['rows'])) if a != b),
+					 None if len(here['rows']) == len(there['rows'])
+					 else min(len(here['rows']), len(there['rows'])))
+		out = {'sweep': sweep, 'n': int(n), 'checked': int(time.time() * 1000),
+			   'ok': first is None, 'here': {'trades': here['trades'], 'net': here['net']},
+			   'pushed': {'trades': there['trades'], 'net': there['net']},
+			   'first': None if first is None else {
+				   'trade': first + 1,
+				   'here': here['rows'][first] if first < len(here['rows']) else None,
+				   'pushed': there['rows'][first] if first < len(there['rows']) else None}}
+		self._write(self.verifyPath(sweep, n), json.dumps(out).encode())
+		return out
+
+	def startVerify(self, mix):
+		"""Check every run of a mix again in the background; verifyStatus() follows it."""
+		saved = next((m for m in self.mixes() if m.get('id') == mix), None)
+		if saved is None:
+			raise ServiceError("no such mix")
+		with self._jobLock:
+			if getattr(self, '_verify', None) and self._verify.get('running'):
+				raise ServiceError("a mix is being checked already")
+			self._verify = {'running': True, 'mix': mix, 'total': len(saved['items']),
+							'done': 0, 'current': None, 'results': []}
+		thread = threading.Thread(target=self._runVerify, args=(self._verify, saved['items']))
+		thread.daemon = True
+		thread.start()
+		return self.verifyStatus()
+
+	def _runVerify(self, job, items):
+		try:
+			for item in items:
+				job['current'] = item
+				try:
+					job['results'].append(self.verify(item['sweep'], item['n']))
+				except ServiceError as exc:
+					job['results'].append(dict(item, ok=False, error=str(exc)))
+				job['done'] += 1
+		except Exception as exc:
+			self.logger.exception("mix %s check failed" % job['mix'])
+			job['error'] = "%s: %s" % (type(exc).__name__, exc)
+		finally:
+			job['current'] = None
+			job['running'] = False
+
+	def verifyStatus(self):
+		job = getattr(self, '_verify', None)
+		if job is None:
+			return {'running': False}
+		out = dict(job, results=list(job['results']))
 		if job.get('current'):
 			out['progress'] = self.progress()
 		return out
@@ -1822,7 +1908,9 @@ class Service(object):
 				'bestParams': top and top.get('params'),
 				# the highest score of its runs (report.score): the rank the
 				# KPI table orders them by
-				'bestScore': max(scores) if scores else None}
+				'bestScore': max(scores) if scores else None,
+				# who pushed it here, for a set simulated on another server
+				'origin': (job.get('origin') or {}).get('client')}
 
 	def _write(self, path, body):
 		# aside and renamed, so the list never reads half a file
@@ -2827,6 +2915,8 @@ class Handler(BaseHTTPRequestHandler):
 				return self.sendJSON({'mixes': self.service.mixes()})
 			if route == '/api/mixes/together':
 				return self.sendJSON(self.service.togetherStatus())
+			if route == '/api/mixes/verify':
+				return self.sendJSON(self.service.verifyStatus())
 			if route.startswith('/api/mixes/'):
 				return self.sendJSON(self.service.mix(route[len('/api/mixes/'):]))
 			if route.startswith('/api/live/'):
@@ -3049,6 +3139,10 @@ class Handler(BaseHTTPRequestHandler):
 					# {} simulates the mix's runs on one account (startTogether)
 					return self.sendJSON(self.service.startTogether(
 						route[len('/api/mixes/'):-len('/together')]))
+				if route.endswith('/verify'):
+					# {} runs a pushed mix's runs again here (startVerify)
+					return self.sendJSON(self.service.startVerify(
+						route[len('/api/mixes/'):-len('/verify')]))
 				if body.get('delete'):
 					self.service.dropMix(route[len('/api/mixes/'):])
 					return self.sendJSON({'mixes': self.service.mixes()})
@@ -3101,9 +3195,9 @@ class Handler(BaseHTTPRequestHandler):
 				length = int(self.headers.get('Content-Length') or 0)
 				body = self.rfile.read(length).decode('utf-8', 'replace')
 				return self.sendJSON(self.service.importCalendar(body))
-			if route in ('/api/market', '/api/market/run', '/api/market/mirror'):
+			if route in ('/api/market', '/api/market/run'):
 				# {"dir"?, "writer"?, "candles"?, ...} changes market.json,
-				# {"kind": "candles"} runs its source now, {"on": bool} the mirror token
+				# {"kind": "candles"} runs its source now
 				length = int(self.headers.get('Content-Length') or 0)
 				try:
 					body = json.loads(self.rfile.read(length) or b'{}')
@@ -3114,8 +3208,6 @@ class Handler(BaseHTTPRequestHandler):
 				if route == '/api/market/run':
 					self.service.sources.trigger(body.get('kind'))
 					return self.sendJSON(self.service.marketData())
-				if route == '/api/market/mirror':
-					return self.sendJSON(self.service.mirror(bool(body.get('on'))))
 				return self.sendJSON(self.service.setMarketData(body))
 			if route == '/api/imports/run':
 				try:

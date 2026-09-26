@@ -1262,10 +1262,34 @@ the same box (`data/sources.py`), with how often it runs:
 | another parity | pulls what it lacks from another server's MCP endpoint (`market_status`, `pull_candles`, `pull_calendar`) with that server's mirror token |
 | a broker's API | the bars after the last one, for every series the stores keep, from a broker that serves ask and bid, with this server's keys (candles only) |
 
-"serve other servers" gives this server a mirror token: another parity -
-the PC, a server for real money - copies the market data with it and can do
-nothing else over MCP. The forexfactory scraper is not a source: it is a
-program of its own and pushes, like any outside one.
+Another parity - the PC, a server for real money - copies the market data
+with a token of the mirror or pc role. The forexfactory scraper is not a
+source: it is a program of its own and pushes, like any outside one.
+
+## Programs' tokens, and the PC's mixes on the cloud
+
+Besides the assistants' token, the settings page (AI assistants) makes a
+token for each program, with a role that says what it may call over MCP:
+
+| role | for | may call |
+|---|---|---|
+| pc | the PC's `scripts/sync.py` | everything but pushing candles and calendar |
+| mirror | another server copying the market data | `market_status`, `pull_candles`, `pull_calendar` |
+| market | the scraper | `push_candles`, `push_calendar`, `market_status` |
+
+The PC simulates, and pushes what is to trade to the cloud:
+
+```
+python scripts/sync.py push --to https://host/parity/mcp --token <a pc token>
+```
+
+Each mix goes with the uploaded strategies its sets trade (a draft on the
+cloud, to enable by hand), its sets and its runs, a chunk a call under
+nginx's 4 MB, marked "from" the PC; `DATA_DIR/sync.json` keeps what was sent,
+so a file that did not change is not sent again. On the cloud, verify on the
+mix page runs each run again on the cloud's code and candles and compares
+the trades: "the same here", or where they part. Candles and calendar go
+the other way only: the PC takes them with the cloud as its upstream.
 
 # Tests
 

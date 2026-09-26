@@ -50,6 +50,10 @@
       title="pick runs of the saved simulations to add to the mix">add</button>
     <button type="button" id="mix-together" hidden data-icon="play"
       title="trade every run on one account: each sized on the shared capital, a trade the margin does not cover refused">simulate together</button>
+    <!-- a mix pushed from another server (scripts/sync.py): its runs done
+         again here, on this server's code and candles -->
+    <button type="button" id="mix-verify" hidden data-icon="rerun"
+      title="run every run of the mix again on this server's code and candles, and compare the trades with the ones it was pushed with">verify</button>
     <button type="button" id="mix-delete" hidden data-icon="delete" title="delete this mix; its sets and their runs stay">delete</button>
   </form>
 </div>

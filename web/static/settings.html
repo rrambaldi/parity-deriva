@@ -67,7 +67,7 @@
       <label>every (min) <input type="number" id="market-calendar-every" min="1" max="10080" value="60"></label>
       <label data-for="upstream">other parity's MCP address
         <input type="url" id="market-upstream" spellcheck="false" placeholder="https://host/parity/mcp"></label>
-      <label data-for="upstream">its mirror token
+      <label data-for="upstream">its token (mirror or pc)
         <input type="password" id="market-token" autocomplete="off"></label>
       <label data-for="providers">broker <select id="market-provider"></select></label>
     </div>
@@ -76,15 +76,8 @@
       <button type="button" id="market-run" data-icon="rerun">pull now</button>
     </div>
     <pre id="market-runs" hidden></pre>
-    <!-- the other side: servers that copy this one's market data, with a
-         token of their own that can do nothing else (mcp.PULLS) -->
-    <div id="market-mirror" class="market-row">
-      <span id="market-mirror-state"></span>
-      <code id="market-mirror-token" hidden></code>
-      <button type="button" id="market-mirror-copy" data-icon="copy" hidden>copy</button>
-      <button type="button" id="market-mirror-on" data-icon="add">new mirror token</button>
-      <button type="button" id="market-mirror-off" data-icon="close" hidden>stop serving</button>
-    </div>
+    <p class="dim">Another server - the PC, a real money one - copies this market data with a
+      token of the mirror or pc role, made under AI assistants below.</p>
   </div>
   <!-- what the stores hold now: the series each one keeps, and the ones the
        viewer builds from them (data/store.py) -->
@@ -193,6 +186,25 @@ npx dukascopy-node -i eurusd -from 2015-01-01 -to 2026-09-20 -t m5 -v -f csv -p 
   <div id="mcp-token" hidden>
     <code id="mcp-token-text"></code>
     <button type="button" id="mcp-copy" data-icon="copy">copy</button>
+  </div>
+  <!-- programs' tokens, each for one kind of work (web/mcp.py ROLES): the PC
+       pushing its strategies, sets and mixes (scripts/sync.py), another
+       server copying the market data, the scraper pushing it -->
+  <div id="mcp-keys-box">
+    <table id="mcp-keys" hidden>
+      <thead><tr><th>program</th><th>role</th><th>token</th><th></th></tr></thead>
+      <tbody id="mcp-key-rows"></tbody>
+    </table>
+    <div id="mcp-key-new">
+      <label>program <input type="text" id="mcp-key-name" maxlength="40" placeholder="my PC"></label>
+      <label>role
+        <select id="mcp-key-role">
+          <option value="pc">pc: pushes strategies, sets, mixes; copies the market data</option>
+          <option value="mirror">mirror: copies the market data, nothing else</option>
+          <option value="market">market: pushes candles and calendar, nothing else</option>
+        </select></label>
+      <button type="button" id="mcp-key-add" data-icon="add">new program token</button>
+    </div>
   </div>
   <p id="mcp-note" role="status"></p>
   <!-- a strategy's file, saved with download in its code's dialog: back as a

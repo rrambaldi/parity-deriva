@@ -33,6 +33,7 @@ import ast
 import base64
 import datetime
 import functools
+import gzip
 import json
 import os
 import re
@@ -325,6 +326,20 @@ TOOLS = [
 					"call's start, null at the end." % 5000,
 	 'inputSchema': {'type': 'object', 'properties': {
 		 'since': {'type': 'string'}, 'start': {'type': 'integer'}}}},
+	{'name': 'push_sweep',
+	 'description': "For the PC's sync (scripts/sync.py), not for an assistant: a simulation "
+					"set as runs/sweeps/<id>.json.gz holds it, or with n one of its runs "
+					"(<id>/<n>.json.gz); the base64 of the gzip bytes, %d bytes a call, "
+					"part from 0 of parts." % (2 << 20),
+	 'inputSchema': {'type': 'object', 'required': ['sweep', 'data'], 'properties': {
+		 'sweep': {'type': 'string'}, 'n': {'type': 'integer'},
+		 'part': {'type': 'integer'}, 'parts': {'type': 'integer'},
+		 'data': {'type': 'string'}, 'commit': {'type': 'string'}}}},
+	{'name': 'push_mix',
+	 'description': "For the PC's sync, not for an assistant: a mix, once its sets and their "
+					"runs are pushed. The runs are then checked again here (verify on the mix page).",
+	 'inputSchema': {'type': 'object', 'required': ['mix'], 'properties': {
+		 'mix': {'type': 'object'}}}},
 ]
 
 
@@ -468,13 +483,23 @@ PUSH_BARS = 10000
 GRANULARITIES = ('M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D', 'W')
 
 
+def role(client):
+	"""
+	'token' for the secret, a program's role ('pc', 'mirror', 'market') for
+	its token, None for an assistant connected through OAuth.
+	"""
+	head, sep, _ = str(client).partition(': ')
+	return head if sep and head in ('token',) + oauth.Authority.ROLES else None
+
+
 def pusher(service, client):
 	"""
-	The data scripts hold the token itself; an assistant connected through
-	OAuth reads and backtests, it does not write the data every run reads.
-	And only to the server that writes the market data (data/market.py).
+	The data scripts hold the token itself, or one of the market role; an
+	assistant connected through OAuth reads and backtests, it does not write
+	the data every run reads. And only to the server that writes the market
+	data (data/market.py).
 	"""
-	if not str(client).startswith('token: '):
+	if role(client) not in ('token', 'market'):
 		raise ToolError("pushing data is for a script with the token, not for an assistant")
 	try:
 		market.guard(market.directory(service.setup), service.setup)
@@ -537,8 +562,8 @@ def pushCandles(service, args, client):
 
 
 def puller(client):
-	"""Another parity server copying the market data: the token, or the mirror one."""
-	if not str(client).startswith(('token: ', 'mirror: ')):
+	"""Another parity server copying the market data: the token, a mirror or a pc one."""
+	if role(client) not in ('token', 'mirror', 'pc'):
 		raise ToolError("pulling the market data is for a server with the token, not for an assistant")
 
 
@@ -616,6 +641,118 @@ def pullCalendar(service, args, client):
 			  .to_dict('records')]
 	end = start + len(page)
 	return {'events': events, 'next': end if end < len(held) else None}
+
+
+#: a pushed file comes a chunk a call, the base64 of up to this many of its
+#: gzip bytes: under nginx's 4 MB for /parity/mcp
+PUSH_CHUNK = 2 << 20
+#: the most a pushed file may weigh, gzipped
+PUSH_FILE = 256 << 20
+
+
+def pcPusher(client):
+	"""The PC's sync (scripts/sync.py) holds a pc token, or the token itself."""
+	if role(client) not in ('token', 'pc'):
+		raise ToolError("pushing a set or a mix is for the PC's token, not for an assistant")
+
+
+def received(args, where):
+	"""
+	A file pushed a chunk a call - `data` the base64 of its gzip bytes, `part`
+	of `parts` - kept beside `where` until the last part is in: then its
+	bytes and their JSON, None before.
+	"""
+	try:
+		part, parts = int(args.get('part') or 0), int(args.get('parts') or 1)
+		data = base64.b64decode(str(args.get('data') or ''), validate=True)
+	except (TypeError, ValueError):
+		data = part = parts = None
+	if data is None or not data or len(data) > PUSH_CHUNK or not 0 <= part < parts:
+		raise ToolError("part (from 0), parts, and data: the base64 of the gzipped file, "
+						"%d bytes of it a call at most" % PUSH_CHUNK)
+	os.makedirs(os.path.dirname(where), exist_ok=True)
+	chunks = ['%s.push%d' % (where, i) for i in range(parts)]
+	with open(chunks[part] + '.part', 'wb') as handle:
+		handle.write(data)
+	os.replace(chunks[part] + '.part', chunks[part])
+	if part < parts - 1:
+		return None
+	missing = [i for i, chunk in enumerate(chunks) if not os.path.exists(chunk)]
+	if missing:
+		raise ToolError("parts %s did not arrive: push them again" % missing[:10])
+	try:
+		if sum(os.path.getsize(chunk) for chunk in chunks) > PUSH_FILE:
+			raise ToolError("a pushed file is %d MB at most" % (PUSH_FILE >> 20))
+		blob = b''
+		for chunk in chunks:
+			with open(chunk, 'rb') as handle:
+				blob += handle.read()
+	finally:
+		for chunk in chunks:
+			os.remove(chunk)
+	try:
+		return blob, json.loads(gzip.decompress(blob))
+	except (OSError, EOFError, ValueError):
+		raise ToolError("the file is not gzipped JSON")
+
+
+def pushSweep(service, args, client):
+	"""
+	A set simulated on the PC, as runs/sweeps/<id>.json.gz holds it, or with
+	`n` one of its runs as <id>/<n>.json.gz does: the set first. Marked with
+	who pushed it, and with `commit`, the code it ran on there.
+	"""
+	pcPusher(client)
+	sweep, n = str(args.get('sweep') or ''), args.get('n')
+	try:
+		if n in (None, ''):
+			where = service.sweepPath(sweep, '.json.gz')
+		else:
+			held = service.savedSweep(sweep)
+			where = service.sweepRunPath(sweep, int(n))
+	except (web().ServiceError, TypeError, ValueError) as exc:
+		raise ToolError("%s: push the set before its runs" % exc)
+	got = received(args, where)
+	if got is None:
+		return {'sweep': sweep, 'n': n, 'part': int(args.get('part') or 0), 'saved': False}
+	blob, found = got
+	if n not in (None, ''):
+		if not isinstance(found, dict) or not isinstance(found.get('trades'), list):
+			raise ToolError("not a run: the payload the run page draws, with its trades")
+		if not any(row.get('n') == int(n) for row in held['done']):
+			raise ToolError("set %s has no run %s" % (sweep, n))
+		service._write(where, blob)
+		return {'sweep': sweep, 'n': int(n), 'trades': len(found['trades']), 'saved': True}
+	if not isinstance(found, dict) or found.get('id') != sweep \
+			or not isinstance(found.get('fields'), dict) or not isinstance(found.get('done'), list):
+		raise ToolError("not the set %s: {id, fields, done, ...} as runs/sweeps/<id>.json.gz holds it"
+						% sweep)
+	if os.path.exists(where) and not service.savedSweep(sweep).get('origin'):
+		raise ToolError("a set of this server's own is called %s" % sweep)
+	found['origin'] = {'client': client, 'pushed': int(time.time() * 1000),
+					   'commit': str(args.get('commit') or '')[:40]}
+	service.saveSweep(found)
+	return {'sweep': sweep, 'runs': len(found['done']), 'saved': True}
+
+
+def pushMix(service, args, client):
+	"""A mix made on the PC, once its sets and their runs are here (push_sweep)."""
+	pcPusher(client)
+	mix = args.get('mix')
+	if not isinstance(mix, dict) or not isinstance(mix.get('items'), list) or not mix['items']:
+		raise ToolError("mix: {id, name, leverage, items: [{sweep, n}]}")
+	held = next((m for m in service.mixes() if m.get('id') == mix.get('id')), None)
+	if held and not held.get('origin'):
+		raise ToolError("a mix of this server's own has the id %s" % mix.get('id'))
+	for item in mix['items']:
+		try:
+			there = service.sweepPayload(str((item or {}).get('sweep') or ''), int(item.get('n')))
+		except (web().ServiceError, TypeError, ValueError, AttributeError):
+			raise ToolError("an item of a mix is {sweep, n}")
+		if there is None:
+			raise ToolError("run %s of set %s is not here: push_sweep it first" % (item['n'], item['sweep']))
+	entry = service.saveMix(mix, origin={'client': client, 'pushed': int(time.time() * 1000)})
+	return {'mix': entry['id'], 'items': len(entry['items']), 'saved': True}
 
 
 # the next version is taken and written by one submit at a time
@@ -1170,13 +1307,21 @@ def sandboxed(service, job, timeout=None):
 	return answer
 
 
-#: all a mirror token may do: another parity server copying the market data
+#: another parity server copying the market data
 PULLS = ('market_status', 'pull_candles', 'pull_calendar')
+#: the market data coming in
+PUSHES = ('push_calendar', 'push_candles')
+#: what a program's token may call, by its role: the PC everything but the
+#: market data (it takes that from here, never the other way)
+ROLES = {'mirror': lambda name: name in PULLS,
+		 'market': lambda name: name in PUSHES + ('market_status',),
+		 'pc': lambda name: name not in PUSHES}
 
 
 def call(service, name, args, base, client):
-	if str(client).startswith('mirror: ') and name not in PULLS:
-		raise ToolError("the mirror token only copies the market data: %s" % ', '.join(PULLS))
+	held = role(client)
+	if held in ROLES and not ROLES[held](name):
+		raise ToolError("a %s token may not call %s" % (held, name))
 	if name == 'get_news':
 		return getNews(service, args, client)
 	if name == 'list_strategies':
@@ -1207,6 +1352,10 @@ def call(service, name, args, base, client):
 		return pullCandles(service, args, client)
 	if name == 'pull_calendar':
 		return pullCalendar(service, args, client)
+	if name == 'push_sweep':
+		return pushSweep(service, args, client)
+	if name == 'push_mix':
+		return pushMix(service, args, client)
 	raise ToolError("no tool %r" % name)
 
 
@@ -1257,7 +1406,8 @@ def status(service):
 			for name, path in held.items():
 				out.append(dict(meta(path), name=name, state=state))
 		return sorted(out, key=lambda r: r.get('submitted') or 0, reverse=True)
-	return dict(service.oauth.status(), strategies=rows('strategies'), indicators=rows('indicators'),
+	return dict(service.oauth.status(), keys=service.oauth.keys(),
+				strategies=rows('strategies'), indicators=rows('indicators'),
 				requests=requests(service)[::-1], news=news(service)[::-1])
 
 
@@ -1440,9 +1590,15 @@ def route(handler, method, path, query):
 										'error': {'code': -32700, 'message': "not JSON"}})
 		# the OAuth client's own name; with the secret in the header, the only
 		# name there is is the program's User-Agent
-		client = authority.holder(bearer) or '%s: %s' % (
-			'mirror' if authority.mirrorIs(bearer) else 'token',
-			(handler.headers.get('User-Agent') or 'no user agent')[:60])
+		# a program's token is its role and name ("pc: my PC"), the secret is
+		# "token: <User-Agent>", and an OAuth client its own name, which may
+		# not pass for either
+		key = authority.keyOf(bearer)
+		client = authority.holder(bearer)
+		if client is not None and role(client):
+			client = 'oauth %s' % client
+		client = client or ('%s: %s' % (key['role'], key['name']) if key else 'token: %s' % (
+			handler.headers.get('User-Agent') or 'no user agent')[:60])
 		if isinstance(message, list):
 			answers = [a for a in (handle(handler.service, m, base, client) for m in message) if a]
 		else:
@@ -1498,6 +1654,17 @@ def route(handler, method, path, query):
 			return reply(handler, 200, {'secret': authority.shownSecret()})
 		if path == '/api/mcp/disconnect':
 			authority.disconnect()
+			return reply(handler, 200, status(handler.service))
+		if path in ('/api/mcp/keys', '/api/mcp/keys/drop'):
+			# {"name", "role"} makes a program's token, {"name"} on drop removes it
+			try:
+				asked = json.loads(body(handler) or b'{}')
+				if path == '/api/mcp/keys':
+					authority.newKey(asked.get('name'), asked.get('role'))
+				else:
+					authority.dropKey(str(asked.get('name') or ''))
+			except (ValueError, AttributeError) as exc:
+				raise ToolError(str(exc) or 'the body is {"name", "role"}')
 			return reply(handler, 200, status(handler.service))
 		if path == '/api/mcp/strategy':
 			try:

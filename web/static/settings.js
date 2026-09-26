@@ -80,12 +80,6 @@ function showMarket(state) {
   $('market-runs').textContent = runs.map(([kind, run]) => `${kind} ${new Date(run.at).toISOString().slice(0, 16).replace('T', ' ')} UTC`
     + ` ${run.running ? 'running' : run.ok ? 'ok' : 'failed'}\n` + run.lines.map((l) => `  ${l}`).join('\n')).join('\n');
   marketRunning = runs.some(([, run]) => run.running);
-  $('market-mirror-state').textContent = state.mirror
-    ? 'serving: other servers copy this market data with the mirror token, at the connector address below'
-    : 'not serving the market data to other servers';
-  $('market-mirror-token').textContent = state.mirror || '';
-  for (const id of ['market-mirror-token', 'market-mirror-copy', 'market-mirror-off']) $(id).hidden = !state.mirror;
-  $('market-mirror-on').textContent = state.mirror ? 'new mirror token' : 'serve other servers';
 }
 
 // the upstream's two fields when a kind comes from it, the broker when the candles do
@@ -135,17 +129,6 @@ $('market-run').addEventListener('click', () => dataAction(async () => {
   showMarket(state);
   await followMarket();
 }));
-
-for (const [id, on] of [['market-mirror-on', true], ['market-mirror-off', false]]) {
-  $(id).addEventListener('click', () => dataAction(async () => {
-    if (!on && !await askUser('Stop serving? Every server copying this market data loses its access.',
-      'stop serving', 'close')) return;
-    showMarket(await post('api/market/mirror', JSON.stringify({ on })));
-  }));
-}
-$('market-mirror-copy').addEventListener('click', () => navigator.clipboard.writeText(
-  $('market-mirror-token').textContent).then(() => dataLog(['mirror token copied']),
-  () => dataLog(['copy it by hand: the browser refused'])));
 
 /* --------------------------------------------------------- the calendar */
 
@@ -437,6 +420,25 @@ async function showMcp(state) {
     + (state.clients.length ? ` \u00b7 connected: ${state.clients.join(', ')}` : '');
   $('mcp-disconnect').disabled = !state.clients.length;
   $('mcp-show').disabled = !state.secret;
+  const keys = $('mcp-key-rows');
+  keys.textContent = '';
+  for (const k of state.keys || []) {
+    const tr = keys.insertRow();
+    tr.insertCell().textContent = k.name;
+    tr.insertCell().textContent = k.role;
+    const code = document.createElement('code');
+    code.textContent = k.token;
+    tr.insertCell().appendChild(code);
+    const cell = tr.insertCell();
+    for (const [label, icon, act] of [['copy', 'copy', 'copy'], ['revoke', 'delete', 'drop']]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      Object.assign(button.dataset, { icon, act, name: k.name, token: k.token });
+      cell.appendChild(button);
+    }
+  }
+  $('mcp-keys').hidden = !(state.keys || []).length;
   const rows = $('mcp-rows');
   const indicators = (state.indicators || []).map((s) => ({ ...s, kind: 'indicators' }));
   mcpStrategies = Object.fromEntries([...state.strategies, ...indicators].map((s) => [s.name, s]));
@@ -680,6 +682,30 @@ const mcpCopy = (text) => navigator.clipboard.writeText(text)
   .then(() => mcpSay('copied'), () => mcpSay('copy it by hand: the browser refused'));
 $('mcp-copy').addEventListener('click', () => mcpCopy($('mcp-token-text').textContent));
 $('mcp-url-copy').addEventListener('click', () => mcpCopy($('mcp-url').textContent));
+
+$('mcp-key-add').addEventListener('click', async () => {
+  try {
+    await showMcp(await post('api/mcp/keys', JSON.stringify(
+      { name: $('mcp-key-name').value, role: $('mcp-key-role').value })));
+    $('mcp-key-name').value = '';
+    mcpSay('made: copy its token into the program, with the connector address');
+  } catch (error) {
+    mcpSay(String(error.message || error));
+  }
+});
+
+$('mcp-key-rows').addEventListener('click', async (event) => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  if (button.dataset.act === 'copy') { mcpCopy(button.dataset.token); return; }
+  if (!await askUser(`Revoke the token of ${button.dataset.name}? It stops working at once.`,
+    'revoke', 'delete')) return;
+  try {
+    await showMcp(await post('api/mcp/keys/drop', JSON.stringify({ name: button.dataset.name })));
+  } catch (error) {
+    mcpSay(String(error.message || error));
+  }
+});
 
 $('mcp-disconnect').addEventListener('click', async () => {
   if (!await askUser('Disconnect every assistant? Each one will have to connect again with the token.',
