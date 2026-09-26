@@ -55,6 +55,7 @@ A real money server:
 Details: [A server for demo accounts, another for real money](../README.md#a-server-for-demo-accounts-another-for-real-money).
 The path of a strategy across these servers, from simulation to demo to live,
 is in [PROCESSO.md](PROCESSO.md) (Italian).
+How a simulation runs inside one server is in [ENGINE.md](ENGINE.md).
 
 ## Market data
 

@@ -34,7 +34,8 @@ the thanks.
 * **Event bus** - `trading/engine.py` runs a thread per data source and fans
   every event out to every handler. Strategies, the money manager, execution,
   the simulator and the loggers are all handlers, so the same stack runs live,
-  against recorded events, or against the local HDF5 store.
+  against recorded events, or against the local HDF5 store. How it works:
+  [docs/ENGINE.md](docs/ENGINE.md).
 * **Shadow execution** - `backtest/oanda.py` is a local broker simulator that
   mimics the OANDA order lifecycle. Registered on the engine next to the real
   execution handler, it sees the same orders and the same candles, which is
