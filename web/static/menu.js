@@ -33,7 +33,7 @@ function palette() {
 /*
  * A series that is one of many - a mix's runs, a strategy's curves, the live
  * page's feeds - is told apart by its dash and not by a colour of its own:
- * the data has three colours and a fourth does not pass (web/DESIGN.md § 3).
+ * the data has three colours and a fourth does not pass (docs/web/DESIGN.md § 3).
  * The legend draws its sample with the same dash, so the two cannot drift.
  */
 const DASHES = [[], [6, 4], [2, 3], [10, 3, 2, 3], [1, 5], [12, 6], [4, 2, 1, 2], [8, 2]];
@@ -315,7 +315,7 @@ function marginText(m) {
 
   /*
    * How loaded the server is: one chip before the theme switch, and the
-   * detail in a panel on a click (web/DESIGN.md § 6, Risorse del server).
+   * detail in a panel on a click (docs/web/DESIGN.md § 6, Risorse del server).
    * Was: four green meters always on show, some 690 px of header, green even
    * as they filled - and green here is long, a target, a gain. Now the chip
    * says "server ok", or names the worst measure; high is ink, critical is

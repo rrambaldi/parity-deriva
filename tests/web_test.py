@@ -2080,7 +2080,7 @@ class HTTPTest(HTTPCase):
             self.assertIn(kind, headers['Content-Type'])
 
     def test_the_fonts_logo_and_icons_are_served(self):
-        # web/DESIGN.md: no CDN, so the page's fonts and pictures come from
+        # docs/web/DESIGN.md: no CDN, so the page's fonts and pictures come from
         # web/static like its script does, each with its own type
         for path, kind in (('/static/IBMPlexSans-Regular.woff2', 'font/woff2'),
                            ('/static/PDInstrument-Regular.woff2', 'font/woff2'),

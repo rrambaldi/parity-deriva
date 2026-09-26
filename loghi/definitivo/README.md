@@ -6,7 +6,7 @@ sole ed esce in alto a destra. L'orizzonte è la parità, il cammino la deriva.
 Versione monocolore: **Alba incisa** (M2), stessa geometria con il cammino
 ritagliato nel sole.
 
-Regole d'uso in `web/DESIGN.md` (§ 7). "fondo-chiaro" = da usare su fondo chiaro
+Regole d'uso in `docs/web/DESIGN.md` (§ 7). "fondo-chiaro" = da usare su fondo chiaro
 (inchiostro petrolio); "fondo-scuro" = su fondo scuro (avorio).
 
 ## SVG (testo convertito in tracciati, nessun font richiesto)

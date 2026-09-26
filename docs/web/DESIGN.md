@@ -135,7 +135,7 @@ direzione in rosso e il P&L in verde, ed è corretto così.
   (`--fs-h-panel`); interlinea 1,1–1,2; spaziatura `--tracking-title` (0,01 em);
   minuscolo come ogni testo. Solo titoli: etichette, campi, tabelle e numeri
   restano in Plex. Scelta del 25/09/2026 fra Jost, Manrope, Instrument Serif e
-  Newsreader (`web/font-titoli-proposte.html`), poi fra le varianti di
+  Newsreader (`docs/web/font-titoli-proposte.html`), poi fra le varianti di
   Instrument (`web/titoli-instrument-varianti.html`): con tutto in Plex a 15 px la
   pagina non aveva un punto d'attacco.
 - PD Instrument ha un peso solo: la gerarchia la fanno misura e carattere. Sui
@@ -178,7 +178,7 @@ Le tavole di riferimento sono sulla tela "Logo parity-deriva", pagina
   del tema. Fra i due, la spia delle risorse del server (sotto).
 
 ### Risorse del server (testata)
-Scelta del 25/09/2026: proposta 4 "una spia sola" di `web/risorse-proposte.html`, al
+Scelta del 25/09/2026: proposta 4 "una spia sola" di `docs/web/risorse-proposte.html`, al
 posto della striscia cpu / ram / dischi sempre visibile (verde pieno, mono 16 px,
 ~690 px di testata).
 
@@ -299,13 +299,13 @@ posto della striscia cpu / ram / dischi sempre visibile (verde pieno, mono 16 px
     l'ocra è di `Run` e del focus, blu, verde e rosso sono dei dati.
   - Nessuno dei due acceso = zero combinazioni: bordo del gruppo `--down`.
   - Focus: anello 2 px `--focus` sul segmento; disabilitato: opacità 0,45.
-  - Prova interattiva e CSS: `web/checkbox-proposte.html`, proposta 2 (scelta il
+  - Prova interattiva e CSS: `docs/web/checkbox-proposte.html`, proposta 2 (scelta il
     25/09/2026). Istruzioni per Claude Code: in fondo a `REFACTORING-claude-code.md`.
 
 ### Dialog
 Tutti gli otto dialog (data, runs, live, help, sets, run, analysis, sim) hanno la
 stessa forma. Scelta del 25/09/2026: proposta 2 "titolo con contesto" di
-`web/dialog-testata-proposte.html`.
+`docs/web/dialog-testata-proposte.html`.
 
 - Foglio: fondo `--panel`, filetto `--line`, raggio 10 px, nessuna ombra; dietro
   `--backdrop` (nero al 55 %).
@@ -367,7 +367,7 @@ File in `loghi/definitivo/` (dettagli nel README della cartella).
 ## 9. Per chi implementa
 
 Il piano completo, passo per passo e con i test, è in
-`web/REFACTORING-claude-code.md` (un prompt da dare a Claude Code). In breve:
+`docs/web/REFACTORING-claude-code.md` (un prompt da dare a Claude Code). In breve:
 
 1. `web/service.py` serve solo `.html`, `.css`, `.js` e rifiuta le sottocartelle:
    aggiungere `.woff2`, `.svg`, `.png` a `CONTENT_TYPES`, **senza** permettere

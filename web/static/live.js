@@ -100,7 +100,7 @@ function cell(row, text, cls) {
 }
 
 // Whoever looks must know at every moment whether real money is moving
-// (web/DESIGN.md § 6): the badge in the header is live·real money as soon as
+// (docs/web/DESIGN.md § 6): the badge in the header is live·real money as soon as
 // one session actually trading (s.running, which also covers "closing…":
 // it is still open until then) is on an account that is not demo. The
 // HTML's default is the red one on purpose, for the moment before this runs.

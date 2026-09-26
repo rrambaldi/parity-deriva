@@ -2,7 +2,7 @@
  * Two panels: the chart on top, the trades under it. Everything else is
  * chrome around those two.
  *
- * Every colour is a token of tokens.css (web/DESIGN.md), the same names in
+ * Every colour is a token of tokens.css (docs/web/DESIGN.md), the same names in
  * both themes, and each has one job: long, a target, a gain and a rising
  * candle are --up; short, a stop, a loss and a falling candle are --down;
  * the entry and the selected trade are --entry. A trade's row and its

@@ -16,7 +16,7 @@ stessi calcoli, stessi testi (in inglese, minuscoli).
 
 Prima di toccare qualunque file leggi, in quest'ordine:
 
-1. `web/DESIGN.md` — **è la specifica**: colori, token, tipografia, componenti.
+1. `docs/web/DESIGN.md` — **è la specifica**: colori, token, tipografia, componenti.
 2. `loghi/definitivo/README.md`, `loghi/definitivo/tokens.css`,
    `loghi/definitivo/font/fonts.css`.
 3. Nel `README.md` del repo le sezioni "Reading a backtest: the viewer",
@@ -254,8 +254,8 @@ Si può dare a Claude Code da sola, anche se le parti sopra sono già state fatt
 **Contesto.** Nei parametri della strategia i valori sì/no (es. `intraday`) sono
 oggi due checkbox nude `Y` e `N`, che si possono spuntare entrambe per provare i
 due valori. Hanno l'aspetto di sistema e non stanno nello stile. Roberto ha scelto
-il segmentato `Y | N` (proposta 2 di `web/checkbox-proposte.html`, regole in
-`web/DESIGN.md` § 6, Campi).
+il segmentato `Y | N` (proposta 2 di `docs/web/checkbox-proposte.html`, regole in
+`docs/web/DESIGN.md` § 6, Campi).
 
 **Cosa fare.**
 
@@ -314,8 +314,8 @@ analysis; `live.html`: sim) aprono tutti con
 `<form method="dialog" class="dialog-head"><strong>…</strong><button …>close</button></form>`.
 Oggi la testata è una fascia di colore diverso staccata dalla tabella, la chiusura è
 un cerchio con fondo proprio, il titolo non dice né quanti elementi ci sono né che
-cosa se ne fa. Roberto ha scelto la proposta 2 di `web/dialog-testata-proposte.html`
-(regole in `web/DESIGN.md` § 6, Dialog).
+cosa se ne fa. Roberto ha scelto la proposta 2 di `docs/web/dialog-testata-proposte.html`
+(regole in `docs/web/DESIGN.md` § 6, Dialog).
 
 **Cosa fare.**
 
@@ -401,7 +401,7 @@ falle insieme.
 pannelli si confondono con il resto. Roberto ha scelto un carattere solo per i
 titoli, **PD Instrument** (Instrument Serif allargato ×1,08, file in
 `loghi/definitivo/font/`), e una testata con il nome PARITY-DERIVA più stretto
-(0,07 em invece di 0,16, con crenatura). Regole in `web/DESIGN.md` § 4, § 6 (Testata,
+(0,07 em invece di 0,16, con crenatura). Regole in `docs/web/DESIGN.md` § 4, § 6 (Testata,
 Dialog, Titoli dei pannelli) e § 7.
 
 **Cosa fare.**
@@ -458,8 +458,8 @@ Si può dare a Claude Code da sola.
 **Contesto.** In testata c'è una striscia sempre visibile con cpu, ram e dischi
 (`cpu ▬ 63%  ram ▬ 2.4/3.7G  / ▬ 73%  /mnt ▬ 78%`): verde pieno anche quando i valori
 salgono, mono 16 px, circa 690 px di testata. Roberto ha scelto la proposta 4 di
-`web/risorse-proposte.html`: una spia sola con il dettaglio al clic. Regole in
-`web/DESIGN.md` § 6, Risorse del server.
+`docs/web/risorse-proposte.html`: una spia sola con il dettaglio al clic. Regole in
+`docs/web/DESIGN.md` § 6, Risorse del server.
 
 **Cosa fare.**
 

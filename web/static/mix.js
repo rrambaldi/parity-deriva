@@ -11,7 +11,7 @@
 
 const AXIS = { left: 92, right: 14, top: 12, bottom: 22 };
 // a run is told apart by its dash, not a colour of its own: the data has
-// three colours and a fourth does not pass (web/DESIGN.md § 3)
+// three colours and a fourth does not pass (docs/web/DESIGN.md § 3)
 
 const state = {
   mixes: [],     // the saved ones, from api/mixes

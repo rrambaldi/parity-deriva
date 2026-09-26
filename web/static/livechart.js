@@ -35,7 +35,7 @@ const AXIS = { left: 66, right: 14, top: 12, bottom: 26 };
 // of the other or the strip is worse than nothing
 const STRIP = { left: AXIS.left, right: AXIS.right, top: 14, bottom: 6 };
 // a feed is told apart by a fixed dash, not a colour of its own: the data has
-// three colours and a fourth does not pass (web/DESIGN.md § 3)
+// three colours and a fourth does not pass (docs/web/DESIGN.md § 3)
 const PROVIDER_DASH = { twelvedata: DASHES[0], ig: DASHES[1], capital: DASHES[2], etoro: DASHES[3],
                         mt5: DASHES[4], ib: DASHES[5], oanda: DASHES[6] };
 const dashOf = (provider) => PROVIDER_DASH[provider] || DASHES[7];
@@ -541,7 +541,7 @@ function drawStrip(pal, view, x, step) {
   }
   // each paired trade: how far from the simulated entry the broker filled -
   // a filled bar cannot carry a dash, and the sign is not long/short, so it
-  // stays neutral (web/DESIGN.md § 3)
+  // stays neutral (docs/web/DESIGN.md § 3)
   const barW = Math.max(2, Math.min(6, step * 0.5));
   sctx.globalAlpha = 0.85;
   sctx.fillStyle = pal.text3;

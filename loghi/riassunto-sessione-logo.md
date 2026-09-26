@@ -5,8 +5,8 @@ logo definitivo, ai font e alle regole del layout del viewer di backtest.
 
 - Tela con tutte le tavole: <https://claude.ai/artifact/YQwK1TbB1ZfcSY7sZxxkqN>
   (privata; pagine Proposte, D · Orizzonte, Alba × Classico, Font e componenti)
-- Linee guida operative: `web/DESIGN.md`
-- Prompt per Claude Code che applica tutto al viewer: `web/REFACTORING-claude-code.md`
+- Linee guida operative: `docs/web/DESIGN.md`
+- Prompt per Claude Code che applica tutto al viewer: `docs/web/REFACTORING-claude-code.md`
 - File definitivi: `loghi/definitivo/` · script: `loghi/sorgenti/`
 - Proposte scartate: `loghi/proposte/` (A–D, `orizzonte/`, `alba-classico/`)
 
@@ -98,7 +98,7 @@ Contrasti del testo calcolati: ≥ 4,5:1 su fondo e pannelli in entrambi i temi.
 ## 5. Punti aperti
 
 - Confermare exit e "stop moved to" neutri (vedi § 4).
-- Applicare le linee guida al codice: prompt pronto in `web/REFACTORING-claude-code.md`.
+- Applicare le linee guida al codice: prompt pronto in `docs/web/REFACTORING-claude-code.md`.
   Per ora nessun file dell'applicativo è stato modificato. Da sapere: `web/service.py`
   serve solo .html/.css/.js e rifiuta le sottocartelle, quindi font, SVG e PNG vanno
   aggiunti a `CONTENT_TYPES` e copiati piatti in `web/static/` (il prompt lo prevede).
@@ -113,11 +113,11 @@ autonome in `web/`, si aprono col doppio clic).
 
 | tema | scelta di Roberto | prova | dove è scritto |
 |---|---|---|---|
-| parametri sì/no | **segmentato `Y \| N`** (fra checkbox ridisegnato, segmentato, chip) | `web/checkbox-proposte.html` | DESIGN § 6 Campi; prompt, aggiunta Y \| N |
-| testata dei dialog | **"titolo con contesto"**: titolo, conteggio, riga d'aiuto, `esc`, chiusura quadrata senza fondo (fra essenziale, contesto, barra strumenti, blocco unico) | `web/dialog-testata-proposte.html` | DESIGN § 6 Dialog; prompt, aggiunta dialog |
-| font dei titoli | **PD Instrument**: Instrument Serif allargato ×1,08, spaziatura +0,01 em (candidati Jost, Manrope, Instrument Serif, Newsreader; poi +0,02/+0,04 em, largo 105 %/108 %) | `web/font-titoli-proposte.html`, `web/titoli-instrument-varianti.html` | DESIGN § 4; `tokens.css` (`--font-title`, `--fs-h-*`); prompt, aggiunta font |
+| parametri sì/no | **segmentato `Y \| N`** (fra checkbox ridisegnato, segmentato, chip) | `docs/web/checkbox-proposte.html` | DESIGN § 6 Campi; prompt, aggiunta Y \| N |
+| testata dei dialog | **"titolo con contesto"**: titolo, conteggio, riga d'aiuto, `esc`, chiusura quadrata senza fondo (fra essenziale, contesto, barra strumenti, blocco unico) | `docs/web/dialog-testata-proposte.html` | DESIGN § 6 Dialog; prompt, aggiunta dialog |
+| font dei titoli | **PD Instrument**: Instrument Serif allargato ×1,08, spaziatura +0,01 em (candidati Jost, Manrope, Instrument Serif, Newsreader; poi +0,02/+0,04 em, largo 105 %/108 %) | `docs/web/font-titoli-proposte.html`, `web/titoli-instrument-varianti.html` | DESIGN § 4; `tokens.css` (`--font-title`, `--fs-h-*`); prompt, aggiunta font |
 | scritta nella testata | **0,07 em** con crenatura, invece di 0,16 senza (prove a 0,11 / 0,07 / 0,04) | `web/titoli-instrument-varianti.html` | DESIGN § 7; `loghi/definitivo/README.md` |
-| risorse del server in testata | **una spia sola** (`server ok` o la misura peggiore) con pannello al clic; niente verde, soglie 80 / 90 % (fra mini indicatori, in linea sobria, a tacche, spia). Scelta di Claude su "continua", da confermare | `web/risorse-proposte.html` | DESIGN § 6 Risorse del server; `tokens.css` (`--backdrop`, `--shadow-float`); prompt, aggiunta risorse |
+| risorse del server in testata | **una spia sola** (`server ok` o la misura peggiore) con pannello al clic; niente verde, soglie 80 / 90 % (fra mini indicatori, in linea sobria, a tacche, spia). Scelta di Claude su "continua", da confermare | `docs/web/risorse-proposte.html` | DESIGN § 6 Risorse del server; `tokens.css` (`--backdrop`, `--shadow-float`); prompt, aggiunta risorse |
 
 - Scala dei titoli: 24 px pagina, 22 px dialog, 18 px pannelli (prima tutti 15 px).
 - PD Instrument: licenza OFL senza nomi riservati, quindi modificabile; rinominato;
@@ -128,7 +128,7 @@ autonome in `web/`, si aprono col doppio clic).
   spaziatura delle versioni con tagline (0,18 em) non è cambiata.
 - Il codice del viewer in questa cartella (branch `candle-forecast-livello0`) ha
   ancora lo stile di prima: il refactoring gira altrove. Le istruzioni per Claude
-  Code sono aggiunte in fondo a `web/REFACTORING-claude-code.md`, ognuna utilizzabile
+  Code sono aggiunte in fondo a `docs/web/REFACTORING-claude-code.md`, ognuna utilizzabile
   da sola.
 
 ## 6. Mappa dei file salvati

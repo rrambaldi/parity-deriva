@@ -554,7 +554,7 @@ quando esce da quello che la simulazione permetteva.
   domenica), `12345` da lunedì a venerdì - senza trattini né virgole, che
   nella griglia separano i valori. Il segnale fuori giorno viene rifiutato
   come fa `session`. Entra nello sweep e nel `groupKey`.
-- Nella pagina: sette segmenti nello stile `Y | N` di `web/DESIGN.md`.
+- Nella pagina: sette segmenti nello stile `Y | N` di `docs/web/DESIGN.md`.
 - File: `portfolio/moneymanager.py`, `backtest/ledger.py`, `web/service.py`,
   `scripts/live.py`, `web/static/sim.js`. Test: un segnale del sabato
   rifiutato, offline e live.

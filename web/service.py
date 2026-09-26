@@ -177,7 +177,7 @@ STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
 #: mimetypes.guess_type: a handler that will serve anything is a handler that
 #: will serve whatever ends up here.
 #: Was: three - the page, its style, its script. Now: six - the fonts, the logo
-#: and the icons of web/DESIGN.md are served from here too, since nothing comes
+#: and the icons of docs/web/DESIGN.md are served from here too, since nothing comes
 #: from a CDN. Still no .txt: the fonts' licence sits next to them unserved.
 CONTENT_TYPES = {
 	'.html': 'text/html; charset=utf-8',

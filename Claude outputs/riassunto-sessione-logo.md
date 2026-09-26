@@ -5,7 +5,7 @@ logo definitivo, ai font e alle regole del layout del viewer di backtest.
 
 - Tela con tutte le tavole: <https://claude.ai/artifact/YQwK1TbB1ZfcSY7sZxxkqN>
   (privata; pagine Proposte, D · Orizzonte, Alba × Classico, Font e componenti)
-- Linee guida operative: `web/DESIGN.md`
+- Linee guida operative: `docs/web/DESIGN.md`
 - File definitivi: `loghi/definitivo/` · script: `loghi/sorgenti/`
 - Proposte scartate: `loghi/proposte/` (A–D, `orizzonte/`, `alba-classico/`)
 
@@ -95,7 +95,7 @@ Contrasti del testo calcolati: ≥ 4,5:1 su fondo e pannelli in entrambi i temi.
 ## 5. Punti aperti
 
 - Confermare exit e "stop moved to" neutri (vedi § 4).
-- Applicare le linee guida al codice di `web/static` (piano in `web/DESIGN.md` § 9):
+- Applicare le linee guida al codice di `web/static` (piano in `docs/web/DESIGN.md` § 9):
   per ora nessun file dell'applicativo è stato modificato.
 - IBM Plex Sans Condensed (pacchetto `@ibm/plex-sans-condensed`) se la tabella dei
   trade diventa troppo larga.

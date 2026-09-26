@@ -144,7 +144,7 @@ assert.strictEqual(arrows(), 2, 'bars too narrow: still one mark per trade');
 
 // Was: 3 and then 2, when the selection's entry was a dot. Now: one more
 // each, since that entry is a triangle up or down like the arrows (the
-// markers of web/DESIGN.md), drawn with or without an exit
+// markers of docs/web/DESIGN.md), drawn with or without an exit
 run('state.selected = 1;');
 assert.strictEqual(arrows(), 4,
   'a selection does not hide the other trades, and adds its entry and the '
