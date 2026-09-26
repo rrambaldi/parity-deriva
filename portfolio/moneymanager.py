@@ -130,6 +130,11 @@ class MoneyManager(ExecutionHandler):
 		# the bar a signal came on, which it answers for (blocked)
 		self.filters = None
 		self._set(args,'filters')
+		# `weekdays` is the days a signal is taken on, ISO digits of the UTC
+		# day ('12345' is Monday to Friday), or None for every day: closed,
+		# like the session, to the signal and not to an order resting
+		self.weekdays = None
+		self._set(args,'weekdays')
 		# How far the initial stop and target sit from the entry, as a
 		# multiple of where the strategy put them: 1.5 is half as far again,
 		# 0.5 half the distance, None (or 1) leaves them alone. Initial only:
@@ -389,6 +394,10 @@ class MoneyManager(ExecutionHandler):
 		if self.outsideSession(when):
 			self.logger.info("SIGNAL IGNORED: %s is outside %s-%s UTC"
 				% (when, self.session[0], self.session[1]))
+			return
+		if self.weekdays and when is not None and str(when.isoweekday()) not in self.weekdays:
+			self.logger.info("SIGNAL IGNORED: %s is a %s, not one of the days %s"
+				% (when, when.strftime('%A'), self.weekdays))
 			return
 		if self.onNews(when):
 			ahead = self.calendar.next(when)

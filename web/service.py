@@ -1649,7 +1649,7 @@ class Service(object):
 				 newsImpacts=None, maxBars=None, strategyArgs=None,
 				 slScale=None, tpScale=None, inverse=False, trailing=None,
 				 trailProfit=False, trailPips=None, cachedOnly=False, confirmed=False,
-				 leverage=None, hold=None, readHoldout=False, filters=None):
+				 leverage=None, hold=None, readHoldout=False, filters=None, weekdays=None):
 		"""
 		Run one backtest and return the payload the page reads, with the
 		margin its account needed at `leverage` (withMargin). cachedOnly
@@ -1687,7 +1687,7 @@ class Service(object):
 		key = self.key(instrument, granularity, strategy, dtfrom, dtto, units,
 					   params, balance, risk, maxStopPips, session, intraday,
 					   news, newsImpacts, maxBars, strategyArgs, slScale, tpScale,
-				   inverse, trailing, trailProfit, trailPips) + (filters,)
+				   inverse, trailing, trailProfit, trailPips) + (filters, weekdays)
 		if key in self._cache or cachedOnly:
 			return self.withMargin(self._cache.get(key), leverage)
 
@@ -1760,7 +1760,7 @@ class Service(object):
 						('trailing', 'trailing stop', trailing),
 						('trailProfit', 'trailing profit', trailProfit),
 						('trailPips', 'trail pips', trailPips),
-						('filters', 'entry filter', filters)):
+						('filters', 'entry filter', filters), ('weekdays', 'days', weekdays)):
 						if not value:
 							continue
 						if name not in takes:
@@ -1784,7 +1784,7 @@ class Service(object):
 										inverse=inverse, trailing=trailing,
 										trailProfit=trailProfit,
 										trailPips=trailPips, filters=filters,
-										progress=report)
+										weekdays=weekdays, progress=report)
 			except Cancelled as stopped:
 				# nothing is kept and nothing is cached: half a run drawn as a
 				# run is the one outcome worse than no run
@@ -3363,8 +3363,24 @@ def backtestArgs(get):
 		strategyArgs=handlerArgs(strategy, get),
 		leverage=parseLeverage(get('leverage')),
 		filters=parseFilters(get('filters')),
+		weekdays=parseWeekdays(get('weekdays')),
 		# the candles: the stores' (none), or an archive's (market.archives)
 		data=get('data') or None)
+
+
+def parseWeekdays(text):
+	"""
+	The days a signal is taken on as ISO digits in order, '12345' Monday to
+	Friday, or None for every day (portfolio/moneymanager.py weekdays).
+	"""
+	text = ''.join(str(text or '').split())
+	if not text or text.lower() == 'none':
+		return None
+	if not re.fullmatch(r'[1-7]+', text):
+		raise ServiceError("days: the ISO digits of the days traded, 1 Monday to 7 Sunday - 12345 is Monday to "
+						   "Friday")
+	days = ''.join(sorted(set(text)))
+	return None if days == '1234567' else days
 
 
 def parseFilters(text):

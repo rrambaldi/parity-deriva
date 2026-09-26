@@ -125,7 +125,7 @@ def load_strategy(name):
 def moneyManager(units=1, setup=None, risk=None, balance=None,
 				 maxStopPips=None, session=None, calendar=None, slScale=None,
 				 tpScale=None, inverse=False, trailing=None, trailProfit=False,
-				 trailPips=None, filters=None):
+				 trailPips=None, filters=None, weekdays=None):
 	"""
 	A MoneyManager that remembers nothing from a previous run.
 
@@ -139,7 +139,8 @@ def moneyManager(units=1, setup=None, risk=None, balance=None,
 					  risk=risk, balance=balance, maxStopPips=maxStopPips,
 					  session=session, calendar=calendar, slScale=slScale,
 					  tpScale=tpScale, inverse=inverse, trailing=trailing,
-					  trailProfit=trailProfit, trailPips=trailPips, filters=filters)
+					  trailProfit=trailProfit, trailPips=trailPips, filters=filters,
+					  weekdays=weekdays)
 	mm.signals = {}
 	mm.processed = []
 	mm.onTrade = False
@@ -547,9 +548,12 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 		maxStopPips=None, progress=None, session=None, intraday=False,
 		closeAt=None, news=None, newsImpacts=None, maxBars=None,
 		strategyArgs=None, slScale=None, tpScale=None, inverse=False,
-		trailing=None, trailProfit=False, trailPips=None, filters=None):
+		trailing=None, trailProfit=False, trailPips=None, filters=None, weekdays=None):
 	"""
 	Replay stored candles through the whole offline stack and collect trades.
+
+	`weekdays` is the days a signal is taken on, '12345' Monday to Friday
+	(portfolio/moneymanager.py), None every day.
 
 	`filters` is an entry filter's conditions, 'rsi14<55&hour>=7'
 	(portfolio/filters.py): read off the strategy's own bars, asked by the
@@ -654,7 +658,8 @@ def run(instrument, granularity, strategy='AG01', dtfrom=None, dtto=None,
 						   maxStopPips=maxStopPips, session=session,
 						   calendar=diary, slScale=slScale, tpScale=tpScale,
 						   inverse=inverse, trailing=trailing,
-						   trailProfit=trailProfit, trailPips=trailPips, filters=entry)
+						   trailProfit=trailProfit, trailPips=trailPips, filters=entry,
+						   weekdays=weekdays)
 	# the cut the day ends at: what was asked for, the session's own end, or
 	# the end of the UTC day. Nothing here invents an hour of its own
 	closer = None

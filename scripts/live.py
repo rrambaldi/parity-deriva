@@ -161,7 +161,7 @@ def fromForm(text):
         import inspect
         takes = inspect.signature(plugin['run']).parameters
         for name, label in (('maxStopPips', 'max stop'), ('session', 'hours'),
-                            ('news', 'news'), ('filters', 'entry filter')):
+                            ('news', 'news'), ('filters', 'entry filter'), ('weekdays', 'days')):
             if spec.get(name) and name not in takes:
                 raise SystemExit("%s runs its own engine, which has no %s: "
                                  "leave it empty" % (spec['strategy'], label))
@@ -468,7 +468,7 @@ def wire(engine, provider, spec, args, strategy_class, style, pairs, granularity
         plRate=balance / spec['capital'] if reference else 1.0,
         maxStopPips=spec['maxStopPips'], session=spec['session'],
         calendar=_calendar(pairs[0], spec['news'], spec['newsImpacts'], settings),
-        filters=entry, **scales))
+        filters=entry, weekdays=spec.get('weekdays'), **scales))
     engine.add_handler(provider.execution(sized=risk is not None))
     for rule in rules:
         engine.add_handler(rule)

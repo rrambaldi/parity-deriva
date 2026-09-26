@@ -68,8 +68,8 @@ C3   holdout + gate SIM → DEMO            fatto (f3208a0)
 C1b  banda e serie di perdite in promote  fatto (6e69885)
 C7d  push e verify senza mix              fatto (96668e1)
 C4   motore correlazioni + filtri         fatto (352bec2)
-C6   live: ramp, protezioni               fatto
-C7a  giorno della settimana               quando si vuole
+C6   live: ramp, protezioni               fatto (564fc96)
+C7a  giorno della settimana               fatto
 C7b  commissioni e financing              quando si vuole
 ```
 
@@ -550,9 +550,10 @@ quando esce da quello che la simulazione permetteva.
 
 ### C7a – giorno della settimana nello sweep (S)
 
-- Opzione del conto `weekdays` (per esempio `1-5`, oppure i giorni uno per
-  uno). Il segnale fuori giorno viene rifiutato come fa `session`. Entra
-  nello sweep e nel `groupKey`.
+- Opzione del conto `weekdays`: le cifre ISO dei giorni (1 lunedì … 7
+  domenica), `12345` da lunedì a venerdì - senza trattini né virgole, che
+  nella griglia separano i valori. Il segnale fuori giorno viene rifiutato
+  come fa `session`. Entra nello sweep e nel `groupKey`.
 - Nella pagina: sette segmenti nello stile `Y | N` di `web/DESIGN.md`.
 - File: `portfolio/moneymanager.py`, `backtest/ledger.py`, `web/service.py`,
   `scripts/live.py`, `web/static/sim.js`. Test: un segnale del sabato

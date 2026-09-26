@@ -100,6 +100,18 @@
             <label><input type="checkbox" id="g-trailProfit-n" checked> N</label>
           </div>
         </div>
+        <div class="field" title="the days a signal is taken on, by its bar's UTC day: all ticked is every day">
+          <span class="field-label" id="lbl-weekdays">days</span>
+          <div class="yn" role="group" aria-labelledby="lbl-weekdays">
+            <label><input type="checkbox" id="g-day-1" checked> Mo</label>
+            <label><input type="checkbox" id="g-day-2" checked> Tu</label>
+            <label><input type="checkbox" id="g-day-3" checked> We</label>
+            <label><input type="checkbox" id="g-day-4" checked> Th</label>
+            <label><input type="checkbox" id="g-day-5" checked> Fr</label>
+            <label><input type="checkbox" id="g-day-6" checked> Sa</label>
+            <label><input type="checkbox" id="g-day-7" checked> Su</label>
+          </div>
+        </div>
         <label title="the stop follows the price this many pips behind, starting once that level reaches the entry (break even); until then the strategy's stop holds. Off with the trailing stop N only: a stop that never moves follows nothing">trail (pips) <input type="text" id="g-trailPips" placeholder="none" size="10"></label>
         <label>max bars <input type="text" id="g-maxBars" placeholder="none"></label>
         <label title="initial stop distance x this: 1 as the strategy, 1.5 half as far again">SL &times; <input type="text" id="g-slScale" placeholder="1" size="10"></label>

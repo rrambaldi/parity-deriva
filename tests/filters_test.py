@@ -88,6 +88,32 @@ class BacktestTest(unittest.TestCase):
         self.assertEqual(self.run_(filters='hour<0')['trades'], [])
 
 
+class WeekdaysTest(BacktestTest):
+    """The days a signal is taken on (C7a): a Saturday's refused, offline and in the live form alike."""
+
+    def test_the_days_written_one_way(self):
+        self.assertEqual(service_module.parseWeekdays(' 5 4 3 2 1 '), '12345')
+        self.assertIsNone(service_module.parseWeekdays('7654321'))
+        self.assertIsNone(service_module.parseWeekdays('none'))
+        with self.assertRaises(ServiceError):
+            service_module.parseWeekdays('1-5')
+
+    def test_a_signal_on_a_day_not_traded_is_refused(self):
+        every = self.run_()['trades']
+        days = lambda trades: set(datetime.datetime.fromtimestamp(t['signalTime'] / 1000, datetime.timezone.utc)
+                                  .isoweekday() for t in trades)
+        # the store's 600 hours are every day of the week, weekends too
+        self.assertEqual(len(days(every)), 7)
+        mondays = self.run_(weekdays='1')['trades']
+        self.assertTrue(mondays)
+        self.assertEqual(days(mondays), {1})
+        self.assertEqual(days(self.run_(weekdays='67')['trades']), {6, 7})
+        self.assertNotIn(6, days(self.run_(weekdays='12345')['trades']))
+        from parity_deriva.scripts import live
+        spec = live.fromForm('{"strategy": "AG01", "instrument": "EUR_USD", "granularity": "H1", "weekdays": "12345"}')
+        self.assertEqual(spec['weekdays'], '12345')
+
+
 class LiveTest(unittest.TestCase):
 
     def test_the_live_form_carries_the_same_filter(self):

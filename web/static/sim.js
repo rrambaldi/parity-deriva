@@ -312,7 +312,19 @@ function gridFields() {
     grid[name] = $('g-' + name).disabled ? '' : $('g-' + name).value;
   }
   for (const name of FLAGS) grid[name] = flagGrid(name);
+  grid.weekdays = daysGrid();
   return grid;
+}
+
+// the days ticked as ISO digits, '12345' Monday to Friday; every day is none
+function daysGrid() {
+  const on = [1, 2, 3, 4, 5, 6, 7].filter((d) => $(`g-day-${d}`).checked);
+  return on.length === 7 || !on.length ? '' : on.join('');
+}
+
+function fillDays(text) {
+  const on = String(text || '').replace(/\D/g, '');
+  for (let d = 1; d <= 7; d++) $(`g-day-${d}`).checked = !on || on.includes(String(d));
 }
 
 // the form from a sweep's fixed fields with its grid over them
@@ -348,6 +360,7 @@ function fillForm(f) {
     if (f[name]) $('g-' + name).value = f[name];
   }
   for (const name of FLAGS) fillFlag(name, f[name]);
+  fillDays(f.weekdays);
 }
 
 let counting = null;
